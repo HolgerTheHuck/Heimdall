@@ -1,0 +1,132 @@
+@* Alarm-Regel-Editor (neu + bearbeiten). POST-Form ohne JS — alle signal-
+   spezifischen Felder werden gezeigt; irrelevant werden server-seitig ignoriert.
+   Submit -> /alerts/save -> Detail-Seite. Statisches SSR. *@
+@using System
+@using System.Globalization
+@using Heimdall.Blazor.Alerts
+@inject IAlertRuleStore Store
+@inject HeimdallAlertingOptions Options
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Alarm-Regel" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <h1>@(string.IsNullOrEmpty(Id) ? "Neue Alarm-Regel" : "Alarm-Regel bearbeiten")</h1>
+    <p class="hmd-dim"><a class="hmd-back" href="@(BasePath + "/alerts")">← alle Alerts</a></p>
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <p class="hmd-err-msg">@Error</p>
+    }
+
+    <form method="post" action="@(BasePath + "/alerts/save")" class="hmd-form">
+        <input type="hidden" name="id" value="@Id" />
+
+        <fieldset>
+            <legend>Allgemein</legend>
+            <label>Name <input type="text" name="name" value="@_name" required /></label>
+            <label class="hmd-check"><input type="checkbox" name="enabled" value="1" checked="@_enabled" /> aktiviert</label>
+            <label>Signal
+                <select name="signal">
+                    <option value="Metric" selected="@(_signal == AlertSignal.Metric)">Metrik (PromQL)</option>
+                    <option value="Log" selected="@(_signal == AlertSignal.Log)">Log (Volltext + Severity)</option>
+                    <option value="Trace" selected="@(_signal == AlertSignal.Trace)">Trace (Fehler/Service/Name)</option>
+                </select>
+            </label>
+            <label>Beschreibung <input type="text" name="description" value="@_description" /></label>
+        </fieldset>
+
+        <fieldset>
+            <legend>Metrik (PromQL)</legend>
+            <p class="hmd-dim">Feuert, wenn der Ausdruck einen nicht-leeren Vektor liefert (Vergleich behält Treffer). Bsp: <code>sum(rate(http_requests_total{status=~"5.."}[5m])) &gt; 0</code></p>
+            <label>PromQL <textarea name="promql" rows="2" class="hmd-mono">@_promql</textarea></label>
+        </fieldset>
+
+        <fieldset>
+            <legend>Log</legend>
+            <p class="hmd-dim">Volltext auf <code>body</code> (FTS5/tsvector, optional) + Mindest-Severity. Feuert bei &gt; Threshold Treffern im Fenster.</p>
+            <label>Log-Text <input type="text" name="logText" value="@_logText" placeholder="z. B. timeout (leer = alle)" /></label>
+            <label>Min. Severity <input type="number" name="minSeverity" value="@(_minSeverity?.ToString(CultureInfo.InvariantCulture))" placeholder="17=ERROR, 13=WARN, 9=INFO" /></label>
+        </fieldset>
+
+        <fieldset>
+            <legend>Trace</legend>
+            <p class="hmd-dim">Feuert bei &gt; Threshold Traces im Fenster (filterbar nach Fehler/Service/Name).</p>
+            <label class="hmd-check"><input type="checkbox" name="hasError" value="1" checked="@(_hasError == true)" /> nur Fehler-Traces</label>
+            <label>Service <input type="text" name="serviceName" value="@_serviceName" /></label>
+            <label>Name enthält <input type="text" name="nameContains" value="@_nameContains" /></label>
+        </fieldset>
+
+        <fieldset>
+            <legend>Fenster &amp; Schwellen &amp; Verhalten</legend>
+            <label>Fenster (s) <input type="number" name="windowSeconds" value="@_windowSeconds.ToString(CultureInfo.InvariantCulture)" /></label>
+            <label>Schwellen <input type="number" name="threshold" value="@_threshold.ToString(CultureInfo.InvariantCulture)" /></label>
+            <label>for (s) <input type="number" name="forSeconds" value="@_forSeconds.ToString(CultureInfo.InvariantCulture)" placeholder="0 = sofort feuern" /></label>
+            <label>Eval-Takt (s) <input type="number" name="evalInterval" value="@_evalInterval.ToString(CultureInfo.InvariantCulture)" placeholder="0 = globaler Takt" /></label>
+        </fieldset>
+
+        <fieldset>
+            <legend>Kanäle</legend>
+            <div class="hmd-check-row">
+                <label class="hmd-check"><input type="checkbox" name="channels" value="logger" checked="@_channels.Contains("logger")" /> logger @(Options.LoggerEnabled ? "" : "(deaktiviert)")</label>
+                <label class="hmd-check"><input type="checkbox" name="channels" value="email" checked="@_channels.Contains("email")" /> email @(Options.Smtp.Enabled ? "" : "(deaktiviert)")</label>
+                <label class="hmd-check"><input type="checkbox" name="channels" value="webhook" checked="@_channels.Contains("webhook")" /> webhook @(Options.Webhook.Enabled ? "" : "(deaktiviert)")</label>
+            </div>
+        </fieldset>
+
+        <div class="hmd-form-actions">
+            <button type="submit" class="hmd-btn">Speichern</button>
+            <a class="hmd-btn hmd-btn-ghost" href="@(BasePath + "/alerts")">Abbrechen</a>
+        </div>
+    </form>
+
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string? Id { get; set; }
+    [Parameter] public string? Error { get; set; }
+
+    private string _name = "";
+    private bool _enabled = true;
+    private AlertSignal _signal = AlertSignal.Metric;
+    private string? _promql, _logText, _serviceName, _nameContains, _description;
+    private int? _minSeverity;
+    private bool? _hasError;
+    private long _windowSeconds = 300;
+    private int _threshold = 0;
+    private long _forSeconds = 0;
+    private long _evalInterval = 0;
+    private HashSet<string> _channels = new();
+
+    protected override void OnInitialized()
+    {
+        if (!string.IsNullOrEmpty(Id))
+        {
+            var rule = Store.Get(Id);
+            if (rule is not null)
+            {
+                _name = rule.Name;
+                _enabled = rule.Enabled;
+                _signal = rule.Signal;
+                _promql = rule.Promql;
+                _logText = rule.LogText;
+                _minSeverity = rule.MinSeverity;
+                _hasError = rule.HasError;
+                _serviceName = rule.ServiceName;
+                _nameContains = rule.NameContains;
+                _windowSeconds = rule.WindowSeconds;
+                _threshold = rule.Threshold;
+                _forSeconds = rule.ForSeconds;
+                _evalInterval = rule.EvalIntervalSeconds;
+                _description = rule.Description;
+                _channels = rule.Channels is null ? new() : new HashSet<string>(rule.Channels, StringComparer.OrdinalIgnoreCase);
+            }
+        }
+    }
+}

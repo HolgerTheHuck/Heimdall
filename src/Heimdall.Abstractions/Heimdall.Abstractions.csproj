@@ -1,0 +1,15 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Heimdall</RootNamespace>
+    <AssemblyName>Heimdall.Abstractions</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Heimdall.Abstractions</PackageId>
+    <Description>Heimdall telemetry contract: interfaces and model records. Dependency-free, F#-friendly. The only Heimdall package consumers (incl. Walhalla) reference.</Description>
+    <PackageTags>otel;opentelemetry;telemetry;tracing;logging;metrics;embedded;heimdall</PackageTags>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+</Project>

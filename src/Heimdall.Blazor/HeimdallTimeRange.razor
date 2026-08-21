@@ -1,0 +1,71 @@
+@* Einbettbare Zeitbereich-Steuerung (Progressive Enhancement). Relative Range als
+   segmented control (Submit setzt preset), „Benutzerdefiniert" mit datetime-local
+   (JS wandelt beim Submit in Unix-ns hidden from/to um; ohne JS greift die relative
+   Range), plus Auto-Refresh-Select (JS startet einen Reload-Intervall aus dem
+   refresh-Query-Param). Besitzt kein eigenes <form> — wird in die Filter-Forms
+   eingebettet. *@
+@using System.Globalization
+<div class="hmd-timerange">
+    <div class="hmd-range-btns" role="group" aria-label="Zeitraum">
+        @foreach (var p in HeimdallRange.Presets)
+        {
+            var isOn = Preset == p.Key && From is null && To is null;
+            <button type="submit" name="preset" value="@p.Key" class="hmd-range-btn"
+                    aria-pressed="@(isOn ? "true" : "false")">@p.Label</button>
+        }
+    </div>
+    <details class="hmd-range-custom">
+        <summary>Benutzerdefiniert</summary>
+        <div class="hmd-range-custom-fields">
+            <label>von <input type="datetime-local" name="from-iso" value="@Iso(From)" /></label>
+            <label>bis <input type="datetime-local" name="to-iso" value="@Iso(To)" /></label>
+            <span class="hmd-dim">Zeiten werden beim Laden in Unix-ns umgerechnet.</span>
+        </div>
+        <input type="hidden" name="from" />
+        <input type="hidden" name="to" />
+    </details>
+    <label class="hmd-refresh">Auto-Refresh
+        <select name="refresh">
+            <option value="" selected="@(string.IsNullOrEmpty(Refresh))">aus</option>
+            <option value="5s" selected="@(Refresh == "5s")">5s</option>
+            <option value="10s" selected="@(Refresh == "10s")">10s</option>
+            <option value="30s" selected="@(Refresh == "30s")">30s</option>
+            <option value="1m" selected="@(Refresh == "1m")">1m</option>
+        </select>
+    </label>
+</div>
+
+@code {
+    /// <summary>Aktives Preset (Key) oder null für „kein Preset".</summary>
+    [Parameter] public string? Preset { get; set; }
+    /// <summary>Explizite untere Schranke (Unix-ns); überschreibt Preset.</summary>
+    [Parameter] public long? From { get; set; }
+    /// <summary>Explizite obere Schranke (Unix-ns); überschreibt Preset.</summary>
+    [Parameter] public long? To { get; set; }
+    /// <summary>Auto-Refresh-Intervall (off/5s/10s/30s/1m); reine UI-Steuerung.
+    /// Wird hier nicht explizit übergeben, aus dem aktuellen Request (?refresh) gelesen.</summary>
+    [Parameter] public string? Refresh { get; set; }
+
+    [Microsoft.AspNetCore.Components.CascadingParameter]
+    public Microsoft.AspNetCore.Http.HttpContext? HttpContext { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        // Refresh selbst aus dem Query-String lösen, falls nicht per Parameter gegeben
+        // (vermeidet Pluming durch jede Seite + jeden Endpoint-Handler).
+        if (string.IsNullOrEmpty(Refresh) && HttpContext is not null)
+            Refresh = HttpContext.Request.Query["refresh"];
+    }
+
+    private static string Iso(long? ns)
+    {
+        if (ns is null || ns <= 0) return string.Empty;
+        try
+        {
+            // ns → lokale Zeit → datetime-local-Format "yyyy-MM-ddTHH:mm".
+            var dt = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).AddTicks(ns.Value / 100).ToLocalTime();
+            return dt.ToString("yyyy-MM-ddTHH:mm", CultureInfo.InvariantCulture);
+        }
+        catch { return string.Empty; }
+    }
+}

@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Heimdall.Host</RootNamespace>
+    <AssemblyName>Heimdall.Host</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- 1.0 liefert SQLite-only. Das Walhalla-Backend kehrt als NuGet-Konsument zurück,
+       sobald Heimdall.Abstractions gepackt ist (statt der früheren cross-repo ProjectReference). -->
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\Heimdall.Blazor\Heimdall.Blazor.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.Otlp\Heimdall.Otlp.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.Otlp.Grpc\Heimdall.Otlp.Grpc.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.Prometheus\Heimdall.Prometheus.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.Direct\Heimdall.Direct.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.Storage.SQLite\Heimdall.Storage.SQLite.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\..\grafana\heimdall-overview.json" CopyToOutputDirectory="PreserveNewest" Link="heimdall-overview.json" />
+  </ItemGroup>
+
+</Project>

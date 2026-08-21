@@ -1,0 +1,50 @@
+@* Server-gerendertes SVG-Liniendiagramm (kein JS). Mehrere Serien (z.B. eine pro
+   Attribut-Dimension) werden als farbige Linien gezeichnet. Das SVG-Markup entsteht
+   in HeimdallCharting.RenderLineSvg und wird als MarkupString ausgegeben — das
+   vermeidet die Razor-SVG-<text>-Parsing-Pitfalls. *@
+@using System.Collections.Generic
+
+@if (string.IsNullOrEmpty(_svg))
+{
+    <p class="hmd-empty">Keine Daten zum Zeichnen.</p>
+}
+else
+{
+    <figure class="hmd-chart-wrap">
+        @((MarkupString)_svg)
+        @if (!string.IsNullOrEmpty(Unit))
+        {
+            <figcaption class="hmd-chart-unit">Y-Achse: @Unit</figcaption>
+        }
+        @if (_legend.Count > 0)
+        {
+            <ul class="hmd-legend">
+                @foreach (var item in _legend)
+                {
+                    <li><span class="hmd-legend-swatch" style="background:@item.Color"></span>@item.Label</li>
+                }
+            </ul>
+        }
+    </figure>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<ChartSeries>? Series { get; set; }
+    [Parameter] public string? Unit { get; set; }
+    [Parameter] public int Width { get; set; } = 800;
+    [Parameter] public int Height { get; set; } = 240;
+    [Parameter] public string AriaLabel { get; set; } = "Metrik-Zeitreihe";
+
+    private string _svg = string.Empty;
+    private List<(string Label, string Color)> _legend = new();
+
+    protected override void OnParametersSet()
+    {
+        _legend.Clear();
+        var g = HeimdallCharting.ScaleChart(Series ?? Array.Empty<ChartSeries>(), Width, Height);
+        if (g is null) { _svg = string.Empty; return; }
+        _svg = HeimdallCharting.RenderLineSvg(g, AriaLabel);
+        foreach (var s in g.Series)
+            _legend.Add((s.Label, s.Color));
+    }
+}

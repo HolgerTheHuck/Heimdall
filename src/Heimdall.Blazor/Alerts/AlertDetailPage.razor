@@ -1,0 +1,117 @@
+@* Alarm-Detail: Regel-Definition (read-only) + aktueller Zustand + Diagnose +
+   Delete-Form. Statisches SSR. *@
+@using System
+@using System.Globalization
+@using Heimdall.Blazor.Alerts
+@inject IAlertRuleStore Store
+@inject IAlertStateStore StateStore
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Alarm-Regel" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <h1>@(_rule?.Name ?? "Regel nicht gefunden")</h1>
+    <p class="hmd-dim"><a class="hmd-back" href="@(BasePath + "/alerts")">← alle Alerts</a></p>
+
+    @if (_rule is null)
+    {
+        <p class="hmd-empty">Keine Regel mit Id „@Id".</p>
+    }
+    else
+    {
+        var st = _state?.State ?? AlertState.Ok;
+        <div class="hmd-kpi-row">
+            <HeimdallKpi Value="@StateLabel(st)" Label="Zustand" Tone="@StateTone(st)" />
+            <HeimdallKpi Value="@(_state?.LastValue?.ToString("0.####", CultureInfo.InvariantCulture) ?? "—")" Label="Letzter Wert" Tone="accent" />
+            <HeimdallKpi Value="@(_rule.Signal.ToString())" Label="Signal" Tone="accent" />
+            <HeimdallKpi Value="@(_rule.Enabled ? "ja" : "nein")" Label="aktiv" Tone="@(_rule.Enabled ? "ok" : "warn")" />
+        </div>
+
+        <table class="hmd-table hmd-kv">
+            <tbody>
+            <tr><th>Name</th><td>@_rule.Name</td></tr>
+            <tr><th>Signal</th><td>@_rule.Signal</td></tr>
+            <tr><th>PromQL</th><td class="hmd-mono">@(_rule.Promql ?? "—")</td></tr>
+            <tr><th>Log-Text</th><td class="hmd-mono">@(_rule.LogText ?? "—")</td></tr>
+            <tr><th>Min. Severity</th><td class="hmd-mono">@(_rule.MinSeverity?.ToString(CultureInfo.InvariantCulture) ?? "—")</td></tr>
+            <tr><th>nur Fehler-Traces</th><td>@(_hasErr)</td></tr>
+            <tr><th>Service</th><td>@(_rule.ServiceName ?? "—")</td></tr>
+            <tr><th>Name enthält</th><td>@(_rule.NameContains ?? "—")</td></tr>
+            <tr><th>Fenster</th><td class="hmd-mono">@_rule.WindowSeconds.ToString(CultureInfo.InvariantCulture) s</td></tr>
+            <tr><th>Schwellen</th><td class="hmd-mono">@_rule.Threshold.ToString(CultureInfo.InvariantCulture)</td></tr>
+            <tr><th>for</th><td class="hmd-mono">@_rule.ForSeconds.ToString(CultureInfo.InvariantCulture) s</td></tr>
+            <tr><th>Eval-Takt</th><td class="hmd-mono">@(_rule.EvalIntervalSeconds == 0 ? "global" : _rule.EvalIntervalSeconds.ToString(CultureInfo.InvariantCulture) + " s")</td></tr>
+            <tr><th>Kanäle</th><td class="hmd-mono">@(_channels)</td></tr>
+            <tr><th>Beschreibung</th><td>@(_rule.Description ?? "—")</td></tr>
+            </tbody>
+        </table>
+
+        <h2 class="hmd-subhead">Zustand</h2>
+        @if (_state is null)
+        {
+            <p class="hmd-empty">Noch nicht ausgewertet (Zustand implizit Ok).</p>
+        }
+        else
+        {
+            <table class="hmd-table hmd-kv">
+                <tbody>
+                <tr><th>Zustand</th><td><span class="hmd-alert-state hmd-alert-state--@(StateClass(_state.State))">@StateLabel(_state.State)</span></td></tr>
+                <tr><th>seit</th><td class="hmd-mono">@HeimdallFmt.Ts(_state.SinceUnixMs * 1_000_000L)</td></tr>
+                <tr><th>Letzte Auswertung</th><td class="hmd-mono">@HeimdallFmt.Ts(_state.LastEvalUnixMs * 1_000_000L)</td></tr>
+                <tr><th>Letzter Wert</th><td class="hmd-mono">@(_state.LastValue?.ToString("0.####", CultureInfo.InvariantCulture) ?? "—")</td></tr>
+                <tr><th>Letzte Benachrichtigung</th><td class="hmd-mono">@(_state.LastNotifiedUnixMs is long ln ? HeimdallFmt.Ts(ln * 1_000_000L) : "—")</td></tr>
+                <tr><th>Hinweis</th><td>@(_state.Message ?? "—")</td></tr>
+                </tbody>
+            </table>
+        }
+
+        <div class="hmd-form-actions">
+            <a class="hmd-btn" href="@(BasePath + "/alerts/" + Uri.EscapeDataString(_rule.Id) + "/edit")">Bearbeiten</a>
+            <form method="post" action="@(BasePath + "/alerts/" + Uri.EscapeDataString(_rule.Id) + "/delete")" style="display:inline">
+                <button type="submit" class="hmd-btn hmd-btn-danger">Löschen</button>
+            </form>
+        </div>
+    }
+
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string? Id { get; set; }
+
+    private AlertRule? _rule;
+    private AlertEvent? _state;
+    private string _hasErr = "—";
+    private string _channels = "—";
+
+    protected override void OnInitialized()
+    {
+        if (string.IsNullOrEmpty(Id)) return;
+        _rule = Store.Get(Id);
+        if (_rule is null) return;
+        _state = StateStore.Get(_rule.Id);
+        _hasErr = _rule.HasError switch { true => "ja", false => "nein", _ => "egal" };
+        _channels = _rule.Channels is null || _rule.Channels.Count == 0 ? "—" : string.Join(", ", _rule.Channels);
+    }
+
+    private static string StateClass(AlertState s) => s.ToString().ToLowerInvariant();
+    private static string StateLabel(AlertState s) => s switch
+    {
+        AlertState.Firing => "Firing",
+        AlertState.Pending => "Pending",
+        AlertState.Resolved => "Resolved",
+        _ => "Ok",
+    };
+    private static string StateTone(AlertState s) => s switch
+    {
+        AlertState.Firing => "err",
+        AlertState.Pending => "warn",
+        AlertState.Resolved => "ok",
+        _ => "accent",
+    };
+}

@@ -1,0 +1,10 @@
+**/bin/
+**/obj/
+**/var/
+host/Heimdall.Host/var/
+samples/Heimdall.MvcSample/var/
+tests/
+**/.vs/
+**/*.user
+*.md
+.claude/

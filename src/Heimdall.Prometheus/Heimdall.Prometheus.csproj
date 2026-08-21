@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Heimdall.Prometheus</RootNamespace>
+    <AssemblyName>Heimdall.Prometheus</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Heimdall.Prometheus</PackageId>
+    <Description>Heimdall Prometheus-compatible HTTP API + PromQL engine. Exposes stored OTel metrics as a Prometheus data source (Grafana points at /api/v1/*). Storage-agnostic — consumes IHeimdallMetricSource + IHeimdallQuery only.</Description>
+    <PackageTags>otel;opentelemetry;telemetry;metrics;prometheus;promql;grafana;embedded;heimdall</PackageTags>
+    <Version>0.1.0</Version>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Heimdall.Abstractions\Heimdall.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Heimdall.Tests" />
+  </ItemGroup>
+
+</Project>

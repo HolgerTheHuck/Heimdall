@@ -1,0 +1,87 @@
+@* Traces-Uebersicht: server-gerendert, Filter via GET-Form (kein JS/SignalR). *@
+@inject Heimdall.IHeimdallQuery Query
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Traces" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <h1>Traces</h1>
+
+    <form class="hmd-filters" method="get" action="@BasePath">
+        <label>Name enthält <input type="search" name="name" value="@NameContains" placeholder="checkout" /></label>
+        <label>Service <input type="search" name="svc" value="@ServiceName" placeholder="shop" /></label>
+        <label>Status
+            <select name="err">
+                <option value="" selected="@(HasError is null)">alle</option>
+                <option value="1" selected="@(HasError is true)">nur Fehler</option>
+                <option value="0" selected="@(HasError is false)">nur OK</option>
+            </select>
+        </label>
+        <label>Limit <input type="number" name="limit" value="@Limit" min="1" max="1000" /></label>
+        <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
+        <button type="submit">Filtern</button>
+    </form>
+
+    @if (_traces.Count == 0)
+    {
+        <section class="hmd-empty-state">
+            <h2>Keine Traces gefunden</h2>
+            <p>Im gewählten Zeitraum liegen keine Spans vor. Zeitraum erweitern, Filter lockern oder Telemetrie senden.</p>
+            <p class="hmd-dim">OTLP/HTTP <code>POST @BasePath/v1/traces</code> · gRPC <code>localhost:4317</code> · zurück zur <a href="@BasePath">Übersicht</a></p>
+        </section>
+    }
+    else
+    {
+        <table class="hmd-table hmd-dense">
+            <thead><tr><th>Trace-ID</th><th>Start</th><th>Dauer</th><th>Spans</th><th>Status</th></tr></thead>
+            <tbody>
+            @foreach (var t in _traces)
+            {
+                <tr class="@(t.HasError ? "hmd-err" : "")">
+                    <td class="hmd-mono"><a href="@(BasePath + "/trace/" + t.TraceId)">@HeimdallFmt.Truncate(t.TraceId, 16)</a></td>
+                    <td>@HeimdallFmt.Ts(t.FirstStartUnixNano)</td>
+                    <td>@HeimdallFmt.Dur(t.DurationNs)</td>
+                    <td>@t.SpanCount</td>
+                    <td>@(t.HasError ? "✕ Fehler" : "✓ OK")</td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+    <p class="hmd-count">@_traces.Count Trace(s) · @Query.CountSpans() Span(s) gesamt</p>
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string? NameContains { get; set; }
+    [Parameter] public string? ServiceName { get; set; }
+    [Parameter] public bool? HasError { get; set; }
+    [Parameter] public int Limit { get; set; } = 100;
+    [Parameter] public int Offset { get; set; } = 0;
+    [Parameter] public string? Preset { get; set; }
+    [Parameter] public long? From { get; set; }
+    [Parameter] public long? To { get; set; }
+
+    private System.Collections.Generic.List<Heimdall.TraceSummary> _traces = new();
+
+    protected override void OnInitialized()
+    {
+        var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano());
+        var f = new Heimdall.TraceFilter
+        {
+            FromUnixNano = range.From,
+            ToUnixNano = range.To,
+            NameContains = string.IsNullOrWhiteSpace(NameContains) ? null : NameContains,
+            ServiceName = string.IsNullOrWhiteSpace(ServiceName) ? null : ServiceName,
+            HasError = HasError,
+            Limit = Limit < 1 ? 100 : Limit,
+            Offset = Offset < 0 ? 0 : Offset,
+        };
+        _traces = new System.Collections.Generic.List<Heimdall.TraceSummary>(Query.ListTraces(f));
+    }
+}

@@ -1,0 +1,135 @@
+@* Landing / Übersicht: orientierender Schnappschuss ohne Filter-Form. Health-KPIs
+   (Spans/Logs/Metriken gesamt), letzte Fehler-Traces + Fehler-Logs (jeweils 5),
+   Quick-Nav-Kacheln zu den Detailseiten. Bei komplett leerer DB ein geführtes
+   Onboarding-Panel mit dem OTLP-Endpunkt. Pure C#-Aggregation auf IHeimdallQuery. *@
+@using System.Collections.Generic
+@inject Heimdall.IHeimdallQuery Query
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Übersicht" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <div class="hmd-page-head">
+        <h1>Übersicht</h1>
+        <span class="hmd-dim">Heimdall-Observability · Schnappschuss der aktuellen Datenlage</span>
+    </div>
+
+    @if (_isEmpty)
+    {
+        <section class="hmd-empty-state">
+            <h2>Noch keine Telemetrie eingegangen</h2>
+            <p>Sende OpenTelemetry-Daten an Heimdall, dann erscheinen hier Health-KPIs, letzte Fehler-Traces und Logs.</p>
+            <ul class="hmd-mono">
+                <li>OTLP/HTTP:  <code>POST @BasePath/v1/traces</code> · <code>@BasePath/v1/metrics</code> · <code>@BasePath/v1/logs</code></li>
+                <li>OTLP/gRPC:  <code>localhost:4317</code> (TraceService / LogsService / MetricsService.Export)</li>
+            </ul>
+            <p class="hmd-dim">Beispiel-Senden via <code>OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:5099@BasePath</code> an das laufende Host.</p>
+        </section>
+    }
+    else
+    {
+        <div class="hmd-kpi-row">
+            <HeimdallKpi Value="@_spansStr" Label="Spans" Sub="gesamt" Tone="accent" />
+            <HeimdallKpi Value="@_logsStr" Label="Logs" Sub="gesamt" Tone="ok" />
+            <HeimdallKpi Value="@_metricsStr" Label="Metrik-Punkte" Sub="gesamt" Tone="warn" />
+            <HeimdallKpi Value="@_errTracesStr" Label="Fehler-Traces" Sub="@($"neueste {_errTraces.Count}")" Tone="@(_errTraces.Count > 0 ? "err" : "ok")" />
+        </div>
+
+        <div class="hmd-navcards">
+            <a class="hmd-navcard" href="@(BasePath + "/dashboard")"><span class="hmd-navcard-ico">📊</span><span class="hmd-navcard-t">Dashboard</span><span class="hmd-navcard-s">RED-Metriken, Latenzen, Uptime</span></a>
+            <a class="hmd-navcard" href="@(BasePath + "/traces")"><span class="hmd-navcard-ico">⛓</span><span class="hmd-navcard-t">Traces</span><span class="hmd-navcard-s">Spans suchen und inspizieren</span></a>
+            <a class="hmd-navcard" href="@(BasePath + "/logs")"><span class="hmd-navcard-ico">📜</span><span class="hmd-navcard-t">Logs</span><span class="hmd-navcard-s">Volltext-Suche + Severity</span></a>
+            <a class="hmd-navcard" href="@(BasePath + "/metrics")"><span class="hmd-navcard-ico">📈</span><span class="hmd-navcard-t">Metriken</span><span class="hmd-navcard-s">Zeitreihen & Histogramme</span></a>
+            <a class="hmd-navcard" href="@(BasePath + "/endpoints")"><span class="hmd-navcard-ico">🛣</span><span class="hmd-navcard-t">Endpoints</span><span class="hmd-navcard-s">Controller/Action-Drilldown</span></a>
+            <a class="hmd-navcard" href="@(BasePath + "/dashboards")"><span class="hmd-navcard-ico">🗃</span><span class="hmd-navcard-t">Dashboards</span><span class="hmd-navcard-s">Grafana-JSON importieren & rendern</span></a>
+        </div>
+
+        <div class="hmd-panels">
+            <section class="hmd-panel">
+                <h2 class="hmd-subhead">Neueste Fehler-Traces (@_errTraces.Count)</h2>
+                @if (_errTraces.Count == 0)
+                {
+                    <p class="hmd-empty">Keine Fehler-Traces — alle Spans im Status OK.</p>
+                }
+                else
+                {
+                    <table class="hmd-table hmd-dense">
+                        <thead><tr><th>Trace-ID</th><th>Start</th><th>Dauer</th><th>Spans</th></tr></thead>
+                        <tbody>
+                        @foreach (var t in _errTraces)
+                        {
+                            <tr class="hmd-err">
+                                <td class="hmd-mono"><a href="@(BasePath + "/trace/" + t.TraceId)">@HeimdallFmt.Truncate(t.TraceId, 16)</a></td>
+                                <td>@HeimdallFmt.Ts(t.FirstStartUnixNano)</td>
+                                <td>@HeimdallFmt.Dur(t.DurationNs)</td>
+                                <td>@t.SpanCount</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            </section>
+            <section class="hmd-panel">
+                <h2 class="hmd-subhead">Neueste Fehler-Logs (@_errLogs.Count)</h2>
+                @if (_errLogs.Count == 0)
+                {
+                    <p class="hmd-empty">Keine Fehler-Logs (Severity ≥ ERROR).</p>
+                }
+                else
+                {
+                    <table class="hmd-table hmd-logs">
+                        <thead><tr><th class="hmd-col-ts">Zeit</th><th class="hmd-col-sev">Sev</th><th>Body</th><th class="hmd-col-trace">Trace</th></tr></thead>
+                        <tbody>
+                        @foreach (var l in _errLogs)
+                        {
+                            <HeimdallLogRow Log="@l" BasePath="@BasePath" Expand="@false" />
+                        }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        </div>
+    }
+
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+
+    private long _spans, _logs, _metrics;
+    private List<Heimdall.TraceSummary> _errTraces = new();
+    private List<Heimdall.LogRow> _errLogs = new();
+    private bool _isEmpty;
+
+    private string _spansStr = "0", _logsStr = "0", _metricsStr = "0", _errTracesStr = "0";
+
+    protected override void OnInitialized()
+    {
+        _spans = Query.CountSpans();
+        _logs = Query.CountLogs();
+        _metrics = Query.CountMetrics();
+        _isEmpty = _spans == 0 && _logs == 0 && _metrics == 0;
+
+        _spansStr = HeimdallCharting.FmtValue(_spans);
+        _logsStr = HeimdallCharting.FmtValue(_logs);
+        _metricsStr = HeimdallCharting.FmtValue(_metrics);
+
+        if (!_isEmpty)
+        {
+            _errTraces = new List<Heimdall.TraceSummary>(Query.ListTraces(new Heimdall.TraceFilter
+            {
+                HasError = true, Limit = 5,
+            }));
+            _errLogs = new List<Heimdall.LogRow>(Query.SearchLogs(new Heimdall.LogSearch
+            {
+                MinSeverity = 17, Limit = 5,
+            }));
+            _errTracesStr = HeimdallCharting.FmtValue(_errTraces.Count);
+        }
+    }
+}

@@ -1,0 +1,167 @@
+@* Rendert ein importiertes Grafana-Dashboard in Heimdalls eigener UI. Lädt das
+   JSON aus dem dateibasierten Store, wertet jedes Panel über die in-process
+   PromQL-Engine (EvalRange/EvalInstant) aus und dispacht das Ergebnis über
+   <GrafanaPanelView>. Template-Variablen erscheinen als Dropdowns in einem
+   GET-Form (kein JS) — Auswahl filtert per var-* Query-Parameter neu. *@
+@using System.Linq
+@using Heimdall.Blazor.Grafana
+@using Heimdall.Prometheus
+@inject PromEngine Engine
+@inject IGrafanaDashboardStore Store
+@inject Heimdall.IHeimdallQuery Query
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="@_title" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <h1>@_title</h1>
+    <p class="hmd-dim"><a href="@(BasePath + "/dashboards")">← Alle Dashboards</a> · UID <span class="hmd-mono">@Uid</span> · @PanelsCount Panels</p>
+
+    @if (_notFound)
+    {
+        <p class="hmd-empty">Dashboard „@Uid" nicht gefunden. <a href="@(BasePath + "/dashboards")">Zur Übersicht</a>.</p>
+    }
+    else if (_dashboard is null)
+    {
+        <p class="hmd-empty">Dashboard „@Uid" konnte nicht gelesen werden (ungültiges JSON).</p>
+    }
+    else
+    {
+        <form class="hmd-filters" method="get" action="@(BasePath + "/dashboards/" + Uid)">
+            <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
+            @foreach (var v in _dashboard.Templating)
+            {
+                @if (string.Equals(v.Type, "datasource", System.StringComparison.OrdinalIgnoreCase)) { continue; }
+                <label>@(string.IsNullOrEmpty(v.Name) ? "Var" : v.Name)
+                    <select name="var-@v.Name" @(_multi[v.Name] ? "multiple" : null)>
+                        @if (v.IncludeAll)
+                        {
+                            <option value="$__all" selected="@(_isAll[v.Name])">All</option>
+                        }
+                        @foreach (var opt in _options[v.Name])
+                        {
+                            <option value="@opt" selected="@(_sel[v.Name].Contains(opt))">@opt</option>
+                        }
+                    </select>
+                </label>
+            }
+            <button type="submit">Anwenden</button>
+        </form>
+
+        <div class="hmd-grid">
+            @foreach (var rp in _panels)
+            {
+                <GrafanaPanelView Panel="@rp" BasePath="@BasePath" />
+            }
+        </div>
+    }
+
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string Uid { get; set; } = "";
+    [Parameter] public string? Preset { get; set; }
+    [Parameter] public long? From { get; set; }
+    [Parameter] public long? To { get; set; }
+    [Parameter] public IReadOnlyDictionary<string, string>? Vars { get; set; }
+
+    private GrafanaDashboard? _dashboard;
+    private string _title = "Dashboard";
+    private bool _notFound;
+    private int PanelsCount => _dashboard?.Panels.Count ?? 0;
+
+    private List<RenderedPanel> _panels = new();
+
+    // Pro Template-Variable vorberechnete Steuer-Daten.
+    private readonly Dictionary<string, IReadOnlyList<string>> _options = new(System.StringComparer.Ordinal);
+    private readonly Dictionary<string, System.Collections.Generic.HashSet<string>> _sel = new(System.StringComparer.Ordinal);
+    private readonly Dictionary<string, bool> _isAll = new(System.StringComparer.Ordinal);
+    private readonly Dictionary<string, bool> _multi = new(System.StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _renderVars = new(System.StringComparer.Ordinal);
+
+    protected override void OnInitialized()
+    {
+        _dashboard = Store.Get(Uid);
+        if (_dashboard is null) { _notFound = true; return; }
+        _title = _dashboard.Title;
+
+        var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano(), fallbackPreset: "1h");
+        long fromNs = range.From ?? 0L;
+        long toNs = range.To ?? HeimdallRange.NowUnixNano();
+        long fromMs = fromNs / 1_000_000L;
+        long toMs = toNs / 1_000_000L;
+        long stepMs = Math.Max(1_000L, (toMs - fromMs) / 120L);
+        if (stepMs < 1_000L) stepMs = 1_000L;
+
+        foreach (var v in _dashboard.Templating)
+        {
+            if (string.IsNullOrEmpty(v.Name)) continue;
+            if (string.Equals(v.Type, "datasource", System.StringComparison.OrdinalIgnoreCase)) continue;
+
+            string selected = GrafanaTemplating.SelectedValue(v, Vars);
+            var opts = GrafanaTemplating.ResolveOptions(v, Engine, fromNs, toNs);
+            _options[v.Name] = opts;
+            _multi[v.Name] = v.Multi;
+            bool all = selected == "$__all" || string.IsNullOrEmpty(selected);
+            _isAll[v.Name] = all;
+            var set = new System.Collections.Generic.HashSet<string>(System.StringComparer.Ordinal);
+            if (!all)
+                foreach (var p in selected.Split(',', System.StringSplitOptions.RemoveEmptyEntries))
+                    set.Add(p.Trim());
+            _sel[v.Name] = set;
+            _renderVars[v.Name] = selected;
+        }
+
+        // Grafana-Built-in-Variablen ($__interval/$__rate_interval) aus dem Step
+        // ableiten — stehen in fast jedem rate()/max_over_time()-Target und würden
+        // ohne Interpolation vom PromQL-Parser abgewiesen („unexpected '$'").
+        // $__rate_interval = 4 × $__interval, ABER mindestens 1 m (Grafana floors
+        // $__rate_interval bei 1 m). Ohne diesen Floor würde bei 15-m-Preset
+        // $__rate_interval=30 s — kürzer als die typische 60-s-Export-Kadenz des
+        // SDK — und rate(…[30s]) träfe keine zwei Punkte → leere Dauer-Panels.
+        _renderVars["__interval"] = GrafanaTemplating.DurationLabel(stepMs);
+        _renderVars["__rate_interval"] = GrafanaTemplating.DurationLabel(Math.Max(stepMs * 4, 60_000L));
+
+        // Panels in Grafana-Lesenreihenfolge (Y, dann X) auswerten. Panels mit
+        // `repeat`-Variable werden pro gewähltem Wert expandiert (eine Kachel je
+        // Wert, Title interpoliert) — wie Grafana es tut.
+        foreach (var p in _dashboard.Panels.OrderBy(x => x.GridPos.Y).ThenBy(x => x.GridPos.X))
+        {
+            foreach (var vars2 in ExpandRepeatVars(p, _renderVars))
+            {
+                var titled = p with { Title = GrafanaTemplating.Interpolate(p.Title, vars2) };
+                _panels.Add(GrafanaPanelRenderer.Render(titled, Engine, fromMs, toMs, stepMs, vars2, Query));
+            }
+        }
+    }
+
+    /// <summary>
+    /// Liefert die Variablen-Dicts, gegen die ein Panel ausgewertet wird: bei
+    /// <c>repeat</c> über einer Multi-Variablen eine Kopie pro gewähltem Wert
+    /// (Repeat-Expansion), sonst das Basis-Dict einmal. So wird z. B.
+    /// <c>${percentile:value}</c> in <c>histogram_quantile(…)</c> zu einem
+    /// einzelnen Skalar (0.95 bzw. 0.50) statt zur Regex-Alternation.
+    /// </summary>
+    private System.Collections.Generic.IEnumerable<System.Collections.Generic.IReadOnlyDictionary<string, string>>
+        ExpandRepeatVars(GrafanaPanel p, System.Collections.Generic.IReadOnlyDictionary<string, string> baseVars)
+    {
+        if (string.IsNullOrEmpty(p.Repeat) ||
+            !baseVars.TryGetValue(p.Repeat, out var sel) || string.IsNullOrEmpty(sel))
+        { yield return baseVars; yield break; }
+        var values = sel.Split(',', System.StringSplitOptions.RemoveEmptyEntries);
+        if (values.Length <= 1) { yield return baseVars; yield break; }
+        foreach (var v in values)
+        {
+            var copy = new System.Collections.Generic.Dictionary<string, string>(System.StringComparer.Ordinal);
+            foreach (var kv in baseVars) copy[kv.Key] = kv.Value;
+            copy[p.Repeat] = v.Trim();
+            yield return copy;
+        }
+    }
+}

@@ -1,0 +1,66 @@
+@* Geteilte Log-Zeile (EIN <tr> pro Log), Seq-style: kompakter Einzeiler, aufklappbar
+   für strukturierte Details. Genutzt von LogsPage, TraceDetailPage, DashboardPage,
+   HomePage und Grafana-Log-Panels. Spalten: Zeit | Sev | Body | Trace.
+   Body ist ein <details>: <summary> zeigt den Log-Text als Einzeiler (mit Ellipsis,
+   solange zugeklappt) — so bleiben viele Logs kompakt übereinander; aufgeklappt
+   erscheinen die strukturierten Attribute + Trace/Span/Scope/Severity darunter.
+   TraceId-Spalte ist ein Link auf das Trace-Detail. Rein nativ, kein JS. *@
+@using System.Collections.Generic
+<tr class="@SevClass()">
+    <td class="hmd-mono">@HeimdallFmt.Ts(Log.TimeUnixNano)</td>
+    <td><span class="hmd-badge">@HeimdallFmt.Sev(Log.Severity)</span></td>
+    <td class="hmd-log-body-cell">
+        <details class="hmd-log-details" open="@Expand">
+            <summary class="hmd-log-summary">@Log.Body</summary>
+            <div class="hmd-log-full">
+                @if (_attrs.Count > 0)
+                {
+                    <dl class="hmd-attr-list">
+                        @foreach (var a in _attrs)
+                        {
+                            <dt>@a.Key</dt><dd>@a.Value</dd>
+                        }
+                    </dl>
+                }
+                else
+                {
+                    <p class="hmd-dim">keine Attribute</p>
+                }
+                <dl class="hmd-attr-list hmd-attr-ids">
+                    <dt>trace</dt><dd class="hmd-mono">@(Log.TraceId ?? "—")</dd>
+                    <dt>span</dt><dd class="hmd-mono">@(Log.SpanId ?? "—")</dd>
+                    <dt>scope</dt><dd>@(Log.ScopeName ?? "—")</dd>
+                    <dt>severity</dt><dd>@(Log.SeverityText ?? HeimdallFmt.Sev(Log.Severity))</dd>
+                </dl>
+            </div>
+        </details>
+    </td>
+    <td class="hmd-mono hmd-log-trace">
+        @if (!string.IsNullOrEmpty(Log.TraceId))
+        {
+            <a href="@(BasePath + "/trace/" + Log.TraceId)">@HeimdallFmt.Truncate(Log.TraceId, 12)</a>
+        }
+        else
+        {
+            <span class="hmd-dim">—</span>
+        }
+    </td>
+</tr>
+
+@code {
+    /// <summary>Die darzustellende Log-Zeile.</summary>
+    [Parameter] public Heimdall.LogRow Log { get; set; } = default!;
+    /// <summary>Mount-Pfad des Dashboards (für Trace-Links).</summary>
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    /// <summary><c>true</c> → <c>&lt;details open&gt;</c> (alle aufgeklappt).</summary>
+    [Parameter] public bool Expand { get; set; }
+
+    private IReadOnlyList<HeimdallCharting.AttrKv> _attrs = Array.Empty<HeimdallCharting.AttrKv>();
+
+    protected override void OnInitialized()
+    {
+        _attrs = HeimdallCharting.ParseAttrs(Log.AttrsJson);
+    }
+
+    private string SevClass() => "hmd-sev-" + HeimdallFmt.Sev(Log.Severity).ToLowerInvariant();
+}

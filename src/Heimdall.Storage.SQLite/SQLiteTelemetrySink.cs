@@ -1,0 +1,547 @@
+using System;
+using System.Collections.Generic;
+using System.Globalization;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using Heimdall;
+using Microsoft.Data.Sqlite;
+
+namespace Heimdall.Storage.SQLite;
+
+/// <summary>
+/// Heimdall-Storage-Backend auf SQLite (Microsoft.Data.Sqlite, FTS5 aktiviert).
+/// Implementiert <see cref="IHeimdallSink"/> (Schreiben) und <see cref="IHeimdallQuery"/>
+/// (Lesen). Schema: heim_spans / heim_logs / heim_metrics + FTS5-Virtual-Tables
+/// (external content) fuer name/body. Parametrisierte Batch-Inserts in einer
+/// Transaktion pro Batch; ein Retention-Sweeper loescht alte Zeilen.
+///
+/// Reif/stabil und mit Standard-Werkzeugen (z. B. DB Browser for SQLite) inspizierbar.
+/// Austauschbar mit dem Walhalla-Backend, da beide dieselben Vertrags-Interfaces
+/// implementieren.
+///
+/// Thread-Safety: eine dauerhaft offene Verbindung, alle DB-Zugriffe hinter einem
+/// Lock (SQLite serialisiert Schreiber ohnehin). WAL-Mode fuer konkurrente Leser.
+/// </summary>
+public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery, IDisposable
+{
+    private readonly SQLiteTelemetryOptions _options;
+    private readonly SqliteConnection _conn;
+    private readonly SqliteCommand _insSpan, _insLog, _insMetric;
+    private readonly SqliteParameter[] _pSpan, _pLog, _pMetric;
+    private readonly Timer? _retentionTimer;
+    private readonly object _gate = new();
+    private readonly Dictionary<string, Regex> _regexCache = new(StringComparer.Ordinal);
+    private int _disposed;
+
+    public SQLiteTelemetrySink(SQLiteTelemetryOptions? options = null)
+    {
+        _options = options ?? new SQLiteTelemetryOptions();
+        // Pooling=False: Dispose gibt den Datei-Handle frei (wichtig fuer Tests/Cleanup
+        // und fuer den eingebetteten Betrieb, in dem die Datei bei Bedarf verschoben
+        // werden koennen soll).
+        _conn = new SqliteConnection($"Data Source={_options.DataPath};Pooling=False");
+        _conn.Open();
+        // Eigene REGEXP-Funktion fuer index-gestuetzte Attribut-Regex-Suche
+        // (=~ / !~); Konvention wie SafeRegex (CultureInvariant, 200 ms Timeout,
+        // gecacht). SQLite ruft REGEXP(value, pattern) auf — `value REGEXP pat`.
+        // SQLite ruft den REGEXP-Operator als REGEXP(pattern, value) auf, d. h. der
+        // 1. Funktionsparameter ist das Regex-Pattern, der 2. der zu testende Wert.
+        _conn.CreateFunction("REGEXP", (string? pattern, string? value) =>
+        {
+            if (value is null || string.IsNullOrEmpty(pattern)) return false;
+            if (!_regexCache.TryGetValue(pattern, out var r))
+            {
+                try { r = new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200)); }
+                catch { return false; }   // ungueltiges Pattern -> kein Treffer
+                _regexCache[pattern] = r;
+            }
+            return r.IsMatch(value);
+        });
+        if (_options.WalMode)
+        {
+            Exec("PRAGMA journal_mode=WAL;");
+            Exec("PRAGMA synchronous=NORMAL;");
+        }
+        Exec("PRAGMA foreign_keys=ON;");
+
+        BootstrapSchema();
+
+        (_insSpan, _pSpan) = Prepare(SqlInsertSpan, 16);
+        (_insLog, _pLog) = Prepare(SqlInsertLog, 10);
+        (_insMetric, _pMetric) = Prepare(SqlInsertMetric, 16);
+
+        if (_options.RetentionDays > 0 && _options.RetentionSweepMinutes > 0)
+        {
+            _retentionTimer = new Timer(_ => SweepRetention(), null,
+                TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(_options.RetentionSweepMinutes));
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // IHeimdallSink
+    // -----------------------------------------------------------------------
+
+    public void WriteSpans(IReadOnlyList<HSpan> spans)
+    {
+        if (spans is null || spans.Count == 0) return;
+        lock (_gate)
+        {
+            using var tx = _conn.BeginTransaction();
+            _insSpan.Transaction = tx;
+            for (int i = 0; i < spans.Count; i++)
+            {
+                var s = spans[i];
+                _pSpan[0].Value = HeimdallJson.ToHex(s.TraceId);
+                _pSpan[1].Value = HeimdallJson.ToHex(s.SpanId);
+                _pSpan[2].Value = s.ParentSpanId is null ? DBNull.Value : (object)HeimdallJson.ToHex(s.ParentSpanId);
+                _pSpan[3].Value = s.Name ?? string.Empty;
+                _pSpan[4].Value = (int)s.Kind;
+                _pSpan[5].Value = s.StartUnixNano;
+                _pSpan[6].Value = s.EndUnixNano;
+                _pSpan[7].Value = Math.Max(0, s.EndUnixNano - s.StartUnixNano);
+                _pSpan[8].Value = (int)s.StatusCode;
+                _pSpan[9].Value = (object?)s.StatusMessage ?? DBNull.Value;
+                _pSpan[10].Value = HeimdallJson.WriteAttributes(s.Attributes);
+                _pSpan[11].Value = HeimdallJson.WriteSpanEvents(s.Events);
+                _pSpan[12].Value = HeimdallJson.WriteSpanLinks(s.Links);
+                _pSpan[13].Value = s.Resource is null ? "{}" : HeimdallJson.WriteAttributes(s.Resource.Attributes);
+                _pSpan[14].Value = (object?)s.Scope?.Name ?? DBNull.Value;
+                _pSpan[15].Value = (object?)s.Scope?.Version ?? DBNull.Value;
+                _insSpan.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+    }
+
+    public void WriteLogs(IReadOnlyList<HLogRecord> logs)
+    {
+        if (logs is null || logs.Count == 0) return;
+        lock (_gate)
+        {
+            using var tx = _conn.BeginTransaction();
+            _insLog.Transaction = tx;
+            for (int i = 0; i < logs.Count; i++)
+            {
+                var l = logs[i];
+                _pLog[0].Value = l.TimeUnixNano;
+                _pLog[1].Value = l.TraceId is null ? DBNull.Value : (object)HeimdallJson.ToHex(l.TraceId);
+                _pLog[2].Value = l.SpanId is null ? DBNull.Value : (object)HeimdallJson.ToHex(l.SpanId);
+                _pLog[3].Value = (int)l.Severity;
+                _pLog[4].Value = (object?)l.SeverityText ?? DBNull.Value;
+                _pLog[5].Value = (object?)l.Body ?? DBNull.Value;
+                _pLog[6].Value = HeimdallJson.WriteAttributes(l.Attributes);
+                _pLog[7].Value = l.Resource is null ? "{}" : HeimdallJson.WriteAttributes(l.Resource.Attributes);
+                _pLog[8].Value = (object?)l.Scope?.Name ?? DBNull.Value;
+                _pLog[9].Value = (object?)l.Scope?.Version ?? DBNull.Value;
+                _insLog.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+    }
+
+    public void WriteMetrics(IReadOnlyList<HMetricPoint> metrics)
+    {
+        if (metrics is null || metrics.Count == 0) return;
+        lock (_gate)
+        {
+            using var tx = _conn.BeginTransaction();
+            _insMetric.Transaction = tx;
+            for (int i = 0; i < metrics.Count; i++)
+            {
+                var m = metrics[i];
+                _pMetric[0].Value = m.Name;
+                _pMetric[1].Value = (object?)m.Unit ?? DBNull.Value;
+                _pMetric[2].Value = (int)m.Type;
+                _pMetric[3].Value = (int)m.Temporality;
+                _pMetric[4].Value = m.TimeUnixNano;
+                _pMetric[5].Value = m.Value;
+                _pMetric[6].Value = (object?)m.Count ?? DBNull.Value;
+                _pMetric[7].Value = (object?)m.Sum ?? DBNull.Value;
+                _pMetric[8].Value = (object?)m.Min ?? DBNull.Value;
+                _pMetric[9].Value = (object?)m.Max ?? DBNull.Value;
+                _pMetric[10].Value = HeimdallJson.WriteLongs(m.BucketCounts);
+                _pMetric[11].Value = HeimdallJson.WriteDoubles(m.ExplicitBounds);
+                _pMetric[12].Value = HeimdallJson.WriteAttributes(m.Attributes);
+                _pMetric[13].Value = m.Resource is null ? "{}" : HeimdallJson.WriteAttributes(m.Resource.Attributes);
+                _pMetric[14].Value = (object?)m.Scope?.Name ?? DBNull.Value;
+                _pMetric[15].Value = (object?)m.Scope?.Version ?? DBNull.Value;
+                _insMetric.ExecuteNonQuery();
+            }
+            tx.Commit();
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // IHeimdallQuery
+    // -----------------------------------------------------------------------
+
+    public IReadOnlyList<TraceSummary> ListTraces(TraceFilter filter)
+    {
+        filter ??= new TraceFilter();
+        var sb = SqlBuilder();
+        sb.Append("SELECT trace_id, MIN(start_unix_nano) AS first_start, MAX(end_unix_nano) AS last_end, ");
+        sb.Append("COUNT(*) AS cnt, MAX(CASE WHEN status_code=2 THEN 1 ELSE 0 END) AS err ");
+        sb.Append("FROM heim_spans WHERE 1=1");
+        var ps = new List<SqliteParameter>();
+        AddRange(sb, ps, filter);
+        if (filter.ServiceName is not null)
+        {
+            sb.Append(" AND trace_id IN (SELECT trace_id FROM heim_spans WHERE resource_json LIKE @svc)");
+            ps.Add(Param("@svc", "%" + EscJson(filter.ServiceName) + "%"));
+        }
+        if (filter.NameContains is not null)
+        {
+            sb.Append(" AND trace_id IN (SELECT s2.trace_id FROM heim_spans s2 WHERE s2.rowid IN (SELECT rowid FROM heim_spans_fts WHERE heim_spans_fts MATCH @nm))");
+            ps.Add(Param("@nm", filter.NameContains));
+        }
+        sb.Append(" GROUP BY trace_id");
+        if (filter.HasError is not null)
+            sb.Append(filter.HasError.Value ? " HAVING err=1" : " HAVING err=0");
+        sb.Append(" ORDER BY first_start DESC LIMIT @lim OFFSET @off");
+        ps.Add(Param("@lim", filter.Limit));
+        ps.Add(Param("@off", filter.Offset));
+
+        var list = new List<TraceSummary>();
+        lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                list.Add(new TraceSummary(
+                    r.GetString(0), r.GetInt64(1), r.GetInt64(2),
+                    Math.Max(0, r.GetInt64(2) - r.GetInt64(1)),
+                    r.GetInt32(3), r.GetInt32(4) == 1));
+            }
+        }
+        return list;
+    }
+
+    public IReadOnlyList<SpanRow> GetTrace(string traceId)
+    {
+        const string sql =
+            "SELECT trace_id, span_id, parent_id, name, kind, start_unix_nano, end_unix_nano, " +
+            "duration_ns, status_code, status_msg, attrs_json, events_json, resource_json, scope_name " +
+            "FROM heim_spans WHERE trace_id=@t ORDER BY start_unix_nano";
+        var list = new List<SpanRow>();
+        lock (_gate)
+        {
+            using var cmd = new SqliteCommand(sql, _conn);
+            cmd.Parameters.AddWithValue("@t", traceId);
+            using var r = cmd.ExecuteReader();
+            while (r.Read()) list.Add(ReadSpan(r));
+        }
+        return list;
+    }
+
+    public IReadOnlyList<SpanRow> ListSpans(SpanFilter filter)
+    {
+        filter ??= new SpanFilter();
+        var sb = SqlBuilder();
+        sb.Append("SELECT trace_id, span_id, parent_id, name, kind, start_unix_nano, end_unix_nano, " +
+                  "duration_ns, status_code, status_msg, attrs_json, events_json, resource_json, scope_name " +
+                  "FROM heim_spans WHERE 1=1");
+        var ps = new List<SqliteParameter>();
+        if (filter.FromUnixNano is not null) { sb.Append(" AND start_unix_nano >= @from"); ps.Add(Param("@from", filter.FromUnixNano.Value)); }
+        if (filter.ToUnixNano is not null) { sb.Append(" AND start_unix_nano <= @to"); ps.Add(Param("@to", filter.ToUnixNano.Value)); }
+        if (filter.Kind is not null) { sb.Append(" AND kind = @kind"); ps.Add(Param("@kind", filter.Kind.Value)); }
+        if (filter.MinStatusCode is not null) { sb.Append(" AND status_code >= @min"); ps.Add(Param("@min", filter.MinStatusCode.Value)); }
+        sb.Append(" ORDER BY start_unix_nano DESC LIMIT @lim OFFSET @off");
+        ps.Add(Param("@lim", filter.Limit < 1 ? 5000 : filter.Limit));
+        ps.Add(Param("@off", filter.Offset < 0 ? 0 : filter.Offset));
+
+        var list = new List<SpanRow>();
+        lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read()) list.Add(ReadSpan(r));
+        }
+        return list;
+    }
+
+    public IReadOnlyList<LogRow> SearchLogs(LogSearch search)
+    {
+        search ??= new LogSearch();
+        var sb = SqlBuilder();
+        sb.Append("SELECT ts_unix_nano, trace_id, span_id, severity, severity_text, body, attrs_json, scope_name FROM heim_logs WHERE 1=1");
+        var ps = new List<SqliteParameter>();
+        if (!string.IsNullOrWhiteSpace(search.Text))
+        {
+            sb.Append(" AND rowid IN (SELECT rowid FROM heim_logs_fts WHERE heim_logs_fts MATCH @q)");
+            ps.Add(Param("@q", search.Text));
+        }
+        if (search.MinSeverity is not null) { sb.Append(" AND severity >= @sev"); ps.Add(Param("@sev", search.MinSeverity.Value)); }
+        if (search.FromUnixNano is not null) { sb.Append(" AND ts_unix_nano >= @from"); ps.Add(Param("@from", search.FromUnixNano.Value)); }
+        if (search.ToUnixNano is not null) { sb.Append(" AND ts_unix_nano <= @to"); ps.Add(Param("@to", search.ToUnixNano.Value)); }
+        if (search.TraceId is not null) { sb.Append(" AND trace_id = @tid"); ps.Add(Param("@tid", search.TraceId)); }
+        // Attribut-Feldsuche (index-gestuetzt ueber heim_log_attrs; deckt Log- UND
+        // Resource-Attribute). Key-Normalisierung: User darf service.name ODER
+        // service_name schreiben -> Subquery fragt beide Formen ab.
+        if (search.AttrFilters is { Count: > 0 })
+        {
+            int i = 0;
+            foreach (var af in search.AttrFilters)
+            {
+                string k = af.Key ?? "";
+                string kAlt = k.Contains('.') ? k.Replace('.', '_') : k.Replace('_', '.');
+                string pKey = "@ak" + i.ToString(CultureInfo.InvariantCulture);
+                string pKeyAlt = "@aka" + i.ToString(CultureInfo.InvariantCulture);
+                string pVal = "@av" + i.ToString(CultureInfo.InvariantCulture);
+                string sub = "SELECT log_rowid FROM heim_log_attrs WHERE key IN (" + pKey + "," + pKeyAlt + ")";
+                switch (af.Op)
+                {
+                    case "=":
+                        sb.Append(" AND rowid IN (").Append(sub).Append(" AND value = ").Append(pVal).Append(')');
+                        ps.Add(Param(pKey, k)); ps.Add(Param(pKeyAlt, kAlt)); ps.Add(Param(pVal, af.Value ?? ""));
+                        break;
+                    case "!=":
+                        // strict: Log muss das Attr besitzen UND Wert weicht ab (Loki-Semantik).
+                        sb.Append(" AND rowid IN (").Append(sub).Append(" AND value <> ").Append(pVal).Append(')');
+                        ps.Add(Param(pKey, k)); ps.Add(Param(pKeyAlt, kAlt)); ps.Add(Param(pVal, af.Value ?? ""));
+                        break;
+                    case "=~":
+                        sb.Append(" AND rowid IN (").Append(sub).Append(" AND value REGEXP ").Append(pVal).Append(')');
+                        ps.Add(Param(pKey, k)); ps.Add(Param(pKeyAlt, kAlt)); ps.Add(Param(pVal, af.Value ?? ""));
+                        break;
+                    case "!~":
+                        // strict: Log muss das Attr besitzen UND Wert matcht nicht.
+                        sb.Append(" AND rowid IN (").Append(sub).Append(" AND NOT value REGEXP ").Append(pVal).Append(')');
+                        ps.Add(Param(pKey, k)); ps.Add(Param(pKeyAlt, kAlt)); ps.Add(Param(pVal, af.Value ?? ""));
+                        break;
+                }
+                i++;
+            }
+        }
+        sb.Append(" ORDER BY ts_unix_nano DESC LIMIT @lim OFFSET @off");
+        ps.Add(Param("@lim", search.Limit));
+        ps.Add(Param("@off", search.Offset));
+
+        var list = new List<LogRow>();
+        lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read()) list.Add(ReadLog(r));
+        }
+        return list;
+    }
+
+    public IReadOnlyList<MetricRow> MetricSeries(string name, long? fromUnixNano, long? toUnixNano, int limit = 500)
+    {
+        var sb = SqlBuilder();
+        sb.Append("SELECT name, unit, type, temporality, ts_unix_nano, value, count, sum, min, max, bucket_counts_json, explicit_bounds_json, attrs_json FROM heim_metrics WHERE name=@n");
+        var ps = new List<SqliteParameter> { Param("@n", name) };
+        if (fromUnixNano is not null) { sb.Append(" AND ts_unix_nano >= @from"); ps.Add(Param("@from", fromUnixNano.Value)); }
+        if (toUnixNano is not null) { sb.Append(" AND ts_unix_nano <= @to"); ps.Add(Param("@to", toUnixNano.Value)); }
+        sb.Append(" ORDER BY ts_unix_nano ASC LIMIT @lim");
+        ps.Add(Param("@lim", limit));
+
+        var list = new List<MetricRow>();
+        lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                list.Add(new MetricRow(
+                    r.GetString(0), NStr(r, 1), r.GetInt32(2), r.GetInt32(3), r.GetInt64(4),
+                    r.GetDouble(5), NLong(r, 6), NDouble(r, 7), NDouble(r, 8), NDouble(r, 9),
+                    NStr(r, 10), NStr(r, 11), NStr(r, 12) ?? "{}"));
+            }
+        }
+        return list;
+    }
+
+    public long CountSpans() => Count("heim_spans");
+    public long CountLogs() => Count("heim_logs");
+    public long CountMetrics() => Count("heim_metrics");
+
+    private long Count(string table)
+    {
+        lock (_gate) using (var cmd = new SqliteCommand($"SELECT COUNT(*) FROM {table}", _conn))
+            return (long)cmd.ExecuteScalar()!;
+    }
+
+    // -----------------------------------------------------------------------
+    // Helfer
+    // -----------------------------------------------------------------------
+
+    private (SqliteCommand, SqliteParameter[]) Prepare(string sql, int n)
+    {
+        var cmd = new SqliteCommand(sql, _conn);
+        var ps = new SqliteParameter[n];
+        for (int i = 0; i < n; i++)
+        {
+            ps[i] = new SqliteParameter("@p" + i.ToString(CultureInfo.InvariantCulture), null);
+            cmd.Parameters.Add(ps[i]);
+        }
+        cmd.Prepare();
+        return (cmd, ps);
+    }
+
+    private void AddRange(StringBuilder sb, List<SqliteParameter> ps, TraceFilter f)
+    {
+        if (f.FromUnixNano is not null) { sb.Append(" AND start_unix_nano >= @from"); ps.Add(Param("@from", f.FromUnixNano.Value)); }
+        if (f.ToUnixNano is not null) { sb.Append(" AND start_unix_nano <= @to"); ps.Add(Param("@to", f.ToUnixNano.Value)); }
+    }
+
+    private static StringBuilder SqlBuilder() => new StringBuilder(256);
+
+    private SqliteCommand Build(string sql, List<SqliteParameter> ps)
+    {
+        var cmd = new SqliteCommand(sql, _conn);
+        foreach (var p in ps) cmd.Parameters.Add(p);
+        return cmd;
+    }
+
+    private static SqliteParameter Param(string name, object value) => new SqliteParameter(name, value);
+
+    // Escapen fuer LIKE-basierte JSON-Suche (Backslash/Percent/Underscore; JSON-Quotes bleiben unveraendert).
+    private static string EscJson(string s) => s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+
+    private static SpanRow ReadSpan(SqliteDataReader r) => new SpanRow(
+        r.GetString(0), r.GetString(1), NStr(r, 2) ?? string.Empty, r.GetString(3), r.GetInt32(4),
+        r.GetInt64(5), r.GetInt64(6), r.GetInt64(7), r.GetInt32(8), NStr(r, 9),
+        NStr(r, 10) ?? "{}", NStr(r, 11) ?? "[]", NStr(r, 12) ?? "{}", NStr(r, 13));
+
+    private static LogRow ReadLog(SqliteDataReader r) => new LogRow(
+        r.GetInt64(0), NStr(r, 1), NStr(r, 2), r.GetInt32(3), NStr(r, 4), NStr(r, 5),
+        NStr(r, 6) ?? "{}", NStr(r, 7));
+
+    private static string? NStr(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
+    private static long? NLong(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : (long)r.GetValue(i);
+    private static double? NDouble(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : (double)r.GetValue(i);
+
+    // -----------------------------------------------------------------------
+    // Schema-Bootstrap (SQLite kennt IF NOT EXISTS fuer Tabellen/Indexe/Trigger)
+    // -----------------------------------------------------------------------
+
+    private void BootstrapSchema()
+    {
+        Exec(SqlCreateSpans);
+        Exec(SqlCreateLogs);
+        Exec(SqlCreateMetrics);
+        Exec("CREATE INDEX IF NOT EXISTS idx_heim_spans_trace ON heim_spans(trace_id)");
+        Exec("CREATE INDEX IF NOT EXISTS idx_heim_spans_start ON heim_spans(start_unix_nano)");
+        Exec("CREATE INDEX IF NOT EXISTS idx_heim_logs_ts ON heim_logs(ts_unix_nano)");
+        Exec("CREATE INDEX IF NOT EXISTS idx_heim_metrics_name_ts ON heim_metrics(name, ts_unix_nano)");
+
+        Exec("CREATE VIRTUAL TABLE IF NOT EXISTS heim_spans_fts USING fts5(name, content='heim_spans', content_rowid='rowid')");
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_spans_ai AFTER INSERT ON heim_spans BEGIN " +
+             "INSERT INTO heim_spans_fts(rowid, name) VALUES (new.rowid, new.name); END");
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_spans_ad AFTER DELETE ON heim_spans BEGIN " +
+             "INSERT INTO heim_spans_fts(heim_spans_fts, rowid, name) VALUES('delete', old.rowid, old.name); END");
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_spans_au AFTER UPDATE ON heim_spans BEGIN " +
+             "INSERT INTO heim_spans_fts(heim_spans_fts, rowid, name) VALUES('delete', old.rowid, old.name); " +
+             "INSERT INTO heim_spans_fts(rowid, name) VALUES (new.rowid, new.name); END");
+
+        Exec("CREATE VIRTUAL TABLE IF NOT EXISTS heim_logs_fts USING fts5(body, content='heim_logs', content_rowid='rowid')");
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_logs_ai AFTER INSERT ON heim_logs BEGIN " +
+             "INSERT INTO heim_logs_fts(rowid, body) VALUES (new.rowid, new.body); END");
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_logs_ad AFTER DELETE ON heim_logs BEGIN " +
+             "INSERT INTO heim_logs_fts(heim_logs_fts, rowid, body) VALUES('delete', old.rowid, old.body); END");
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_logs_au AFTER UPDATE ON heim_logs BEGIN " +
+             "INSERT INTO heim_logs_fts(heim_logs_fts, rowid, body) VALUES('delete', old.rowid, old.body); " +
+             "INSERT INTO heim_logs_fts(rowid, body) VALUES (new.rowid, new.body); END");
+
+        // Attribut-Feldsuche: schluessel-wert-Index ueber Log- UND Resource-Attribute.
+        // json_each expandiert attrs_json + resource_json (OTel service.name ist ein
+        // Resource-Attr -> in resource_json, nicht attrs_json) in eine Zeile pro
+        // (log_rowid, key, value). CAST(value AS TEXT) normalisiert Skalare (String
+        // ohne Quotes, Zahl) auf die User-Typsyntax. PRIMARY KEY dedupliziert,
+        // OR IGNORE sichert gegen Duplikate bei Insert aus beiden JSON-Spalten.
+        Exec("CREATE TABLE IF NOT EXISTS heim_log_attrs (" +
+             "log_rowid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, " +
+             "PRIMARY KEY (log_rowid, key, value))");
+        Exec("CREATE INDEX IF NOT EXISTS idx_heim_log_attrs_kv ON heim_log_attrs(key, value)");
+        Exec("CREATE INDEX IF NOT EXISTS idx_heim_log_attrs_log ON heim_log_attrs(log_rowid)");
+        // AFTER INSERT: beide JSON-Spalten expandieren (log-Attrs + Resource-Attrs).
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_log_attrs_ai AFTER INSERT ON heim_logs BEGIN " +
+             "INSERT OR IGNORE INTO heim_log_attrs(log_rowid, key, value) " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.attrs_json) e " +
+             "UNION ALL " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.resource_json) e; END");
+        // AFTER DELETE: Cascade ueber log_rowid (heim_logs.rowid ist implizit).
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_log_attrs_ad AFTER DELETE ON heim_logs BEGIN " +
+             "DELETE FROM heim_log_attrs WHERE log_rowid = old.rowid; END");
+        // AFTER UPDATE: delete + reinsert (wie FTS5-Pattern).
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_log_attrs_au AFTER UPDATE ON heim_logs BEGIN " +
+             "DELETE FROM heim_log_attrs WHERE log_rowid = old.rowid; " +
+             "INSERT OR IGNORE INTO heim_log_attrs(log_rowid, key, value) " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.attrs_json) e " +
+             "UNION ALL " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.resource_json) e; END");
+    }
+
+    private void Exec(string sql)
+    {
+        using var cmd = new SqliteCommand(sql, _conn);
+        cmd.ExecuteNonQuery();
+    }
+
+    private void SweepRetention()
+    {
+        if (_options.RetentionDays <= 0) return;
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-_options.RetentionDays).ToUnixTimeSeconds() * 1_000_000_000L;
+        lock (_gate)
+        {
+            try
+            {
+                using var tx = _conn.BeginTransaction();
+                using var d1 = new SqliteCommand($"DELETE FROM heim_spans WHERE start_unix_nano < @c", _conn, tx);
+                d1.Parameters.AddWithValue("@c", cutoff); d1.ExecuteNonQuery();
+                using var d2 = new SqliteCommand($"DELETE FROM heim_logs WHERE ts_unix_nano < @c", _conn, tx);
+                d2.Parameters.AddWithValue("@c", cutoff); d2.ExecuteNonQuery();
+                using var d3 = new SqliteCommand($"DELETE FROM heim_metrics WHERE ts_unix_nano < @c", _conn, tx);
+                d3.Parameters.AddWithValue("@c", cutoff); d3.ExecuteNonQuery();
+                tx.Commit();
+            }
+            catch { /* Sweeper darf nie den Host killen */ }
+        }
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
+        _retentionTimer?.Dispose();
+        _insSpan.Dispose(); _insLog.Dispose(); _insMetric.Dispose();
+        _conn.Dispose();
+    }
+
+    // -----------------------------------------------------------------------
+    // SQL-Konstanten
+    // -----------------------------------------------------------------------
+
+    private const string SqlCreateSpans =
+        "CREATE TABLE IF NOT EXISTS heim_spans (" +
+        "trace_id TEXT NOT NULL, span_id TEXT NOT NULL, parent_id TEXT, " +
+        "name TEXT NOT NULL, kind INTEGER NOT NULL, " +
+        "start_unix_nano INTEGER NOT NULL, end_unix_nano INTEGER NOT NULL, duration_ns INTEGER NOT NULL, " +
+        "status_code INTEGER NOT NULL, status_msg TEXT, " +
+        "attrs_json TEXT, events_json TEXT, links_json TEXT, " +
+        "resource_json TEXT, scope_name TEXT, scope_version TEXT)";
+
+    private const string SqlCreateLogs =
+        "CREATE TABLE IF NOT EXISTS heim_logs (" +
+        "ts_unix_nano INTEGER NOT NULL, trace_id TEXT, span_id TEXT, " +
+        "severity INTEGER NOT NULL, severity_text TEXT, body TEXT, " +
+        "attrs_json TEXT, resource_json TEXT, scope_name TEXT, scope_version TEXT)";
+
+    private const string SqlCreateMetrics =
+        "CREATE TABLE IF NOT EXISTS heim_metrics (" +
+        "name TEXT NOT NULL, unit TEXT, type INTEGER NOT NULL, temporality INTEGER NOT NULL, ts_unix_nano INTEGER NOT NULL, " +
+        "value REAL NOT NULL, count INTEGER, sum REAL, min REAL, max REAL, " +
+        "bucket_counts_json TEXT, explicit_bounds_json TEXT, " +
+        "attrs_json TEXT, resource_json TEXT, scope_name TEXT, scope_version TEXT)";
+
+    private const string SqlInsertSpan =
+        "INSERT INTO heim_spans (trace_id, span_id, parent_id, name, kind, " +
+        "start_unix_nano, end_unix_nano, duration_ns, status_code, status_msg, " +
+        "attrs_json, events_json, links_json, resource_json, scope_name, scope_version) " +
+        "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15)";
+
+    private const string SqlInsertLog =
+        "INSERT INTO heim_logs (ts_unix_nano, trace_id, span_id, severity, severity_text, body, " +
+        "attrs_json, resource_json, scope_name, scope_version) " +
+        "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9)";
+
+    private const string SqlInsertMetric =
+        "INSERT INTO heim_metrics (name, unit, type, temporality, ts_unix_nano, " +
+        "value, count, sum, min, max, bucket_counts_json, explicit_bounds_json, " +
+        "attrs_json, resource_json, scope_name, scope_version) " +
+        "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15)";
+}

@@ -1,0 +1,38 @@
+@* Import-Seite: Grafana-Dashboard-JSON per Datei-Upload ODER Paste-Textarea
+   hochladen (POST /dashboards/import). Nach dem Import Redirect zur View-Seite. *@
+@inject IGrafanaDashboardStore Store
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Dashboard importieren" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <h1>Dashboard importieren</h1>
+    <p class="hmd-dim">Ein exportiertes Grafana-Dashboard-JSON (mit Prometheus/PromQL-Panels) hochladen. Heimdall wertet die Panel-Ausdrücke über die eigene PromQL-Engine aus und rendert sie server-seitig.</p>
+
+    <form class="hmd-filters" method="post" action="@(BasePath + "/dashboards/import")" enctype="multipart/form-data">
+        <label>Datei
+            <input type="file" name="file" accept="application/json,.json" />
+        </label>
+        <label style="flex-basis:100%">… oder JSON direkt einfügen
+            <textarea name="json" rows="12" placeholder='{ "title": "...", "panels": [...] }'></textarea>
+        </label>
+        <button type="submit">Importieren</button>
+        <a class="hmd-btn" href="@(BasePath + "/dashboards")">Abbrechen</a>
+    </form>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <p class="hmd-empty hmd-err-text">@_error</p>
+    }
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string? Error { get; set; }
+    private string _error = string.Empty;
+    protected override void OnParametersSet() => _error = Error ?? string.Empty;
+}

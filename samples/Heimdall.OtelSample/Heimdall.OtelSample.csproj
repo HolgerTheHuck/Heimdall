@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Heimdall.OtelSample</RootNamespace>
+    <AssemblyName>Heimdall.OtelSample</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Heimdall eingebettet: Dashboard-UI + PromQL-Engine + Grafana-Renderer
+         (Heimdall.Blazor), SQLite-Backend (Sink+Query), in-process OTel-Exporter
+         (Heimdall.Sdk) + ASP.NET-Core-Span-Enrichment (Heimdall.AspNetCore). -->
+    <ProjectReference Include="..\..\src\Heimdall.Blazor\Heimdall.Blazor.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.Sdk\Heimdall.Sdk.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.Storage.SQLite\Heimdall.Storage.SQLite.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.AspNetCore\Heimdall.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- OTel-SDK: AspNetCore-Server-Spans + HttpClient-Spans (Traffic-Seeder) +
+         Hosting-Integration (WithTracing/WithMetrics/WithLogging). Exportiert via
+         Heimdall.Sdk direkt in den SQLite-Sink — ohne OTLP/Collector. -->
+    <PackageReference Include="OpenTelemetry" Version="1.16.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.16.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.9.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.9.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Runtime" Version="1.16.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Das otel-dotnet-webapi-Dashboard (gnetId 20568) wird ins Ausgabeverzeichnis
+         kopiert und vom dateibasierten Dashboard-Store unter
+         /otel/dashboards/otel-dotnet-webapi gerendert. -->
+    <None Include="dashboards\**\*" CopyToOutputDirectory="PreserveNewest" Link="dashboards\%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

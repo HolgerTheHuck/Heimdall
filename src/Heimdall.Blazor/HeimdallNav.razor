@@ -1,0 +1,44 @@
+@* Navigationsleiste (sticky). BasePath ist das Praefix, unter dem das Dashboard haengt.
+   Der aktive Tab wird ueber den Request-Pfad markiert (aria-current="page") — via
+   HttpContext, das im statischen SSR als CascadingParameter verfuegbar ist. "@"
+   rendert aria-current nur bei dem Tab, dessen Pfad zum aktuellen Request passt. *@
+<header class="hmd-nav">
+    <a class="hmd-brand" href="@BasePath">⌖ Heimdall</a>
+    <nav class="hmd-tabs" aria-label="Hauptnavigation">
+        <a href="@BasePath" aria-current="@Active("")">Übersicht</a>
+        <a href="@(BasePath + "/dashboard")" aria-current="@Active("/dashboard")">Dashboard</a>
+        <a href="@(BasePath + "/endpoints")" aria-current="@Active("/endpoints")">Endpoints</a>
+        <a href="@(BasePath + "/traces")" aria-current="@Active("/traces")">Traces</a>
+        <a href="@(BasePath + "/logs")" aria-current="@Active("/logs")">Logs</a>
+        <a href="@(BasePath + "/metrics")" aria-current="@Active("/metrics")">Metriken</a>
+        <a href="@(BasePath + "/dashboards")" aria-current="@Active("/dashboards")">Dashboards</a>
+        <a href="@(BasePath + "/alerts")" aria-current="@Active("/alerts")">Alerts</a>
+    </nav>
+</header>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+
+    // Statisches SSR: HttpContext als CascadingParameter; ohne Request (z. B.
+    // reiner Unit-Render ohne HTTP-Kontext) null → keine Markierung (graceful).
+    [Microsoft.AspNetCore.Components.CascadingParameter]
+    public Microsoft.AspNetCore.Http.HttpContext? HttpContext { get; set; }
+
+    private string? _path;
+
+    protected override void OnInitialized()
+        => _path = HttpContext?.Request.Path.Value ?? null;
+
+    /// <summary>
+    /// Liefert "page", wenn der Tab-Pfad der aktuelle Request-Pfad ist (Root-Tab:
+    /// exakt BasePath; Unterseiten: StartsWith). Sonst null (kein aria-current).
+    /// </summary>
+    private string? Active(string tabSuffix)
+    {
+        if (string.IsNullOrEmpty(_path)) return null;
+        var tabPath = BasePath + tabSuffix;
+        if (tabSuffix.Length == 0)
+            return _path == BasePath || _path == BasePath + "/" ? "page" : null;
+        return _path.StartsWith(tabPath + "/", StringComparison.Ordinal) || _path == tabPath ? "page" : null;
+    }
+}

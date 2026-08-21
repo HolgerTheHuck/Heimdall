@@ -1,0 +1,212 @@
+@* Controller/Endpoint-Drilldown (ASP.NET-WebAPI-Monitoring). Aggregiert die
+   Server-Spans im Zeitfenster per HeimdallEndpointAgg (Load, avg/min/max,
+   p50/p95/p99, Fehlerrate) auf drei Ebenen: Gesamt-API → Controller → Endpoint
+   (Action). Dimensions-Attribute liefert das Heimdall.AspNetCore-Plugin
+   (aspnetmvc.controller/action + http.route); fehlen sie, fällt die Aggregation
+   auf Route-Parsen zurück. Zwei Modi über [Parameter] Controller: Overview
+   (Controller==null) und Controller-Detail. Kein JS. *@
+@using System
+@using System.Globalization
+@using System.Collections.Generic
+@inject Heimdall.IHeimdallQuery Query
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Endpoints" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <h1>Endpoints</h1>
+    @if (string.IsNullOrEmpty(Controller))
+    {
+        <p class="hmd-dim">API-Übersicht über den Zeitraum „@_rangeLabel". Server-Spans=@_spans.Count.</p>
+    }
+    else
+    {
+        <p class="hmd-dim"><a class="hmd-back" href="@(BasePath + "/endpoints")">← alle Controller</a> · Controller „@Controller" · Server-Spans=@(_focusStat.Count).</p>
+    }
+
+    <form class="hmd-filters" method="get" action="@_formAction">
+        <label>Controller-Attr <input type="search" name="controllerAttr" value="@ControllerAttr" /></label>
+        <label>Action-Attr <input type="search" name="actionAttr" value="@ActionAttr" /></label>
+        <label>Route-Attr <input type="search" name="routeAttr" value="@RouteAttr" /></label>
+        <label>Limit <input type="number" name="limit" value="@Limit" min="1" max="20000" /></label>
+        <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
+        <button type="submit">Laden</button>
+    </form>
+
+    @if (_hasData)
+    {
+        <div class="hmd-kpi-row">
+            <HeimdallKpi Value="@(_focusStat.Count.ToString(CultureInfo.InvariantCulture))" Label="Aufrufe" Sub="@($"∅ {HeimdallCharting.FmtValue(_callsPerSec)}/s")" Tone="accent" />
+            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.AvgNs)" Label="∅ Antwortzeit" Sub="avg" Tone="ok" />
+            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.MinNs)" Label="min" Sub="Antwortzeit" Tone="ok" />
+            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.MaxNs)" Label="max" Sub="Antwortzeit" Tone="@_maxTone" />
+            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.P95)" Label="p95" Sub="Antwortzeit" Tone="@_p95Tone" />
+            <HeimdallKpi Value="@_errPct" Label="Fehlerrate" Sub="@($"Fehler {_focusStat.Errors}")" Tone="@_errTone" />
+        </div>
+
+        @if (string.IsNullOrEmpty(Controller))
+        {
+            <h2 class="hmd-subhead">Controller (@_rollup.Controllers.Count)</h2>
+            @if (_rollup.Controllers.Count == 0)
+            {
+                <p class="hmd-empty">Keine Controller im Zeitraum.</p>
+            }
+            else
+            {
+                <table class="hmd-table">
+                    <thead><tr><th>Controller</th><th>Aufrufe</th><th>∅/s</th><th>avg</th><th>min</th><th>max</th><th>p95</th><th>Fehler</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var c in _rollup.Controllers)
+                    {
+                        <tr>
+                            <td><a href="@(BasePath + "/endpoints/" + Uri.EscapeDataString(c.Controller))">@c.Controller</a></td>
+                            <td>@c.Count.ToString(CultureInfo.InvariantCulture)</td>
+                            <td>@HeimdallCharting.FmtValue(RatePerSec(c.Count))</td>
+                            <td>@HeimdallFmt.Dur((long)c.AvgNs)</td>
+                            <td>@HeimdallFmt.Dur((long)c.MinNs)</td>
+                            <td>@HeimdallFmt.Dur((long)c.MaxNs)</td>
+                            <td>@HeimdallFmt.Dur((long)c.P95)</td>
+                            <td>@ErrPct(c)</td>
+                            <td><a href="@(BasePath + "/endpoints/" + Uri.EscapeDataString(c.Controller))">→</a></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        }
+        else
+        {
+            var eps = _controllerEndpoints;
+            <h2 class="hmd-subhead">Endpoints / Actions (@eps.Count)</h2>
+            @if (eps.Count == 0)
+            {
+                <p class="hmd-empty">Keine Endpoints für Controller „@Controller" im Zeitraum.</p>
+            }
+            else
+            {
+                <table class="hmd-table">
+                    <thead><tr><th>Action</th><th>Route</th><th>Aufrufe</th><th>avg</th><th>min</th><th>max</th><th>p50</th><th>p95</th><th>p99</th><th>Fehler</th><th></th></tr></thead>
+                    <tbody>
+                    @foreach (var e in eps)
+                    {
+                        <tr class="@(e.Errors > 0 ? "hmd-err" : "")">
+                            <td>@e.Action</td>
+                            <td class="hmd-mono">@(string.IsNullOrEmpty(e.Route) ? "—" : e.Route)</td>
+                            <td>@e.Count.ToString(CultureInfo.InvariantCulture)</td>
+                            <td>@HeimdallFmt.Dur((long)e.AvgNs)</td>
+                            <td>@HeimdallFmt.Dur((long)e.MinNs)</td>
+                            <td>@HeimdallFmt.Dur((long)e.MaxNs)</td>
+                            <td>@HeimdallFmt.Dur((long)e.P50)</td>
+                            <td>@HeimdallFmt.Dur((long)e.P95)</td>
+                            <td>@HeimdallFmt.Dur((long)e.P99)</td>
+                            <td>@ErrPct(e)</td>
+                            <td><a href="@(BasePath + "?nameContains=" + Uri.EscapeDataString(string.IsNullOrEmpty(e.Route) ? e.Action : e.Route))">trace →</a></td>
+                        </tr>
+                    }
+                    </tbody>
+                </table>
+            }
+        }
+    }
+    else
+    {
+        <p class="hmd-empty">Keine Server-Spans im Zeitraum (Limit=@Limit). Attribut-Namen prüfen oder Zeitraum vergrößern.</p>
+    }
+
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string? Controller { get; set; }
+    [Parameter] public string ControllerAttr { get; set; } = HeimdallEndpointAgg.DefaultControllerAttr;
+    [Parameter] public string ActionAttr { get; set; } = HeimdallEndpointAgg.DefaultActionAttr;
+    [Parameter] public string RouteAttr { get; set; } = HeimdallEndpointAgg.DefaultRouteAttr;
+    [Parameter] public int Limit { get; set; } = 5000;
+    [Parameter] public string? Preset { get; set; }
+    [Parameter] public long? From { get; set; }
+    [Parameter] public long? To { get; set; }
+
+    private List<Heimdall.SpanRow> _spans = new();
+    private EndpointRollup _rollup = new(new EndpointStat("", "", "", 0, 0, 0, 0, 0, 0, 0, 0),
+        new List<EndpointStat>(), new Dictionary<string, IReadOnlyList<EndpointStat>>());
+    private IReadOnlyList<EndpointStat> _controllerEndpoints = new List<EndpointStat>();
+    private EndpointStat _focusStat = new("", "", "", 0, 0, 0, 0, 0, 0, 0, 0);
+    private bool _hasData;
+    private string _rangeLabel = "—";
+    private string _formAction = "/otel/endpoints";
+    private long _windowNs;
+    private double _callsPerSec;
+
+    private string _errPct = "0 %";
+    private string _errTone = "ok";
+    private string _p95Tone = "ok";
+    private string _maxTone = "ok";
+
+    protected override void OnInitialized()
+    {
+        int lim = Limit < 1 ? 5000 : (Limit > 20000 ? 20000 : Limit);
+        var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano(), fallbackPreset: "24h");
+        _rangeLabel = RangeLabel(Preset, From, To);
+        _formAction = BasePath + (string.IsNullOrEmpty(Controller) ? "/endpoints" : "/endpoints/" + Uri.EscapeDataString(Controller));
+
+        // Server-Spans im Zeitfenster (Kind=Server); Aggregation in der App.
+        _spans = new List<Heimdall.SpanRow>(
+            Query.ListSpans(new Heimdall.SpanFilter
+            {
+                FromUnixNano = range.From,
+                ToUnixNano = range.To,
+                Kind = (int)Heimdall.HSpanKind.Server,
+                Limit = lim,
+            }));
+        _windowNs = (range.From is not null && range.To is not null) ? Math.Max(1, range.To.Value - range.From.Value) : 0;
+
+        _rollup = HeimdallEndpointAgg.Aggregate(_spans, ControllerAttr, ActionAttr, RouteAttr);
+        _hasData = _rollup.Overall.Count > 0;
+
+        // Fokus-Stat: Overall im Overview-Modus, sonst der gewählte Controller.
+        if (string.IsNullOrEmpty(Controller))
+        {
+            _focusStat = _rollup.Overall;
+            _controllerEndpoints = new List<EndpointStat>();
+        }
+        else
+        {
+            _focusStat = new EndpointStat(Controller, "", "", 0, 0, 0, 0, 0, 0, 0, 0);
+            foreach (var c in _rollup.Controllers)
+                if (c.Controller == Controller) { _focusStat = c; break; }
+            _rollup.EndpointsByController.TryGetValue(Controller, out var eps);
+            _controllerEndpoints = eps ?? new List<EndpointStat>();
+        }
+
+        _callsPerSec = RatePerSec(_focusStat.Count);
+        _errPct = ErrPct(_focusStat);
+        // Tones: Fehler rot ab 5 %, gelb ab 1 %; p95 rot ab 1 s, gelb ab 200 ms; max rot ab 2 s, gelb ab 1 s.
+        double er = _focusStat.Count > 0 ? (double)_focusStat.Errors / _focusStat.Count : 0;
+        _errTone = er >= 0.05 ? "err" : er >= 0.01 ? "warn" : "ok";
+        _p95Tone = _focusStat.P95 >= 1_000_000_000 ? "err" : _focusStat.P95 >= 200_000_000 ? "warn" : "ok";
+        _maxTone = _focusStat.MaxNs >= 2_000_000_000 ? "err" : _focusStat.MaxNs >= 1_000_000_000 ? "warn" : "ok";
+    }
+
+    private double RatePerSec(long count) => _windowNs > 0 ? count / (_windowNs / 1_000_000_000.0) : 0;
+
+    private static string ErrPct(EndpointStat s)
+    {
+        if (s.Count <= 0) return "0 %";
+        double p = (double)s.Errors / s.Count * 100.0;
+        return p.ToString("0.##", CultureInfo.InvariantCulture) + " %";
+    }
+
+    private static string RangeLabel(string? preset, long? from, long? to)
+    {
+        if (from is not null || to is not null)
+            return $"von {(from?.ToString(CultureInfo.InvariantCulture) ?? "—")} bis {(to?.ToString(CultureInfo.InvariantCulture) ?? "—")} ns";
+        var key = string.IsNullOrWhiteSpace(preset) ? "24h" : preset;
+        var p = HeimdallRange.Presets.FirstOrDefault(x => x.Key == key);
+        return p?.Label ?? key;
+    }
+}

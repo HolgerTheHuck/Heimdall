@@ -1,0 +1,152 @@
+{
+  "title": "Heimdall Overview (RED + Application Metrics)",
+  "uid": "heimdall-overview",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["heimdall", "red", "otel"],
+  "time": { "from": "now-1h", "to": "now" },
+  "refresh": "10s",
+  "templating": {
+    "list": [
+      {
+        "name": "DS_HEIMDALL",
+        "label": "Heimdall (Prometheus)",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": { "text": "", "value": "" },
+        "hide": 0,
+        "includeAll": false,
+        "multi": false
+      },
+      {
+        "name": "job",
+        "label": "Service (job)",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_HEIMDALL}" },
+        "query": "label_values(http_requests_total, job)",
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "multi": true
+      },
+      {
+        "name": "http_route",
+        "label": "HTTP Route",
+        "type": "query",
+        "datasource": { "type": "prometheus", "uid": "${DS_HEIMDALL}" },
+        "query": "label_values(http_requests_total{job=~\"$job\"}, http_route)",
+        "current": { "text": "All", "value": "$__all" },
+        "includeAll": true,
+        "multi": true
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Requests / s (gesamt)",
+      "gridPos": { "h": 4, "w": 4, "x": 0, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_HEIMDALL}" },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{job=~\"$job\",http_route=~\"$http_route\"}[5m]))", "legendFormat": "rps", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "thresholds": { "mode": "absolute", "steps": [{ "color": "green" }, { "color": "yellow", "value": 50 }, { "color": "red", "value": 200 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] }, "orientation": "auto" }
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Fehler-Rate %",
+      "gridPos": { "h": 4, "w": 4, "x": 4, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_HEIMDALL}" },
+      "targets": [
+        { "expr": "sum(rate(http_requests_total{job=~\"$job\",http_response_status_code=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total{job=~\"$job\"}[5m])), 1) * 100", "legendFormat": "err%", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "thresholds": { "mode": "absolute", "steps": [{ "color": "green" }, { "color": "yellow", "value": 1 }, { "color": "red", "value": 5 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "p95 Latenz (s)",
+      "gridPos": { "h": 4, "w": 4, "x": 8, "y": 0 },
+      "datasource": { "type": "prometheus", "uid": "${DS_HEIMDALL}" },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=~\"$job\",http_route=~\"$http_route\"}[5m])))", "legendFormat": "p95", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "thresholds": { "mode": "absolute", "steps": [{ "color": "green" }, { "color": "yellow", "value": 0.25 }, { "color": "red", "value": 1 }] } }, "overrides": [] },
+      "options": { "reduceOptions": { "calcs": ["lastNotNull"] } }
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "Requests / s nach Route",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_HEIMDALL}" },
+      "targets": [
+        { "expr": "sum by (http_route) (rate(http_requests_total{job=~\"$job\",http_route=~\"$http_route\"}[5m]))", "legendFormat": "{{http_route}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "reqps", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Fehler-Rate % nach Route",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 4 },
+      "datasource": { "type": "prometheus", "uid": "${DS_HEIMDALL}" },
+      "targets": [
+        { "expr": "sum by (http_route) (rate(http_requests_total{job=~\"$job\",http_response_status_code=~\"5..\"}[5m])) / clamp_min(sum by (http_route) (rate(http_requests_total{job=~\"$job\"}[5m])), 1) * 100", "legendFormat": "{{http_route}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "percent", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Latenz-Perzentile (p50 / p95 / p99)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_HEIMDALL}" },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum by (le) (rate(http_request_duration_seconds_bucket{job=~\"$job\",http_route=~\"$http_route\"}[5m])))", "legendFormat": "p50", "refId": "A" },
+        { "expr": "histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job=~\"$job\",http_route=~\"$http_route\"}[5m])))", "legendFormat": "p95", "refId": "B" },
+        { "expr": "histogram_quantile(0.99, sum by (le) (rate(http_request_duration_seconds_bucket{job=~\"$job\",http_route=~\"$http_route\"}[5m])))", "legendFormat": "p99", "refId": "C" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 5 } }, "overrides": [] }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Latenz p95 nach Route",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 12 },
+      "datasource": { "type": "prometheus", "uid": "${DS_HEIMDALL}" },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum by (le, http_route) (rate(http_request_duration_seconds_bucket{job=~\"$job\",http_route=~\"$http_route\"}[5m])))", "legendFormat": "{{http_route}}", "refId": "A" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "s", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Orders / s (region)",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_HEIMDALL}" },
+      "targets": [
+        { "expr": "sum by (region) (rate(orders_total[5m]))", "legendFormat": "{{region}}", "refId": "A" },
+        { "expr": "sum by (region) (rate(orders_errors_total[5m]))", "legendFormat": "errors {{region}}", "refId": "B" }
+      ],
+      "fieldConfig": { "defaults": { "unit": "ops", "custom": { "drawStyle": "line", "lineInterpolation": "smooth", "fillOpacity": 10 } }, "overrides": [] }
+    },
+    {
+      "id": 9,
+      "type": "table",
+      "title": "Top-Routen nach Requests / s",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 20 },
+      "datasource": { "type": "prometheus", "uid": "${DS_HEIMDALL}" },
+      "targets": [
+        { "expr": "topk(10, sum by (http_route) (rate(http_requests_total{job=~\"$job\",http_route=~\"$http_route\"}[5m])))", "legendFormat": "{{http_route}}", "refId": "A", "instant": true, "format": "table" }
+      ],
+      "transformations": [
+        { "id": "organize", "options": { "excludeByName": { "Time": true }, "renameByName": { "Value": "req/s", "http_route": "Route" } } }
+      ]
+    }
+  ]
+}

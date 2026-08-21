@@ -1,0 +1,120 @@
+using System;
+using System.IO;
+using System.Text;
+using System.Threading.Tasks;
+using Google.Protobuf;
+using Heimdall;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
+
+namespace Heimdall.Otlp;
+
+/// <summary>
+/// Mappt den OTLP/HTTP-Empfänger unter ein Präfix (Default <c>/otel</c>), sodass die
+/// Collector-Endpunkte <c>{prefix}/v1/traces|metrics|logs</c> entstehen. Akzeptiert
+/// sowohl <c>application/x-protobuf</c> als auch <c>application/json</c> (OTLP/HTTP-
+/// JSON); beide Parser landen im selben Proto-Typ → ein <see cref="OtlpConvert"/>.
+/// Antwort ist eine leere <c>Export{...}ServiceResponse</c> im angeforderten Format
+/// (Collector-kompatibel). Schreibt über <see cref="IHeimdallSink"/> aus DI.
+///
+/// Aufruf im Host:
+/// <code>
+/// app.MapHeimdallOtlp("/otel");   // → POST /otel/v1/traces, /v1/metrics, /v1/logs
+/// </code>
+/// </summary>
+public static class OtlpEndpointExtensions
+{
+    /// <summary>
+    /// Mappt <c>POST {prefix}/v1/traces|metrics|logs</c> als OTLP/HTTP-Empfänger, der
+    /// eintreffende Spans/Logs/Metriken (Protobuf oder JSON) über <see cref="OtlpConvert"/>
+    /// in den <see cref="IHeimdallSink"/> aus DI schreibt. <paramref name="prefix"/>
+    /// ist per Default <c>/otel</c> (parallel zum Dashboard-Mount).
+    /// </summary>
+    public static IEndpointConventionBuilder MapHeimdallOtlp(this IEndpointRouteBuilder endpoints, string prefix = "/otel")
+    {
+        var group = endpoints.MapGroup(prefix);
+        group.MapPost("/v1/traces", (HttpContext ctx, IHeimdallSink sink) => TraceHandler(ctx, sink));
+        group.MapPost("/v1/metrics", (HttpContext ctx, IHeimdallSink sink) => MetricsHandler(ctx, sink));
+        group.MapPost("/v1/logs", (HttpContext ctx, IHeimdallSink sink) => LogsHandler(ctx, sink));
+        return group;
+    }
+
+    private static async Task<IResult> TraceHandler(HttpContext ctx, IHeimdallSink sink)
+    {
+        var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Trace.V1.ExportTraceServiceRequest.Parser);
+        if (req is null) return Results.BadRequest();
+        try
+        {
+            var spans = OtlpConvert.ToSpans(req);
+            if (spans.Count > 0) sink.WriteSpans(spans);
+        }
+        catch { return Results.BadRequest(); }
+        return Respond(ctx, new OpenTelemetry.Proto.Collector.Trace.V1.ExportTraceServiceResponse());
+    }
+
+    private static async Task<IResult> LogsHandler(HttpContext ctx, IHeimdallSink sink)
+    {
+        var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Logs.V1.ExportLogsServiceRequest.Parser);
+        if (req is null) return Results.BadRequest();
+        try
+        {
+            var logs = OtlpConvert.ToLogs(req);
+            if (logs.Count > 0) sink.WriteLogs(logs);
+        }
+        catch { return Results.BadRequest(); }
+        return Respond(ctx, new OpenTelemetry.Proto.Collector.Logs.V1.ExportLogsServiceResponse());
+    }
+
+    private static async Task<IResult> MetricsHandler(HttpContext ctx, IHeimdallSink sink)
+    {
+        var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceRequest.Parser);
+        if (req is null) return Results.BadRequest();
+        try
+        {
+            var metrics = OtlpConvert.ToMetrics(req);
+            if (metrics.Count > 0) sink.WriteMetrics(metrics);
+        }
+        catch { return Results.BadRequest(); }
+        return Respond(ctx, new OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceResponse());
+    }
+
+    /// <summary>
+    /// Parst den Body je nach Content-Type als Protobuf (<c>MessageParser</c>) oder
+    /// JSON (<c>JsonParser</c>). Liefert null bei Lese-/Parse-Fehler → Aufrufer liefert 400.
+    /// </summary>
+    private static async Task<TReq?> ParseAsync<TReq>(HttpContext ctx, MessageParser<TReq> parser)
+        where TReq : class, IMessage<TReq>, new()
+    {
+        var ct = ctx.Request.ContentType ?? string.Empty;
+        try
+        {
+            if (ct.Contains("json", StringComparison.OrdinalIgnoreCase))
+            {
+                using var reader = new StreamReader(ctx.Request.Body, leaveOpen: true);
+                var json = await reader.ReadToEndAsync();
+                if (string.IsNullOrWhiteSpace(json)) return null;
+                return JsonParser.Default.Parse<TReq>(json);
+            }
+            // Google.Protobuf bietet nur ParseFrom(Stream) (synchron). Der Request-Body ist
+            // unter Kestrel/TestServer default synchron-IO-gesperrt (AllowSynchronousIO=false)
+            // → erst async in einen MemoryStream kopieren, dann synchron parsen (MemStream-
+            // Sync-IO ist erlaubt). Sonst wirft ParseFrom → catch → BadRequest (OTLP/Protobuf
+            // wäre unter Default-Config unbrauchbar).
+            await using var ms = new MemoryStream();
+            await ctx.Request.Body.CopyToAsync(ms);
+            ms.Position = 0;
+            return parser.ParseFrom(ms);
+        }
+        catch { return null; }
+    }
+
+    /// <summary>Leere Response im angeforderten Format (Collector-kompatibel).</summary>
+    private static IResult Respond(HttpContext ctx, IMessage resp)
+    {
+        var ct = ctx.Request.ContentType ?? string.Empty;
+        if (ct.Contains("json", StringComparison.OrdinalIgnoreCase))
+            return Results.Text(JsonFormatter.Default.Format(resp), "application/json", Encoding.UTF8);
+        return Results.Bytes(resp.ToByteArray(), "application/x-protobuf");
+    }
+}

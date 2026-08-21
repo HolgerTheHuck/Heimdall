@@ -1,0 +1,32 @@
+@* Server-gerendertes SVG-Balkendiagramm fuer eine Histogramm-Bucket-Verteilung (kein JS).
+   counts.Length == bounds.Length + 1 (letzter Bucket = +Inf). SVG-Markup via
+   HeimdallCharting.RenderHistSvg + MarkupString. *@
+@using System.Collections.Generic
+
+@if (string.IsNullOrEmpty(_svg))
+{
+    <p class="hmd-empty">Keine Buckets.</p>
+}
+else
+{
+    <figure class="hmd-chart-wrap">
+        @((MarkupString)_svg)
+        <figcaption class="hmd-chart-unit">Buckets (Anzahl pro Schranke)</figcaption>
+    </figure>
+}
+
+@code {
+    [Parameter] public IReadOnlyList<long> BucketCounts { get; set; } = Array.Empty<long>();
+    [Parameter] public IReadOnlyList<double> ExplicitBounds { get; set; } = Array.Empty<double>();
+    [Parameter] public string? Unit { get; set; }
+    [Parameter] public int Width { get; set; } = 800;
+    [Parameter] public int Height { get; set; } = 200;
+
+    private string _svg = string.Empty;
+
+    protected override void OnParametersSet()
+    {
+        if (BucketCounts is null || BucketCounts.Count == 0) { _svg = string.Empty; return; }
+        _svg = HeimdallCharting.RenderHistSvg(BucketCounts, ExplicitBounds ?? Array.Empty<double>(), Width, Height);
+    }
+}

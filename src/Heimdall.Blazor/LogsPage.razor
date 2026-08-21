@@ -1,0 +1,132 @@
+@* Logs-Suche: LogQL-Suchfeld (index-gestuetzte Feldfilter {k=v} + Body-Freitext
+   |= "t") UND klassisches Text-Feld (Body-Freitext, BC fuer Deep-Links), Severity-
+   Filter + konfigurierbarer Zeitraum, server-gerendert. LogQl.Parse zerlegt das
+   q-Feld in Stream-Selector (-> AttrFilters) + Zeilenfilter (-> Body-Text);
+   q hat Vorrang, text ist Fallback. TraceId-Spalte ist Link aufs Trace-Detail.
+   Zeilen-Rendering in HeimdallLogRow ausgelagert. Kein JS. *@
+@using System.Collections.Generic
+@using Heimdall.Blazor.Grafana
+@inject Heimdall.IHeimdallQuery Query
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Logs" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main hmd-main-wide">
+    <h1>Logs</h1>
+
+    <form class="hmd-filters" method="get" action="@(BasePath + "/logs")">
+        <label class="hmd-logq">Suche <input type="search" name="q" value="@Query1" placeholder="{service.name=\"shop\"} |= \"timeout\"" /></label>
+        <label>Text <input type="search" name="text" value="@Text" placeholder="timeout" /></label>
+        <label>Min. Severity
+            <select name="sev">
+                <option value="" selected="@(MinSeverity is null)">alle</option>
+                <option value="9"  selected="@(MinSeverity == 9)">INFO+</option>
+                <option value="13" selected="@(MinSeverity == 13)">WARN+</option>
+                <option value="17" selected="@(MinSeverity == 17)">ERROR+</option>
+                <option value="21" selected="@(MinSeverity == 21)">FATAL</option>
+            </select>
+        </label>
+        <label>Limit <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
+        <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
+        <button type="submit">Suchen</button>
+        <label class="hmd-inline-chk"><input type="checkbox" name="expand" value="1" checked="@Expand" /> alle aufklappen</label>
+    </form>
+    <p class="hmd-dim hmd-logq-hint">Syntax: <code>{schlüssel="wert"}</code> Feldfilter (index-gestützt, auch Resource-Attribute wie <code>service.name</code>) · <code>|= "text"</code> Body-Volltext · mehrere Filter kommasepariert · Operatoren <code>= != =~ !~</code>.</p>
+
+    @if (_logs.Count == 0)
+    {
+        <section class="hmd-empty-state">
+            <h2>Keine Logs gefunden</h2>
+            <p>Im gewählten Zeitraum liegen keine Logs vor. Suchtext entfernen, Severity-Filter lockern oder Telemetrie senden.</p>
+            <p class="hmd-dim">OTLP/HTTP <code>POST @BasePath/v1/logs</code> · gRPC <code>localhost:4317</code> · zurück zur <a href="@BasePath">Übersicht</a></p>
+        </section>
+    }
+    else
+    {
+        <table class="hmd-table hmd-logs">
+            <thead><tr><th class="hmd-col-ts">Zeit</th><th class="hmd-col-sev">Sev</th><th>Body</th><th class="hmd-col-trace">Trace</th></tr></thead>
+            <tbody>
+            @foreach (var l in _logs)
+            {
+                <HeimdallLogRow Log="@l" BasePath="@BasePath" Expand="@Expand" />
+            }
+            </tbody>
+        </table>
+    }
+    <p class="hmd-count">@_logs.Count Log(s) · @Query.CountLogs() gesamt</p>
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+
+<script>
+// Ganze Zeile klappt den Log auf/zu (Progressive Enhancement). Klick auf einen
+// Link (Trace-Detail) und Textauswahl werden nicht als Toggle gewertet; ohne
+// JS bleibt der native <summary>-Toggle der <details>-Zelle nutzbar.
+(function () {
+    var table = document.querySelector('table.hmd-logs');
+    if (!table) return;
+    table.addEventListener('click', function (e) {
+        if (e.target.closest('a')) return;
+        var tr = e.target.closest('tbody tr');
+        if (!tr) return;
+        var d = tr.querySelector('details.hmd-log-details');
+        if (!d) return;
+        var sel = window.getSelection && window.getSelection();
+        if (sel && !sel.isCollapsed) return;   // Textauswahl nicht als Toggle
+        e.preventDefault();                    // native summary-Schaltung unterbinden
+        d.open = !d.open;
+    });
+})();
+</script>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string? Text { get; set; }
+    // LogQL-Suchfeld (Vorrang vor Text): {k=v} |= "t" -> AttrFilters + Body-Text.
+    [Parameter] public string? Query1 { get; set; }
+    [Parameter] public int? MinSeverity { get; set; }
+    [Parameter] public int Limit { get; set; } = 200;
+    [Parameter] public bool Expand { get; set; }
+    [Parameter] public string? Preset { get; set; }
+    [Parameter] public long? From { get; set; }
+    [Parameter] public long? To { get; set; }
+
+    private List<Heimdall.LogRow> _logs = new();
+
+    protected override void OnInitialized()
+    {
+        var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano());
+
+        string? body = string.IsNullOrWhiteSpace(Text) ? null : Text;
+        List<Heimdall.AttrFilter>? attrFilters = null;
+
+        // LogQL-Suchfeld zerlegen: Stream-Selector -> AttrFilters, Zeilenfilter -> Body-Text.
+        if (!string.IsNullOrWhiteSpace(Query1))
+        {
+            var ql = LogQl.Parse(Query1);
+            if (ql.Stream.Count > 0)
+            {
+                attrFilters = new List<Heimdall.AttrFilter>(ql.Stream.Count);
+                foreach (var m in ql.Stream)
+                    attrFilters.Add(new Heimdall.AttrFilter(m.Key, m.Op, m.Value));
+            }
+            // Erstes nicht-leeres |= / |~ als Body-Volltext (wie GrafanaPanelRenderer).
+            foreach (var f in ql.Lines)
+                if ((f.Op == "|=" || f.Op == "|~") && !string.IsNullOrEmpty(f.Value)) { body = f.Value; break; }
+        }
+
+        var s = new Heimdall.LogSearch
+        {
+            Text = body,
+            MinSeverity = MinSeverity,
+            FromUnixNano = range.From,
+            ToUnixNano = range.To,
+            AttrFilters = attrFilters,
+            Limit = Limit < 1 ? 200 : Limit,
+        };
+        _logs = new List<Heimdall.LogRow>(Query.SearchLogs(s));
+    }
+}

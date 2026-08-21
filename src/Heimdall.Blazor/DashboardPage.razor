@@ -1,0 +1,250 @@
+@* Verbundenes Monitoring über einen konfigurierbaren Zeitraum: Load (calls/s),
+   Errorrate, Uptime, Spitzenlast und Antwortzeiten (p50/p95/p99 aus dem
+   http.server.request.duration-Histogramm) als KPIs; dazu Linien (calls/s, Errorrate,
+   p50/p95/p99 über die Zeit) und kompakte Panels „Logs im Zeitraum" (mit TraceId-Link)
+   und „Traces im Zeitraum" (Link → Detail). Da alles über OTel kommt, sind Logs und
+   Traces über die Trace-ID verbunden. Pure C#-Aggregation auf bestehenden
+   MetricSeries/TraceFilter/LogSearch — keine neue Backend-Query. Kein JS. *@
+@using System.Globalization
+@using System.Collections.Generic
+@inject Heimdall.IHeimdallQuery Query
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Dashboard" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <h1>Dashboard</h1>
+    <p class="hmd-dim">Monitoring über den Zeitraum „@_rangeLabel". Requests=@Requests, Errors=@Errors, Latenz=@Duration.</p>
+
+    <form class="hmd-filters" method="get" action="@(BasePath + "/dashboard")">
+        <label>Requests <input type="search" name="requests" value="@Requests" /></label>
+        <label>Errors <input type="search" name="errors" value="@Errors" /></label>
+        <label>Latenz-Metrik <input type="search" name="duration" value="@Duration" /></label>
+        <label>Limit <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
+        <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
+        <button type="submit">Laden</button>
+    </form>
+
+    @if (_hasData)
+    {
+        <div class="hmd-kpi-row">
+            <HeimdallKpi Value="@_callsPerSec" Label="calls/s aktuell" Sub="@($"∅ {HeimdallCharting.FmtValue(HeimdallSeries.Mean(_reqRate))}/s")" Tone="accent" />
+            <HeimdallKpi Value="@_peak" Label="Spitzenlast" Sub="max calls/s" Tone="warn" />
+            <HeimdallKpi Value="@_errRatePct" Label="Errorrate" Sub="@($"gesamt {HeimdallCharting.FmtValue(_totalErr)}")" Tone="@_errTone" />
+            <HeimdallKpi Value="@_uptimePct" Label="Uptime" Sub="@($" Calls {HeimdallCharting.FmtValue(_totalReq)}")" Tone="@_upTone" />
+            <HeimdallKpi Value="@_p50Str" Label="p50" Sub="Antwortzeit" Tone="ok" />
+            <HeimdallKpi Value="@_p95Str" Label="p95" Sub="Antwortzeit" Tone="@_p95Tone" />
+            <HeimdallKpi Value="@_p99Str" Label="p99" Sub="Antwortzeit" Tone="ok" />
+        </div>
+
+        <h2 class="hmd-subhead">Aufrufe pro Sekunde (calls/s)</h2>
+        <HeimdallChart Series="@_callsChart" Unit="calls/s" AriaLabel="Aufrufe pro Sekunde" />
+
+        <h2 class="hmd-subhead">Errorrate</h2>
+        <HeimdallChart Series="@_errChart" Unit="%" AriaLabel="Errorrate" />
+
+        @if (_latencyChart.Count > 0)
+        {
+            <h2 class="hmd-subhead">Antwortzeiten (p50 / p95 / p99)</h2>
+            <HeimdallChart Series="@_latencyChart" Unit="s" AriaLabel="Antwortzeiten Quantile" Height="240" />
+        }
+        else
+        {
+            <p class="hmd-empty">Keine Latenz-Histogramm-Punkte für „@Duration" — p50/p95/p99 nicht verfügbar.</p>
+        }
+
+        <div class="hmd-panels">
+            <section class="hmd-panel">
+                <h2 class="hmd-subhead">Logs im Zeitraum (@_logs.Count)</h2>
+                @if (_logs.Count == 0)
+                {
+                    <p class="hmd-empty">Keine Logs im Zeitraum.</p>
+                }
+                else
+                {
+                    <table class="hmd-table hmd-logs">
+                        <thead><tr><th class="hmd-col-ts">Zeit</th><th class="hmd-col-sev">Sev</th><th>Body</th><th class="hmd-col-trace">Trace</th></tr></thead>
+                        <tbody>
+                        @foreach (var l in _logs)
+                        {
+                            <HeimdallLogRow Log="@l" BasePath="@BasePath" Expand="@false" />
+                        }
+                        </tbody>
+                    </table>
+                }
+            </section>
+            <section class="hmd-panel">
+                <h2 class="hmd-subhead">Traces im Zeitraum (@_traces.Count)</h2>
+                @if (_traces.Count == 0)
+                {
+                    <p class="hmd-empty">Keine Traces im Zeitraum.</p>
+                }
+                else
+                {
+                    <table class="hmd-table hmd-dense">
+                        <thead><tr><th>Trace-ID</th><th>Start</th><th>Dauer</th><th>Spans</th><th>Status</th></tr></thead>
+                        <tbody>
+                        @foreach (var t in _traces)
+                        {
+                            <tr class="@(t.HasError ? "hmd-err" : "")">
+                                <td class="hmd-mono"><a href="@(BasePath + "/trace/" + t.TraceId)">@HeimdallFmt.Truncate(t.TraceId, 16)</a></td>
+                                <td>@HeimdallFmt.Ts(t.FirstStartUnixNano)</td>
+                                <td>@HeimdallFmt.Dur(t.DurationNs)</td>
+                                <td>@t.SpanCount</td>
+                                <td>@(t.HasError ? "✕" : "✓")</td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                }
+            </section>
+        </div>
+    }
+    else
+    {
+        <p class="hmd-empty">Keine Daten für „@Requests" / „@Errors" — bitte Counter-Namen anpassen.</p>
+    }
+
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string Requests { get; set; } = "orders";
+    [Parameter] public string Errors { get; set; } = "orders.errors";
+    [Parameter] public string Duration { get; set; } = "http.server.request.duration";
+    [Parameter] public int Limit { get; set; } = 500;
+    [Parameter] public string? Preset { get; set; }
+    [Parameter] public long? From { get; set; }
+    [Parameter] public long? To { get; set; }
+
+    private IReadOnlyList<(long T, double V)> _reqPts = Array.Empty<(long, double)>();
+    private IReadOnlyList<(long T, double V)> _errPts = Array.Empty<(long, double)>();
+    private IReadOnlyList<(long T, double R)> _reqRate = Array.Empty<(long, double)>();
+    private IReadOnlyList<(long T, double R)> _errRate = Array.Empty<(long, double)>();
+    private IReadOnlyList<(long T, double R)> _errRatio = Array.Empty<(long, double)>();
+    private IReadOnlyList<(long T, double V)> _p50Series = Array.Empty<(long, double)>();
+    private IReadOnlyList<(long T, double V)> _p95Series = Array.Empty<(long, double)>();
+    private IReadOnlyList<(long T, double V)> _p99Series = Array.Empty<(long, double)>();
+    private List<ChartSeries> _callsChart = new();
+    private List<ChartSeries> _errChart = new();
+    private List<ChartSeries> _latencyChart = new();
+    private List<Heimdall.LogRow> _logs = new();
+    private List<Heimdall.TraceSummary> _traces = new();
+    private bool _hasData;
+    private string _rangeLabel = "—";
+
+    private string _callsPerSec = "0";
+    private string _peak = "0";
+    private string _errRatePct = "0 %";
+    private string _uptimePct = "100 %";
+    private string _p50Str = "—";
+    private string _p95Str = "—";
+    private string _p99Str = "—";
+    private double _totalReq, _totalErr;
+    private string _errTone = "ok";
+    private string _upTone = "ok";
+    private string _p95Tone = "ok";
+
+    protected override void OnInitialized()
+    {
+        int lim = Limit < 1 ? 500 : Limit;
+        var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano(), fallbackPreset: "24h");
+        _rangeLabel = RangeLabel(Preset, From, To);
+
+        // Load + Errors aus den kumulativen Countern (bestehende Logik), im Zeitfenster.
+        _reqPts = HeimdallSeries.PointsFromMetric(Query.MetricSeries(Requests, range.From, range.To, lim));
+        _errPts = HeimdallSeries.PointsFromMetric(Query.MetricSeries(Errors, range.From, range.To, lim));
+
+        _reqRate = HeimdallSeries.Rate(_reqPts);
+        _errRate = HeimdallSeries.Rate(_errPts);
+        _errRatio = HeimdallSeries.ErrorRateSeries(_reqRate, _errRate);
+
+        if (_reqPts.Count > 0) _hasData = true;
+
+        // KPIs.
+        _totalReq = HeimdallSeries.Last(_reqPts);
+        _totalErr = HeimdallSeries.Last(_errPts);
+        double calls = _reqRate.Count > 0 ? HeimdallSeries.Last(_reqRate) : 0;
+        double peak = _reqRate.Count > 0 ? HeimdallSeries.Max(_reqRate) : 0;
+        double errRatioNow = _errRatio.Count > 0 ? HeimdallSeries.Last(_errRatio) : 0;
+        double uptime = HeimdallSeries.Uptime(_reqPts, _errPts);
+
+        _callsPerSec = HeimdallCharting.FmtValue(calls);
+        _peak = HeimdallCharting.FmtValue(peak);
+        _errRatePct = (errRatioNow * 100).ToString("0.##", CultureInfo.InvariantCulture) + " %";
+        _uptimePct = (uptime * 100).ToString("0.##", CultureInfo.InvariantCulture) + " %";
+
+        // Tone nach Schwellen: Errorrate rot ab 5 %, gelb ab 1 %; Uptime rot < 90 %, gelb < 99 %.
+        _errTone = errRatioNow >= 0.05 ? "err" : errRatioNow >= 0.01 ? "warn" : "ok";
+        _upTone = uptime < 0.90 ? "err" : uptime < 0.99 ? "warn" : "ok";
+
+        // Antwortzeiten aus dem Duration-Histogramm (p50/p95/p99) über LatencySeries.
+        var durRows = Query.MetricSeries(Duration, range.From, range.To, lim);
+        _p50Series = HeimdallSeries.LatencySeries(durRows, 0.50);
+        _p95Series = HeimdallSeries.LatencySeries(durRows, 0.95);
+        _p99Series = HeimdallSeries.LatencySeries(durRows, 0.99);
+        double p50 = _p50Series.Count > 0 ? HeimdallSeries.Last(_p50Series) : 0;
+        double p95 = _p95Series.Count > 0 ? HeimdallSeries.Last(_p95Series) : 0;
+        double p99 = _p99Series.Count > 0 ? HeimdallSeries.Last(_p99Series) : 0;
+        _p50Str = HeimdallFmt.Dur((long)(p50 * 1_000_000_000));   // s → ns für Dur()
+        _p95Str = HeimdallFmt.Dur((long)(p95 * 1_000_000_000));
+        _p99Str = HeimdallFmt.Dur((long)(p99 * 1_000_000_000));
+        // p95-Tone: rot ab 1 s, gelb ab 200 ms.
+        _p95Tone = p95 >= 1.0 ? "err" : p95 >= 0.2 ? "warn" : "ok";
+
+        // Liniendiagramme.
+        if (_reqRate.Count > 1)
+        {
+            var pts = new List<(long T, double V)>(_reqRate.Count);
+            foreach (var p in _reqRate) pts.Add((p.T, p.R));
+            _callsChart.Add(new ChartSeries(Requests, HeimdallCharting.ColorAt(0), pts));
+        }
+        if (_errRatio.Count > 1)
+        {
+            var pts = new List<(long T, double V)>(_errRatio.Count);
+            foreach (var p in _errRatio) pts.Add((p.T, p.R * 100.0));   // in %
+            _errChart.Add(new ChartSeries("Errorrate %", HeimdallCharting.ColorAt(3), pts));
+        }
+        if (_p50Series.Count > 1)
+            _latencyChart.Add(new ChartSeries("p50", HeimdallCharting.ColorAt(1), ToV(_p50Series)));
+        if (_p95Series.Count > 1)
+            _latencyChart.Add(new ChartSeries("p95", HeimdallCharting.ColorAt(2), ToV(_p95Series)));
+        if (_p99Series.Count > 1)
+            _latencyChart.Add(new ChartSeries("p99", HeimdallCharting.ColorAt(3), ToV(_p99Series)));
+
+        // Verbundene Panels: Logs + Traces im Zeitraum (TraceId-Link verbindet beides).
+        _logs = new List<Heimdall.LogRow>(Query.SearchLogs(new Heimdall.LogSearch
+        {
+            FromUnixNano = range.From,
+            ToUnixNano = range.To,
+            Limit = 20,
+        }));
+        _traces = new List<Heimdall.TraceSummary>(Query.ListTraces(new Heimdall.TraceFilter
+        {
+            FromUnixNano = range.From,
+            ToUnixNano = range.To,
+            Limit = 10,
+        }));
+    }
+
+    private static List<(long T, double V)> ToV(IReadOnlyList<(long T, double R)> s)
+    {
+        var pts = new List<(long T, double V)>(s.Count);
+        foreach (var p in s) pts.Add((p.T, p.R));
+        return pts;
+    }
+
+    private static string RangeLabel(string? preset, long? from, long? to)
+    {
+        if (from is not null || to is not null)
+            return $"von {(from?.ToString(CultureInfo.InvariantCulture) ?? "—")} bis {(to?.ToString(CultureInfo.InvariantCulture) ?? "—")} ns";
+        var key = string.IsNullOrWhiteSpace(preset) ? "24h" : preset;
+        var p = HeimdallRange.Presets.FirstOrDefault(x => x.Key == key);
+        return p?.Label ?? key;
+    }
+}

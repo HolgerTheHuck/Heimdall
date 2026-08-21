@@ -1,0 +1,131 @@
+@* Trace-Detail: flache Span-Liste (Kind/Status/Dauer), verlinkt Parent. Attrs je Span
+   aufklappbar (<details>, nativ, kein JS) → volle Attribute + Events. *@
+@using System.Collections.Generic
+@inject Heimdall.IHeimdallQuery Query
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Trace" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <p class="hmd-back"><a href="@(BasePath + "/traces")">← zurück zu Traces</a></p>
+    <h1>Trace <span class="hmd-mono">@TraceId</span></h1>
+
+    @if (_spans.Count == 0)
+    {
+        <p class="hmd-empty">Keine Spans zu dieser Trace-ID.</p>
+    }
+    else
+    {
+        @if (!string.IsNullOrEmpty(_waterfall))
+        {
+            <h2 class="hmd-subhead">Span-Zeitstrahl</h2>
+            <figure class="hmd-chart-wrap">@((MarkupString)_waterfall)</figure>
+        }
+
+        <h2 class="hmd-subhead">Spans</h2>
+        <table class="hmd-table hmd-dense">
+            <thead><tr><th>Span</th><th>Kind</th><th>Start</th><th>Dauer</th><th>Status</th><th>Attrs</th></tr></thead>
+            <tbody>
+            @foreach (var s in _spans)
+            {
+                var attrs = HeimdallCharting.ParseAttrs(s.AttrsJson);
+                <tr class="@(s.StatusCode == 2 ? "hmd-err" : "")">
+                    <td>
+                        <span class="hmd-mono">@HeimdallFmt.Truncate(s.SpanId, 8)</span>
+                        @s.Name
+                        @if (!string.IsNullOrEmpty(s.ParentSpanId))
+                        {
+                            <span class="hmd-dim">↳ @HeimdallFmt.Truncate(s.ParentSpanId, 8)</span>
+                        }
+                    </td>
+                    <td>@((Heimdall.HSpanKind)s.Kind)</td>
+                    <td>@HeimdallFmt.Ts(s.StartUnixNano)</td>
+                    <td>@HeimdallFmt.Dur(s.DurationNs)</td>
+                    <td>@(s.StatusCode == 2 ? "✕ " + (s.StatusMessage ?? "Fehler") : (s.StatusCode == 1 ? "✓ OK" : "—"))</td>
+                    <td>
+                        <details class="hmd-log-details">
+                            <summary class="hmd-log-summary">@(attrs.Count) Attribut(e) @(attrs.Count > 0 ? "▸" : "")</summary>
+                            <div class="hmd-log-full">
+                                @if (attrs.Count > 0)
+                                {
+                                    <dl class="hmd-attr-list">
+                                        @foreach (var a in attrs)
+                                        {
+                                            <dt>@a.Key</dt><dd>@a.Value</dd>
+                                        }
+                                    </dl>
+                                }
+                                else
+                                {
+                                    <p class="hmd-dim">keine Attribute</p>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(s.EventsJson) && s.EventsJson != "[]")
+                                {
+                                    <details class="hmd-nested">
+                                        <summary>Events</summary>
+                                        <pre class="hmd-pre">@s.EventsJson</pre>
+                                    </details>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(s.ResourceJson) && s.ResourceJson != "{}")
+                                {
+                                    <details class="hmd-nested">
+                                        <summary>Resource</summary>
+                                        <pre class="hmd-pre">@s.ResourceJson</pre>
+                                    </details>
+                                }
+                            </div>
+                        </details>
+                    </td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+
+    <h2 class="hmd-subhead">Logs dieses Traces</h2>
+    @if (_logs.Count == 0)
+    {
+        <p class="hmd-empty">Keine Logs mit dieser Trace-ID verknüpft.</p>
+    }
+    else
+    {
+        <table class="hmd-table hmd-logs">
+            <thead><tr><th class="hmd-col-ts">Zeit</th><th class="hmd-col-sev">Sev</th><th>Body</th><th class="hmd-col-trace">Trace</th></tr></thead>
+            <tbody>
+            @foreach (var l in _logs)
+            {
+                <HeimdallLogRow Log="@l" BasePath="@BasePath" Expand="@false" />
+            }
+            </tbody>
+        </table>
+    }
+
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string TraceId { get; set; } = string.Empty;
+
+    private List<Heimdall.SpanRow> _spans = new();
+    private List<Heimdall.LogRow> _logs = new();
+    private string _waterfall = string.Empty;
+
+    protected override void OnInitialized()
+    {
+        if (string.IsNullOrEmpty(TraceId)) return;
+        _spans = new List<Heimdall.SpanRow>(Query.GetTrace(TraceId));
+        _waterfall = HeimdallTraceWaterfall.RenderWaterfallSvg(_spans);
+        // Korrelation Traces↔Logs: LogSearch.TraceId existiert im Modell — direkter
+        // Join über die Trace-ID, kein Zeitfenster nötig (Trace ist selbst begrenzt).
+        _logs = new List<Heimdall.LogRow>(Query.SearchLogs(new Heimdall.LogSearch
+        {
+            TraceId = TraceId,
+            Limit = 200,
+        }));
+    }
+}

@@ -1,0 +1,55 @@
+# Heimdall .gitignore (.NET)
+
+## Build-Ergebnisse
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Dd]ebug/
+[Rr]elease/
+artifacts/
+*.nupkg
+*.snupkg
+*.symbols.nupkg
+
+## Laufzeitdaten & lokale State
+var/
+host/Heimdall.Host/var/
+samples/Heimdall.MvcSample/var/
+samples/Heimdall.OtelSample/var/
+*.db
+*.db-shm
+*.db-wal
+*.log
+otel.db*
+
+## IDE / Editor
+.vs/
+.idea/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.userprefs
+[Dd]ebugPrivateSettings/
+.vscode/
+
+## OS-Artefakte
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+[Dd]esktop.ini
+nul
+
+## NuGet
+*.nuget.props
+*.nuget.targets
+project.lock.json
+project.fragment.lock.json
+artifacts/
+
+## Sonstiges
+*.DotSettings.user
+*.swp
+*~
+.DS_Store

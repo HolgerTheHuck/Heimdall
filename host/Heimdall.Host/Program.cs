@@ -1,0 +1,128 @@
+using Heimdall;
+using Heimdall.Blazor;
+using Heimdall.Direct;
+using Heimdall.Host;
+using Heimdall.Otlp;
+using Heimdall.Otlp.Grpc;
+using Heimdall.Prometheus;
+using Heimdall.Storage.SQLite;
+
+// --- Heimdall Stand-alone-Host ----------------------------------------------
+// Config-getriebenes, persistentes Backend (Grafana-Stack-Äquivalent): Dashboard (Blazor),
+// OTLP-Empfänger (HTTP + gRPC), Prometheus-API, dateibasierter Dashboard-Store — alles
+// schaltbar via appsettings Sektion "Heimdall". Embedded-Nutzung bleibt unangetastet
+// (alle Add*/Map*-Signaturen unverändert, keine IOptions-Maschinerie).
+//
+// Start:  `dotnet run --project host/Heimdall.Host`  →  http://localhost:5099/otel
+// OTLP/HTTP:  POST /otel/v1/{traces,metrics,logs}   (Protobuf + JSON)
+// OTLP/gRPC:  localhost:4317  (opentelemetry.proto.collector.{trace,logs,metrics}.v1)
+// Prom-API:   GET  /otel/api/v1/{query,query_range,labels,...}  (Grafana-Datenquelle)
+// Docker (SQLite-only):  docker build -t heimdall -f host/Heimdall.Host/Dockerfile .
+
+var builder = WebApplication.CreateBuilder(args);
+
+// POCO-Bindung (bewusst ohne IOptions): Sektion "Heimdall" → HeimdallHostOptions.
+var opts = builder.Configuration.GetSection("Heimdall").Get<HeimdallHostOptions>() ?? new HeimdallHostOptions();
+ValidateOptions(opts);
+
+// Persistente Verzeichnisse anlegen — die DB-Datei wird NICHT gelöscht (Gegensatz zum alten SelfHost).
+var dataDir = Path.GetDirectoryName(Path.GetFullPath(opts.Storage.DataPath));
+if (!string.IsNullOrEmpty(dataDir)) Directory.CreateDirectory(dataDir);
+Directory.CreateDirectory(opts.DashboardsStore.Dir);
+Directory.CreateDirectory(opts.Alerting.RulesDir);
+Directory.CreateDirectory(opts.Alerting.StateDir);
+
+// Backend-Sink bauen (1.0: SQLite). Der Sink implementiert IHeimdallSink,
+// IHeimdallQuery UND IHeimdallMetricSource — dasselbe Objekt geht in alle Add*-Aufrufe.
+var (sink, query, metricSource, sinkDisposable) = BuildSink(opts);
+
+// --- Bedingte DI-Registrierung ----------------------------------------------
+if (opts.Dashboard.Enabled) builder.Services.AddHeimdallDashboard(query);
+if (opts.Otlp.Http.Enabled) builder.Services.AddHeimdallOtlp(sink);
+if (opts.Otlp.Grpc.Enabled)
+{
+    // gRPC-Auth: Host mapt Auth → HeimdallOtlpGrpcOptions (inline-Check in den *ServiceImpl).
+    var grpcAuth = opts.Auth.Enabled
+        ? new HeimdallOtlpGrpcOptions { AuthEnabled = true, ApiKey = opts.Auth.ApiKey }
+        : null;
+    builder.Services.AddHeimdallOtlpGrpc(sink, grpcAuth);
+}
+if (opts.Prometheus.Enabled) builder.Services.AddHeimdallPrometheus(metricSource, query);
+builder.Services.AddHeimdallDashboards(opts.DashboardsStore.Dir);
+// Alarm-Subsystem: Store/UI immer (Route /otel/alerts funktioniert ohne aktiven Evaluator);
+// Evaluator + Kanäle nur wenn Alerting.Enabled.
+builder.Services.AddHeimdallAlerting(query, opts.Alerting);
+builder.Services.AddSingleton(opts);   // für HeimdallAuthMiddleware (Prefixe + Auth)
+
+var app = builder.Build();
+
+// Beispiel-Dashboard seeden (idempotent), falls konfiguriert — vor Auth, nach Build.
+if (opts.DashboardsStore.SeedExample) HeimdallSeeder.SeedExampleDashboard(app.Services);
+
+// Auth vor den Map*-Aufrufen einhängen (Passthrough bei Enabled=false).
+if (opts.Auth.Enabled) app.UseHeimdallAuth(opts);
+
+app.UseStaticFiles();   // liefert /_content/Heimdall.Blazor/{css,js}
+
+// --- Bedingte Endpoint-Mappings --------------------------------------------
+if (opts.Dashboard.Enabled) app.MapHeimdallDashboard(opts.Dashboard.Prefix);
+if (opts.Otlp.Http.Enabled) app.MapHeimdallOtlp(opts.Otlp.Http.Prefix);
+if (opts.Prometheus.Enabled) app.MapHeimdallPrometheus(opts.Prometheus.Prefix);
+if (opts.Otlp.Grpc.Enabled) app.MapHeimdallOtlpGrpc();   // gRPC-Wire-Path ist proto-fixiert (kein Prefix)
+app.MapGet("/", () => Results.Redirect(opts.Dashboard.Enabled ? opts.Dashboard.Prefix : "/otel", permanent: false));
+
+// Demo-Daten rein additiv seeden (DB bleibt erhalten).
+if (opts.SeedDemoData) HeimdallSeeder.SeedDemoData(sink);
+if (opts.SeedDemoData) HeimdallSeeder.SeedDemoAlerts(app.Services);
+
+// Sauberer Shutdown: Sink disposen.
+app.Lifetime.ApplicationStopping.Register(() => sinkDisposable.Dispose());
+
+app.Run();
+
+// --- Optionen-Validierung ----------------------------------------------------
+static void ValidateOptions(HeimdallHostOptions o)
+{
+    var backend = o.Storage.Backend?.Trim().ToLowerInvariant();
+    if (backend != "sqlite")
+        throw new InvalidOperationException(
+            $"Heimdall:Storage:Backend „{o.Storage.Backend}“ ungültig — 1.0 unterstützt nur „sqlite“. " +
+            "Das Walhalla-Backend kehrt als NuGet-Konsument zurück, sobald Heimdall.Abstractions gepackt ist.");
+    o.Storage.Backend = backend;
+    if (o.Auth.Enabled && string.IsNullOrEmpty(o.Auth.ApiKey))
+        throw new InvalidOperationException("Heimdall:Auth:Enabled=true erfordert ApiKey (x-heimdall-key).");
+    if (o.Auth.Enabled && string.IsNullOrEmpty(o.Auth.UiPassword))
+        throw new InvalidOperationException("Heimdall:Auth:Enabled=true erfordert UiPassword (Basic-Auth).");
+    if (o.Alerting.Enabled && o.Alerting.Smtp.Enabled &&
+        (string.IsNullOrEmpty(o.Alerting.Smtp.Host) || string.IsNullOrEmpty(o.Alerting.Smtp.From) || string.IsNullOrEmpty(o.Alerting.Smtp.To)))
+        throw new InvalidOperationException("Heimdall:Alerting:Smtp:Enabled=true erfordert Host, From und To.");
+    if (o.Alerting.Enabled && o.Alerting.Webhook.Enabled && string.IsNullOrEmpty(o.Alerting.Webhook.Url))
+        throw new InvalidOperationException("Heimdall:Alerting:Webhook:Enabled=true erfordert Url.");
+}
+
+// --- Sink-Konstruktion je Backend -------------------------------------------
+static (IHeimdallSink Sink, IHeimdallQuery Query, IHeimdallMetricSource Metrics, IDisposable Disposable) BuildSink(
+    HeimdallHostOptions o)
+{
+    if (o.Storage.Backend == "sqlite")
+    {
+        var s = new SQLiteTelemetrySink(new SQLiteTelemetryOptions
+        {
+            DataPath = o.Storage.DataPath,
+            RetentionDays = o.Storage.RetentionDays,
+            RetentionSweepMinutes = o.Storage.RetentionSweepMinutes,
+            WalMode = o.Storage.WalMode,
+        });
+        return (s, s, s, s);
+    }
+
+    // 1.0 liefert SQLite-only. Das Walhalla-Backend kehrt zurück, sobald Walhalla
+    // als NuGet-Paket vorliegt (statt der früheren cross-repo ProjectReference).
+    throw new InvalidOperationException(
+        "Heimdall:Storage:Backend=„" + o.Storage.Backend + "“ wird in 1.0 nicht " +
+        "unterstützt. 1.0 liefert SQLite-only (Backend=„sqlite“). Das Walhalla-Backend " +
+        "kehrt als NuGet-Konsument zurück, sobald Heimdall.Abstractions gepackt ist.");
+}
+
+/// <summary>Test-Hook für <c>WebApplicationFactory&lt;Program&gt;</c>.</summary>
+public partial class Program { }

@@ -1,0 +1,50 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Heimdall.Otlp.Grpc</RootNamespace>
+    <AssemblyName>Heimdall.Otlp.Grpc</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Heimdall.Otlp.Grpc</PackageId>
+    <Description>Heimdall OTLP/gRPC-Receiver: implementiert TraceService/LogsService/MetricsService.Export (opentelemetry-proto v1.7.0) und schreibt in IHeimdallSink. Generiert Client- und Server-Stubs (GrpcServices="Both") — Server für den Receiver-Betrieb, Client für Integrationstests/Aufrufer. Benötigt HTTP/2 (Kestrel). Heimdall.Otlp bleibt gRPC-frei — diese Assembly zieht Grpc.AspNetCore; Einbetter, die nur OTLP/HTTP wollen, referenzieren nur Heimdall.Otlp.</Description>
+    <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;otlp;grpc;receiver</PackageTags>
+    <Version>0.1.0</Version>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Grpc.AspNetCore 2.71.0 passt zu Grpc.Tools 2.71.0 (Proto) und ist net8/9/10-kompatibel. -->
+    <PackageReference Include="Grpc.AspNetCore" Version="2.71.0" />
+    <PackageReference Include="Google.Protobuf" Version="3.30.2" />
+    <PackageReference Include="Grpc.Tools" Version="2.71.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- NUR die 3 Collector-Service-protos werden hier kompiliert (GrpcServices="Both"):
+         erzeugt je Service die Server-Base (TraceServiceBase …) UND den Client-Stub
+         (TraceServiceClient …) — ein kanonisches Codegen für Receiver-Betrieb + Aufrufer/
+         Integrationstests. ProtoRoot zeigt auf den KANONISCHEN Proto-Ordner von
+         Heimdall.Otlp.Proto — protoc löst die Imports (trace_types.proto, trace.proto …)
+         dort auf, generiert sie aber NICHT (sie sind hier keine <Protobuf>-Inputs) → keine
+         Typ-Kollision. Die Message-Typen kommen via ProjectReference aus Heimdall.Otlp.Proto. -->
+    <Protobuf Include="..\Heimdall.Otlp.Proto\proto\opentelemetry\proto\collector\trace\v1\trace_service.proto" ProtoRoot="..\Heimdall.Otlp.Proto\proto" GrpcServices="Both" />
+    <Protobuf Include="..\Heimdall.Otlp.Proto\proto\opentelemetry\proto\collector\logs\v1\logs_service.proto" ProtoRoot="..\Heimdall.Otlp.Proto\proto" GrpcServices="Both" />
+    <Protobuf Include="..\Heimdall.Otlp.Proto\proto\opentelemetry\proto\collector\metrics\v1\metrics_service.proto" ProtoRoot="..\Heimdall.Otlp.Proto\proto" GrpcServices="Both" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Heimdall.Otlp.Proto\Heimdall.Otlp.Proto.csproj" />
+    <ProjectReference Include="..\Heimdall.Abstractions\Heimdall.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Heimdall.Tests" />
+  </ItemGroup>
+
+</Project>

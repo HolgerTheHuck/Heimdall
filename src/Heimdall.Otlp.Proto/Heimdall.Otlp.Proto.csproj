@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Heimdall.Otlp.Proto</RootNamespace>
+    <AssemblyName>Heimdall.Otlp.Proto</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Heimdall.Otlp.Proto</PackageId>
+    <Description>Heimdall OTLP-Proto-Typen + OtlpConvert: generiert die OTLP-Messages (opentelemetry-proto v1.7.0, GrpcServices="None") und den OTLP→Heimdall-Konverter. Transport-agnostisch —消费 von Heimdall.Otlp (HTTP) und Heimdall.Otlp.Grpc (gRPC) gleichermaßen. Die 3 Collector-Service-protos liegen hier als Dateien, werden aber nur von Heimdall.Otlp.Grpc (Server) kompiliert.</Description>
+    <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;otlp;proto;grpc</PackageTags>
+    <Version>0.1.0</Version>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- OTLP-Prototypen aus opentelemetry-proto v1.7.0 (vendiert, GrpcServices="None"):
+         generiert NUR die Message-Typen, keine gRPC-Service-Bases. Die 3 *_service.proto
+         liegen im selben ProtoRoot, werden hier aber NICHT kompiliert (nur Heimdall.Otlp.Grpc
+         kompiliert sie mit GrpcServices="Server"). So gibt es genau einen Ort für die
+         Message-Typen → keine Typ-Kollision zwischen den Assemblies. -->
+    <PackageReference Include="Google.Protobuf" Version="3.30.2" />
+    <PackageReference Include="Grpc.Tools" Version="2.71.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Protobuf Include="proto\opentelemetry\proto\common\v1\common.proto" ProtoRoot="proto" GrpcServices="None" />
+    <Protobuf Include="proto\opentelemetry\proto\resource\v1\resource.proto" ProtoRoot="proto" GrpcServices="None" />
+    <Protobuf Include="proto\opentelemetry\proto\trace\v1\trace.proto" ProtoRoot="proto" GrpcServices="None" />
+    <Protobuf Include="proto\opentelemetry\proto\logs\v1\logs.proto" ProtoRoot="proto" GrpcServices="None" />
+    <Protobuf Include="proto\opentelemetry\proto\metrics\v1\metrics.proto" ProtoRoot="proto" GrpcServices="None" />
+    <Protobuf Include="proto\opentelemetry\proto\collector\trace\v1\trace_types.proto" ProtoRoot="proto" GrpcServices="None" />
+    <Protobuf Include="proto\opentelemetry\proto\collector\logs\v1\logs_types.proto" ProtoRoot="proto" GrpcServices="None" />
+    <Protobuf Include="proto\opentelemetry\proto\collector\metrics\v1\metrics_types.proto" ProtoRoot="proto" GrpcServices="None" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Heimdall.Abstractions\Heimdall.Abstractions.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- OtlpConvert ist internal; sichtbar für die HTTP- und gRPC-Receiver sowie Tests. -->
+    <InternalsVisibleTo Include="Heimdall.Tests" />
+    <InternalsVisibleTo Include="Heimdall.Otlp" />
+    <InternalsVisibleTo Include="Heimdall.Otlp.Grpc" />
+  </ItemGroup>
+
+</Project>

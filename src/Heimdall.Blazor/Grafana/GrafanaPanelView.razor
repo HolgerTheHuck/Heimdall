@@ -1,0 +1,137 @@
+@* Einzelnes Grafana-Panel: dispacht das Render-Resultat auf den passenden
+   Visualisierungstyp (Linie/Stat/Tabelle/Gauge/BarGauge/Pie). Die SVGs fuer
+   Gauge/BarGauge/Pie entstehen server-seitig in HeimdallCharting und werden
+   als MarkupString ausgegeben. Grid-Spannung aus gridPos.w (24-Spalten). Kein JS. *@
+@using Heimdall.Blazor.Grafana
+
+@if (Panel.Result is RowResult)
+{
+    // Row-Section-Header: Vollbreite-Überschrift (keine Panel-Box, keine Auswertung).
+    <h2 class="hmd-subhead" style="grid-column: 1 / -1; margin: 1.1rem 0 .25rem;">@Panel.Panel.Title</h2>
+}
+else
+{
+    <section class="hmd-gpanel" style="grid-column: span @ColSpan;">
+        <h3 class="hmd-gpanel-title">@Panel.Panel.Title</h3>
+        <div class="hmd-gpanel-body">
+            @if (Panel.Result is ChartResult chart)
+            {
+                <HeimdallChart Series="@chart.Series" Unit="@chart.Unit" AriaLabel="@Panel.Panel.Title"
+                               Width="760" Height="@ChartHeight" />
+            }
+            else if (Panel.Result is StatResult stat)
+            {
+                <HeimdallKpi Value="@stat.DisplayText" Label="@Panel.Panel.Title" Tone="@stat.Tone" />
+            }
+            else if (Panel.Result is StatGridResult grid)
+            {
+                // Multi-Serien-stat (Grafana graphMode=area, wideLayout): eine Kachel
+                // je Serie (z. B. pro Statuscode) mit Wert + Mini-Flächen-Graph.
+                <div class="hmd-stat-grid">
+                    @foreach (var t in grid.Tiles)
+                    {
+                        <div class="hmd-stat-tile hmd-stat-tile--@t.Tone">
+                            <div class="hmd-stat-tile-val">@t.DisplayText</div>
+                            <div class="hmd-stat-tile-label">@t.Label</div>
+                            @((MarkupString)HeimdallCharting.RenderStatSparklineSvg(t.Points, t.Tone, 120, 30))
+                        </div>
+                    }
+                </div>
+            }
+            else if (Panel.Result is GaugeResult gauge)
+            {
+                <div class="hmd-gauge-wrap">
+                    @((MarkupString)HeimdallCharting.RenderGaugeSvg(gauge.Value, gauge.Min, gauge.Max, gauge.Color, Panel.Panel.Title, 300, 160))
+                </div>
+            }
+            else if (Panel.Result is BarGaugeResult bg)
+            {
+                @((MarkupString)HeimdallCharting.RenderBarGaugeSvg(bg.Rows, 760, BarHeight(bg.Rows.Count)))
+            }
+            else if (Panel.Result is PieResult pie)
+            {
+                @((MarkupString)HeimdallCharting.RenderPieSvg(pie.Slices, 360, 220))
+            }
+            else if (Panel.Result is HeatmapResult heat)
+            {
+                // Heatmap: Zeit × Histogramm-Bucket, Farbintensität = Rate.
+                // Höhe aus Bucketzahl (wie BarGauge aus Zeilenzahl), damit viele
+                // Buckets nicht gequetscht werden.
+                <div class="hmd-heatmap-wrap">
+                    @((MarkupString)HeimdallCharting.RenderHeatmapSvg(heat.Buckets, heat.ColumnTimesMs, heat.MaxValue, 760, HeatmapHeight(heat.Buckets.Count)))
+                </div>
+            }
+            else if (Panel.Result is TableResult tbl)
+            {
+                <table class="hmd-table">
+                    <thead><tr>@foreach (var c in tbl.Columns) { <th>@c</th> }</tr></thead>
+                    <tbody>
+                        @foreach (var row in tbl.Rows)
+                        {
+                            <tr>@foreach (var cell in row) { <td>@cell</td> }</tr>
+                        }
+                    </tbody>
+                </table>
+            }
+            else if (Panel.Result is LogResult logs)
+            {
+                // Loki-Logs-Panel ausgewertet gegen Heimdalls eigenen Log-Store.
+                // Zeilen-Rendering via HeimdallLogRow (gleiches Layout wie Logs-Seite).
+                <table class="hmd-table hmd-logs hmd-logs-panel">
+                    <thead><tr><th class="hmd-col-ts">Zeit</th><th class="hmd-col-sev">Sev</th><th>Body</th><th class="hmd-col-trace">Trace</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in logs.Rows)
+                        {
+                            <HeimdallLogRow Log="@l" BasePath="@BasePath" />
+                        }
+                    </tbody>
+                </table>
+                @if (logs.TruncatedCount > 0)
+                {
+                    <p class="hmd-dim hmd-logs-more">… @logs.TruncatedCount weitere im Zeitraum</p>
+                }
+            }
+            else if (Panel.Result is ErrorResult err)
+            {
+                <p class="hmd-empty hmd-err-text">@err.Message</p>
+            }
+            else if (Panel.Result is EmptyResult empty)
+            {
+                <p class="hmd-empty">@empty.Message</p>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter] public RenderedPanel Panel { get; set; } = null!;
+
+    /// <summary>Mount-Pfad des Dashboards (für Trace-Links in Log-Zeilen).</summary>
+    [Parameter] public string BasePath { get; set; } = "/otel";
+
+    private int ColSpan
+    {
+        get
+        {
+            int w = Panel?.Panel?.GridPos.W ?? 6;
+            if (w < 1) w = 1;
+            if (w > 24) w = 24;
+            return w;
+        }
+    }
+
+    private int ChartHeight
+    {
+        get
+        {
+            int h = Panel?.Panel?.GridPos.H ?? 8;
+            return Math.Max(140, h * 30);
+        }
+    }
+
+    private static int BarHeight(int rows) => Math.Max(60, Math.Min(rows, 20) * 36 + 12);
+
+    /// <summary>Heatmap-Höhe aus Bucketzahl: ~16px/Bucket + Achsen, gedeckelt
+    /// auf 160–460px, damit 14 typische Dauer-Buckets gut lesbar bleiben.</summary>
+    private static int HeatmapHeight(int buckets) => Math.Max(160, Math.Min(buckets * 16 + 40, 460));
+}

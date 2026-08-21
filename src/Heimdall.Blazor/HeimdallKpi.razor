@@ -1,0 +1,17 @@
+@* KPI/Single-Stat-Karte: großer Wert + Label + optionale Sub-Zeile. Tone waehlt die
+   Akzentfarbe (ok/warn/err/accent). Reines HTML/CSS, kein JS. *@
+<article class="hmd-kpi hmd-kpi--@Tone">
+    <div class="hmd-kpi-value">@Value</div>
+    <div class="hmd-kpi-label">@Label</div>
+    @if (!string.IsNullOrEmpty(Sub))
+    {
+        <div class="hmd-kpi-sub">@Sub</div>
+    }
+</article>
+
+@code {
+    [Parameter] public string Value { get; set; } = string.Empty;
+    [Parameter] public string Label { get; set; } = string.Empty;
+    [Parameter] public string? Sub { get; set; }
+    [Parameter] public string Tone { get; set; } = "accent";
+}

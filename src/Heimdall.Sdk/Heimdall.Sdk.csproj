@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Heimdall.Sdk</RootNamespace>
+    <AssemblyName>Heimdall.Sdk</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Heimdall.Sdk</PackageId>
+    <Description>Heimdall in-process exporter for the OpenTelemetry SDK: AddOpenTelemetry().UseHeimdallExporter() — traces/logs/metrics land directly in Heimdall without OTLP/HTTP/gRPC.</Description>
+    <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;exporter;inproc</PackageTags>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="OpenTelemetry" Version="1.16.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Heimdall.Abstractions\Heimdall.Abstractions.csproj" />
+  </ItemGroup>
+
+</Project>

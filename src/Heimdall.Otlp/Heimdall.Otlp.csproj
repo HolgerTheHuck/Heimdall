@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Heimdall.Otlp</RootNamespace>
+    <AssemblyName>Heimdall.Otlp</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Heimdall.Otlp</PackageId>
+    <Description>Heimdall OTLP/HTTP receiver: accepts OTLP traces/logs/metrics (protobuf + JSON) at /v1/* and writes them into IHeimdallSink. Pfad C — ingestion for stand-alone processes. HTTP-only (gRPC-frei für Einbetter); die OTLP-Message-Typen + OtlpConvert liegen in Heimdall.Otlp.Proto, die gRPC-Service-Stubs in Heimdall.Otlp.Grpc.</Description>
+    <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;otlp;receiver;http</PackageTags>
+    <Version>0.1.0</Version>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Google.Protobuf liefert IMessage<T>/MessageParser/JsonParser/JsonFormatter,
+         die OtlpEndpointExtensions für den HTTP-Parse-Pfad nutzt. Die OTLP-Message-Typen
+         selbst kommen transitiv aus Heimdall.Otlp.Proto. Grpc.Tools wird hier nicht
+         mehr benötigt (keine Proto-Kompilierung mehr — HTTP-only). -->
+    <PackageReference Include="Google.Protobuf" Version="3.30.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Heimdall.Abstractions\Heimdall.Abstractions.csproj" />
+    <ProjectReference Include="..\Heimdall.Otlp.Proto\Heimdall.Otlp.Proto.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Heimdall.Tests" />
+  </ItemGroup>
+
+</Project>

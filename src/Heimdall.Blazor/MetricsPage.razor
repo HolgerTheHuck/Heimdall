@@ -1,0 +1,138 @@
+@* Metriken: Serie zu einem Namen, gruppiert nach Attribut-Dimension → SVG-Liniendiagramm
+   (Gauge/Sum) bzw. Linie + Histogramm-Balken (Histogram). Kein JS. *@
+@using System.Collections.Generic
+@using System.Globalization
+@inject Heimdall.IHeimdallQuery Query
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Metriken" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <h1>Metriken</h1>
+
+    <form class="hmd-filters" method="get" action="@(BasePath + "/metrics")">
+        <label>Name <input type="search" name="name" value="@Name" placeholder="orders" /></label>
+        <label>Limit <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
+        <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
+        <button type="submit">Laden</button>
+    </form>
+
+    @if (_series.Count == 0)
+    {
+        <section class="hmd-empty-state">
+            <h2>Keine Messpunkte für „@Name"</h2>
+            <p>Zu diesem Metrik-Namen liegen im Zeitraum keine Punkte vor. Namen prüfen, Zeitraum erweitern oder Metriken senden.</p>
+            <p class="hmd-dim">OTLP/HTTP <code>POST @BasePath/v1/metrics</code> · gRPC <code>localhost:4317</code> · zurück zur <a href="@BasePath">Übersicht</a></p>
+        </section>
+    }
+    else
+    {
+        <h2 class="hmd-subhead">
+            @Name · @((Heimdall.HMetricType)_type) · @((Heimdall.HTemporality)_temp)
+            @if (!string.IsNullOrEmpty(_unit)) { <span class="hmd-dim">· Einheit @_unit</span> }
+        </h2>
+
+        <HeimdallChart Series="@_chartSeries" Unit="@_unit" Height="240" />
+
+        @if (_histCounts.Count > 0)
+        {
+            <h3 class="hmd-subhead-sm">Verteilung (letzter Punkt)</h3>
+            <HeimdallHistogram BucketCounts="@_histCounts" ExplicitBounds="@_histBounds" Unit="@_unit" />
+        }
+
+        <details class="hmd-raw">
+            <summary>Roh-Tabelle (@_series.Count Punkt(e))</summary>
+            <table class="hmd-table">
+                <thead><tr><th>Zeit</th><th>Typ</th><th>Wert</th><th>Count</th><th>Sum</th><th>Min</th><th>Max</th><th>Attrs</th></tr></thead>
+                <tbody>
+                @foreach (var m in _series)
+                {
+                    <tr>
+                        <td class="hmd-mono">@HeimdallFmt.Ts(m.TimeUnixNano)</td>
+                        <td>@((Heimdall.HMetricType)m.Type)</td>
+                        <td>@m.Value.ToString(CultureInfo.InvariantCulture)</td>
+                        <td>@(m.Count?.ToString(CultureInfo.InvariantCulture) ?? "—")</td>
+                        <td>@(m.Sum?.ToString("0.##", CultureInfo.InvariantCulture) ?? "—")</td>
+                        <td>@(m.Min?.ToString("0.##", CultureInfo.InvariantCulture) ?? "—")</td>
+                        <td>@(m.Max?.ToString("0.##", CultureInfo.InvariantCulture) ?? "—")</td>
+                        <td class="hmd-json">@HeimdallFmt.Truncate(m.AttrsJson, 60)</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </details>
+    }
+    <p class="hmd-count">@_series.Count Punkt(e) · @Query.CountMetrics() Metrik-Punkte gesamt</p>
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string Name { get; set; } = "orders";
+    [Parameter] public int Limit { get; set; } = 500;
+    [Parameter] public string? Preset { get; set; }
+    [Parameter] public long? From { get; set; }
+    [Parameter] public long? To { get; set; }
+
+    private List<Heimdall.MetricRow> _series = new();
+    private List<ChartSeries> _chartSeries = new();
+    private List<long> _histCounts = new();
+    private List<double> _histBounds = new();
+    private int _type;
+    private int _temp;
+    private string? _unit;
+
+    protected override void OnInitialized()
+    {
+        if (string.IsNullOrWhiteSpace(Name)) return;
+        var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano());
+        _series = new List<Heimdall.MetricRow>(
+            Query.MetricSeries(Name, range.From, range.To, Limit < 1 ? 500 : Limit));
+        if (_series.Count == 0) return;
+
+        _type = _series[0].Type;
+        _temp = _series[0].Temporality;
+        _unit = _series[0].Unit;
+
+        // Nach Attribut-Fingerprint gruppieren → eine Linie pro Dimension.
+        var groups = new Dictionary<string, List<(long T, double V)>>();
+        var labels = new Dictionary<string, string>();
+        var order = new List<string>();
+        foreach (var m in _series)
+        {
+            if (!groups.TryGetValue(m.AttrsJson, out var pts))
+            {
+                pts = new List<(long, double)>();
+                groups[m.AttrsJson] = pts;
+                labels[m.AttrsJson] = HeimdallCharting.FormatAttrsLabel(HeimdallCharting.ParseAttrs(m.AttrsJson));
+                order.Add(m.AttrsJson);
+            }
+            pts.Add((m.TimeUnixNano, m.Value));
+        }
+        _chartSeries.Clear();
+        for (int i = 0; i < order.Count; i++)
+        {
+            var key = order[i];
+            var pts = groups[key];
+            pts.Sort((a, b) => a.T.CompareTo(b.T));
+            _chartSeries.Add(new ChartSeries(labels[key], HeimdallCharting.ColorAt(i), pts));
+        }
+
+        // Histogramm: Bucket-Verteilung des neuesten Punkts.
+        if ((Heimdall.HMetricType)_type == Heimdall.HMetricType.Histogram)
+        {
+            Heimdall.MetricRow? last = null;
+            foreach (var m in _series)
+                if (last is null || m.TimeUnixNano > last.TimeUnixNano) last = m;
+            if (last is not null)
+            {
+                _histCounts = new List<long>(HeimdallCharting.ParseLongs(last.BucketCountsJson));
+                _histBounds = new List<double>(HeimdallCharting.ParseDoubles(last.ExplicitBoundsJson));
+            }
+        }
+    }
+}

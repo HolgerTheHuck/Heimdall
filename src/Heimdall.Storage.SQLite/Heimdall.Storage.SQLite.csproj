@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Heimdall.Storage.SQLite</RootNamespace>
+    <AssemblyName>Heimdall.Storage.SQLite</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Heimdall.Storage.SQLite</PackageId>
+    <Description>Heimdall storage backend backed by SQLite (Microsoft.Data.Sqlite) with FTS5 fulltext search. Mature, stable alternative to the Walhalla backend.</Description>
+    <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;sqlite;fts5</PackageTags>
+    <Version>0.1.0</Version>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Heimdall.Abstractions\Heimdall.Abstractions.csproj" />
+    <!-- Microsoft.Data.Sqlite buendelt SQLite mit FTS5 aktiviert (e_sqlite3, SQLITE_ENABLE_FTS5). -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />
+  </ItemGroup>
+
+</Project>

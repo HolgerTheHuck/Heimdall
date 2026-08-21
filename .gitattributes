@@ -1,0 +1,16 @@
+# Zeilenenden repo-seitig normalisieren (LF); Checkout plattformabhängig.
+* text=auto eol=lf
+
+# Binäre Dateien (kein Line-Ending-Touch, kein Diff-Rauschen).
+*.db       binary
+*.db-wal   binary
+*.db-shm   binary
+*.nupkg    binary
+*.snupkg   binary
+*.png      binary
+*.jpg      binary
+*.jpeg     binary
+*.gif      binary
+*.ico      binary
+*.woff     binary
+*.woff2    binary

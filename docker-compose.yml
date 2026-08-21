@@ -1,0 +1,25 @@
+# Heimdall Stand-alone-Stack (SQLite-only, Docker).
+#
+#   docker compose up --build
+#
+# UI/HTTP-OTLP:  http://localhost:5099/otel
+# OTLP/gRPC:     localhost:4317
+# Persistenz:    ./var/heimdall (Host-Volume) — überlebt Neustart/Rebuild.
+#
+# Auth aktivieren: die drei Heimdall__Auth__*-Env-Vars einkommentieren und setzen.
+services:
+  heimdall:
+    build:
+      context: .
+      dockerfile: host/Heimdall.Host/Dockerfile
+    ports:
+      - "5099:5099"
+      - "4317:4317"
+    volumes:
+      - ./var/heimdall:/app/var/heimdall
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Production
+      # - Heimdall__Auth__Enabled=true
+      # - Heimdall__Auth__ApiKey=change-me
+      # - Heimdall__Auth__UiPassword=change-me
+    restart: unless-stopped

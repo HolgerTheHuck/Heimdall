@@ -1,0 +1,133 @@
+@* Alarm-Liste. KPI-Row (Firing/Pending/Resolved/Regeln) + Tabelle aller Regeln mit
+   Zustands-Badge, LastValue, LastEval, `for`-Dauer, Kanälen und Drilldown zur
+   Detail-Seite. Filter nach Zustand + Zeitraum. Statisches SSR, kein JS. *@
+@using System
+@using System.Globalization
+@using Heimdall.Blazor.Alerts
+@inject IAlertRuleStore Store
+@inject IAlertStateStore StateStore
+@inject HeimdallAlertingOptions Options
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Alerts" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <h1>Alerts</h1>
+    <p class="hmd-dim">
+        Konfigurierbare Alarmregeln über Logs, Metriken und Traces.
+        @if (!Options.Enabled)
+        {
+            <span class="hmd-alert-hint">· Auswertung deaktiviert (Heimdall:Alerting:Enabled=false) — Regeln sind verwaltbar, werden aber nicht getaktet.</span>
+        }
+        · @(_rules.Count) Regel(n).
+    </p>
+
+    <div class="hmd-filters">
+        <form method="get" action="@(BasePath + "/alerts")" style="display:inline-flex; gap:.5rem; flex-wrap:wrap;">
+            <label>Zustand
+                <select name="state">
+                    <option value="" selected="@(string.IsNullOrEmpty(StateFilter))">alle</option>
+                    <option value="firing" selected="@(StateFilter == "firing")">Firing</option>
+                    <option value="pending" selected="@(StateFilter == "pending")">Pending</option>
+                    <option value="resolved" selected="@(StateFilter == "resolved")">Resolved</option>
+                    <option value="ok" selected="@(StateFilter == "ok")">Ok</option>
+                </select>
+            </label>
+            <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
+            <button type="submit">Aktualisieren</button>
+        </form>
+        <a class="hmd-btn" href="@(BasePath + "/alerts/new")">+ Neue Regel</a>
+    </div>
+
+    @if (_rules.Count == 0)
+    {
+        <p class="hmd-empty">Keine Alarmregeln vorhanden — <a href="@(BasePath + "/alerts/new")">neue Regel anlegen</a>.</p>
+    }
+    else
+    {
+        <div class="hmd-kpi-row">
+            <HeimdallKpi Value="@_firing.ToString(CultureInfo.InvariantCulture)" Label="Firing" Sub="aktive Alarme" Tone="err" />
+            <HeimdallKpi Value="@_pending.ToString(CultureInfo.InvariantCulture)" Label="Pending" Sub="wartet auf for" Tone="warn" />
+            <HeimdallKpi Value="@_resolved.ToString(CultureInfo.InvariantCulture)" Label="Resolved" Sub="kürzlich aufgelöst" Tone="ok" />
+            <HeimdallKpi Value="@_rules.Count.ToString(CultureInfo.InvariantCulture)" Label="Regeln" Sub="gesamt" Tone="accent" />
+        </div>
+
+        <table class="hmd-table">
+            <thead><tr><th>Name</th><th>Signal</th><th>Zustand</th><th>Wert</th><th>Letzte Auswertung</th><th>for</th><th>Kanäle</th><th>aktiv</th><th></th></tr></thead>
+            <tbody>
+            @foreach (var r in _rules)
+            {
+                var ev = _states.TryGetValue(r.Id, out var e) ? e : null;
+                var st = ev?.State ?? AlertState.Ok;
+                <tr>
+                    <td><a href="@(BasePath + "/alerts/" + Uri.EscapeDataString(r.Id))">@r.Name</a></td>
+                    <td>@r.Signal</td>
+                    <td><span class="hmd-alert-state hmd-alert-state--@(StateClass(st))">@StateLabel(st)</span></td>
+                    <td class="hmd-mono">@(ev?.LastValue?.ToString("0.####", CultureInfo.InvariantCulture) ?? "—")</td>
+                    <td class="hmd-mono">@(ev is not null ? HeimdallFmt.Ts(ev.LastEvalUnixMs * 1_000_000L) : "—")</td>
+                    <td class="hmd-mono">@(_forSeconds.GetValueOrDefault(r.Id).ToString(CultureInfo.InvariantCulture)) s</td>
+                    <td class="hmd-mono">@(r.Channels is null ? "—" : string.Join(", ", r.Channels))</td>
+                    <td>@(r.Enabled ? "ja" : "nein")</td>
+                    <td><a href="@(BasePath + "/alerts/" + Uri.EscapeDataString(r.Id))">→</a></td>
+                </tr>
+            }
+            </tbody>
+        </table>
+    }
+
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string? StateFilter { get; set; }
+    [Parameter] public int Limit { get; set; } = 100;
+    [Parameter] public string? Preset { get; set; }
+    [Parameter] public long? From { get; set; }
+    [Parameter] public long? To { get; set; }
+
+    private List<AlertRule> _rules = new();
+    private Dictionary<string, AlertEvent> _states = new();
+    private Dictionary<string, long> _forSeconds = new();
+    private int _firing, _pending, _resolved;
+
+    protected override void OnInitialized()
+    {
+        foreach (var rf in Store.List().Take(Math.Max(1, Limit)))
+        {
+            var rule = Store.Get(rf.Id);
+            if (rule is null) continue;
+            _rules.Add(rule);
+            _forSeconds[rule.Id] = rule.ForSeconds;
+        }
+        _states = new Dictionary<string, AlertEvent>(StateStore.All(), StringComparer.Ordinal);
+        foreach (var r in _rules)
+        {
+            var st = _states.TryGetValue(r.Id, out var e) ? e.State : AlertState.Ok;
+            if (st == AlertState.Firing) _firing++;
+            else if (st == AlertState.Pending) _pending++;
+            else if (st == AlertState.Resolved) _resolved++;
+        }
+        if (!string.IsNullOrEmpty(StateFilter))
+        {
+            _rules = _rules.Where(r =>
+            {
+                var st = _states.TryGetValue(r.Id, out var e) ? e.State : AlertState.Ok;
+                return string.Equals(st.ToString(), StateFilter, StringComparison.OrdinalIgnoreCase);
+            }).ToList();
+        }
+    }
+
+    private static string StateClass(AlertState s) => s.ToString().ToLowerInvariant();
+    private static string StateLabel(AlertState s) => s switch
+    {
+        AlertState.Firing => "Firing",
+        AlertState.Pending => "Pending",
+        AlertState.Resolved => "Resolved",
+        _ => "Ok",
+    };
+}

@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RootNamespace>Heimdall.MvcSample</RootNamespace>
+    <AssemblyName>Heimdall.MvcSample</AssemblyName>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Heimdall: Dashboard-UI + SQLite-Backend + in-process OTel-Exporter +
+         ASP.NET-Core-Enrichment (aspnetmvc.controller/action/route auf den
+         Server-Spans) → Controller/Endpoint-Drilldown unter /otel/endpoints. -->
+    <ProjectReference Include="..\..\src\Heimdall.Blazor\Heimdall.Blazor.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.Sdk\Heimdall.Sdk.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.Storage.SQLite\Heimdall.Storage.SQLite.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.AspNetCore\Heimdall.AspNetCore.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- OTel-SDK-Instrumentation: ASP.NET-Core-Server-Spans (http.route/status) +
+         HttpClient-Spans für den Traffic-Seeder. Exportiert via Heimdall.Sdk. -->
+    <PackageReference Include="OpenTelemetry" Version="1.16.0" />
+    <PackageReference Include="OpenTelemetry.Extensions.Hosting" Version="1.16.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.AspNetCore" Version="1.9.0" />
+    <PackageReference Include="OpenTelemetry.Instrumentation.Http" Version="1.9.0" />
+  </ItemGroup>
+
+</Project>

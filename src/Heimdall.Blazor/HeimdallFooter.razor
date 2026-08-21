@@ -1,0 +1,18 @@
+@* Status-Fußzeile auf jeder Seite: Heimdall-Marke + aktuelle Daten-Zähler
+   (Spans/Logs/Metriken) aus IHeimdallQuery. Dünne, ruhige Leiste — keine
+   Aktionen. Geringe Query-Last (3 Count-Aufrufe). Kein JS. *@
+@inject Heimdall.IHeimdallQuery Query
+
+<footer class="hmd-footer">
+    <span class="hmd-footer-brand">⌖ Heimdall</span>
+    <span class="hmd-footer-sep">·</span>
+    <span>Spans <strong>@HeimdallCharting.FmtValue(Query.CountSpans())</strong></span>
+    <span class="hmd-footer-sep">·</span>
+    <span>Logs <strong>@HeimdallCharting.FmtValue(Query.CountLogs())</strong></span>
+    <span class="hmd-footer-sep">·</span>
+    <span>Metriken <strong>@HeimdallCharting.FmtValue(Query.CountMetrics())</strong></span>
+</footer>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+}

@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Heimdall.AspNetCore</RootNamespace>
+    <AssemblyName>Heimdall.AspNetCore</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Heimdall.AspNetCore</PackageId>
+    <Description>Heimdall ASP.NET Core enrichment plugin: a thin middleware that tags the OTel server span with aspnetmvc.controller / aspnetmvc.action / aspnetmvc.route read from the MVC pipeline metadata, so the Heimdall dashboard can drill down API → Controller → Endpoint by real names (not by route-template parsing). No own metric, no measurement — pure Activity-tag enrichment.</Description>
+    <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;aspnetcore;aspnetmvc;enrichment</PackageTags>
+    <Version>0.1.0</Version>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Heimdall.Tests" />
+  </ItemGroup>
+
+</Project>

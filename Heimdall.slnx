@@ -1,0 +1,25 @@
+<Solution>
+  <Folder Name="/host/">
+    <Project Path="host/Heimdall.Host/Heimdall.Host.csproj" />
+  </Folder>
+  <Folder Name="/samples/">
+    <Project Path="samples/Heimdall.MvcSample/Heimdall.MvcSample.csproj" />
+    <Project Path="samples/Heimdall.OtelSample/Heimdall.OtelSample.csproj" />
+  </Folder>
+  <Folder Name="/src/">
+    <Project Path="src/Heimdall.Abstractions/Heimdall.Abstractions.csproj" />
+    <Project Path="src/Heimdall.AspNetCore/Heimdall.AspNetCore.csproj" />
+    <Project Path="src/Heimdall.Blazor/Heimdall.Blazor.csproj" />
+    <Project Path="src/Heimdall.Direct/Heimdall.Direct.csproj" />
+    <Project Path="src/Heimdall.Ingest/Heimdall.Ingest.csproj" />
+    <Project Path="src/Heimdall.Otlp/Heimdall.Otlp.csproj" />
+    <Project Path="src/Heimdall.Otlp.Proto/Heimdall.Otlp.Proto.csproj" />
+    <Project Path="src/Heimdall.Otlp.Grpc/Heimdall.Otlp.Grpc.csproj" />
+    <Project Path="src/Heimdall.Prometheus/Heimdall.Prometheus.csproj" />
+    <Project Path="src/Heimdall.Sdk/Heimdall.Sdk.csproj" />
+    <Project Path="src/Heimdall.Storage.SQLite/Heimdall.Storage.SQLite.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Heimdall.Tests/Heimdall.Tests.csproj" />
+  </Folder>
+</Solution>

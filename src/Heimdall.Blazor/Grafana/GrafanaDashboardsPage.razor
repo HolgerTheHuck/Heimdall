@@ -1,0 +1,53 @@
+@* Liste der importierten Grafana-Dashboards. Jedes Dashboard ist ein Link zur
+   View-Seite; ein Delete-Form (POST) entfernt es aus dem dateibasierten Store.
+   Oben ein Link zur Import-Seite. Kein JS. *@
+@using Heimdall.Blazor.Grafana
+@inject IGrafanaDashboardStore Store
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Grafana-Dashboards" /></head>
+<body>
+<HeimdallNav BasePath="@BasePath" />
+<main class="hmd-main">
+    <h1>Grafana-Dashboards</h1>
+    <p class="hmd-dim">Importierte Dashboards werden lokal gespeichert und in Heimdall selbst gerendert — keine externe Grafana-Instanz nötig.</p>
+    <p><a class="hmd-btn" href="@(BasePath + "/dashboards/import")">+ Dashboard importieren</a></p>
+
+    @if (_list.Count == 0)
+    {
+        <p class="hmd-empty">Noch keine Dashboards importiert. Ein Grafana-Dashboard-JSON (mit PromQL-Panels) hochladen → es wird gegen die Heimdall-Metriken gerendert.</p>
+    }
+    else
+    {
+        <table class="hmd-table">
+            <thead><tr><th>Titel</th><th>UID</th><th>Panels</th><th></th></tr></thead>
+            <tbody>
+                @foreach (var d in _list)
+                {
+                    <tr>
+                        <td><a href="@(BasePath + "/dashboards/" + d.Uid)">@d.Title</a></td>
+                        <td class="hmd-mono">@d.Uid</td>
+                        <td>@d.PanelCount</td>
+                        <td>
+                            <form method="post" action="@(BasePath + "/dashboards/" + d.Uid + "/delete")">
+                                <button type="submit" class="hmd-btn hmd-btn-danger">Löschen</button>
+                            </form>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    }
+
+    <HeimdallFooter BasePath="@BasePath" />
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    private IReadOnlyList<GrafanaDashboardRef> _list = System.Array.Empty<GrafanaDashboardRef>();
+
+    protected override void OnInitialized() => _list = Store.List();
+}
