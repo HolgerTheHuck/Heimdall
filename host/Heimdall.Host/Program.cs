@@ -98,6 +98,21 @@ static void ValidateOptions(HeimdallHostOptions o)
         throw new InvalidOperationException("Heimdall:Storage:MaxBytes darf nicht negativ sein (0 = unbegrenzt).");
     if (o.Storage.RetentionSweepMinutes < 0)
         throw new InvalidOperationException("Heimdall:Storage:RetentionSweepMinutes darf nicht negativ sein (0 = deaktiviert).");
+    var rollup = o.Storage.Rollup;
+    if (rollup is not null)
+    {
+        if (rollup.ResolutionSeconds <= 0)
+            throw new InvalidOperationException(
+                $"Heimdall:Storage:Rollup:ResolutionSeconds „{rollup.ResolutionSeconds}“ ungültig — muss > 0 sein.");
+        if (rollup.RawDays < 0)
+            throw new InvalidOperationException(
+                $"Heimdall:Storage:Rollup:RawDays „{rollup.RawDays}“ ungültig — negativ nicht erlaubt (0 = sofort rollen).");
+        var metricsDays = o.Storage.Retention?.MetricsDays ?? o.Storage.RetentionDays;
+        if (rollup.Enabled && metricsDays > 0 && rollup.RawDays > metricsDays)
+            throw new InvalidOperationException(
+                $"Heimdall:Storage:Rollup:RawDays „{rollup.RawDays}“ > MetricsDaysEffective „{metricsDays}“ — " +
+                "Rollup-Fenster wäre leer (Raw wird vor dem Rollen gelöscht).");
+    }
     if (o.Auth.Enabled && string.IsNullOrEmpty(o.Auth.ApiKey))
         throw new InvalidOperationException("Heimdall:Auth:Enabled=true erfordert ApiKey (x-heimdall-key).");
     if (o.Auth.Enabled && string.IsNullOrEmpty(o.Auth.UiPassword))
@@ -130,6 +145,12 @@ static (IHeimdallSink Sink, IHeimdallQuery Query, IHeimdallMetricSource Metrics,
             WalMode = o.Storage.WalMode,
             AutoVacuum = o.Storage.AutoVacuum,
             VacuumMigrateLegacy = o.Storage.VacuumMigrateLegacy,
+            Rollup = new Heimdall.Storage.SQLite.HeimdallRollupOptions
+            {
+                Enabled = o.Storage.Rollup?.Enabled ?? false,
+                ResolutionSeconds = o.Storage.Rollup?.ResolutionSeconds ?? 60,
+                RawDays = o.Storage.Rollup?.RawDays ?? 1,
+            },
         });
         return (s, s, s, s);
     }

@@ -366,6 +366,8 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     public long CountSpans() => Count("heim_spans");
     public long CountLogs() => Count("heim_logs");
     public long CountMetrics() => Count("heim_metrics");
+    // Workstream F — Rollup-Zeilenzahl (Test-Hook).
+    internal long CountMetricsRollup() => Count("heim_metrics_rollup");
 
     private long Count(string table)
     {
@@ -436,6 +438,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_spans_start ON heim_spans(start_unix_nano)");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_logs_ts ON heim_logs(ts_unix_nano)");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_metrics_name_ts ON heim_metrics(name, ts_unix_nano)");
+        // Rollup-Tabelle + Index (Workstream F) — additive, kein user_version-Bump.
+        Exec(SqlCreateMetricsRollup);
+        Exec("CREATE INDEX IF NOT EXISTS idx_heim_metrics_rollup_name_ts ON heim_metrics_rollup(name, bucket_start)");
 
         Exec("CREATE VIRTUAL TABLE IF NOT EXISTS heim_spans_fts USING fts5(name, content='heim_spans', content_rowid='rowid')");
         Exec("CREATE TRIGGER IF NOT EXISTS heim_spans_ai AFTER INSERT ON heim_spans BEGIN " +
@@ -500,6 +505,10 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             try
             {
                 bool anyDeleted = false;
+                // 0. Rollup (Workstream F): rohe Metrik-Punkte aelter als RawDays zu
+                //    ResolutionSeconds-Buckets aggregieren, VOR der TTL-Loeschung.
+                //    Liefert true, falls Raw-Zeilen eingrollt wurden (-> Reclaim).
+                if (RollupRawMetrics()) anyDeleted = true;
                 // 1. Zeitbasierte Retention pro Signal (A1). Tabelle nur anfassen,
                 // wenn ihr effektiver Wert > 0 (0 = unbegrenzt).
                 if (_options.TracesDaysEffective > 0)
@@ -515,6 +524,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 if (_options.MetricsDaysEffective > 0)
                 {
                     long n = DeleteByCutoff("heim_metrics", "ts_unix_nano", _options.MetricsDaysEffective);
+                    // Rollup-Zeilen altern mit derselben Metric-Frist (bucket_start
+                    // als Zeit-Spalte) — in denselben metrics-Counter gefaltet.
+                    n += DeleteByCutoff("heim_metrics_rollup", "bucket_start", _options.MetricsDaysEffective);
                     Interlocked.Add(ref _retDeletedMetrics, n); anyDeleted |= n > 0;
                 }
 
@@ -594,7 +606,8 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 {
                     case "spans": Interlocked.Add(ref _retEvictedSpans, n); break;
                     case "logs": Interlocked.Add(ref _retEvictedLogs, n); break;
-                    case "metrics": Interlocked.Add(ref _retEvictedMetrics, n); break;
+                    case "metrics":
+                    case "metrics_rollup": Interlocked.Add(ref _retEvictedMetrics, n); break;  // gefaltet (Workstream F)
                 }
             }
             if (deleted == 0) break;                // Sicherheitsbremse
@@ -610,7 +623,8 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             "SELECT rowid, src FROM (" +
             "SELECT rowid, start_unix_nano AS t, 'spans' AS src FROM heim_spans " +
             "UNION ALL SELECT rowid, ts_unix_nano, 'logs' FROM heim_logs " +
-            "UNION ALL SELECT rowid, ts_unix_nano, 'metrics' FROM heim_metrics) " +
+            "UNION ALL SELECT rowid, ts_unix_nano, 'metrics' FROM heim_metrics " +
+            "UNION ALL SELECT rowid, bucket_start, 'metrics_rollup' FROM heim_metrics_rollup) " +
             "ORDER BY t ASC LIMIT @k";
         var list = new List<(long, string)>();
         using var cmd = new SqliteCommand(sql, _conn);
@@ -625,6 +639,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         "spans" => "heim_spans",
         "logs" => "heim_logs",
         "metrics" => "heim_metrics",
+        "metrics_rollup" => "heim_metrics_rollup",
         _ => throw new InvalidOperationException("Unbekannte Signal-Quelle: " + src)
     };
 
@@ -710,6 +725,19 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     private const string SqlCreateMetrics =
         "CREATE TABLE IF NOT EXISTS heim_metrics (" +
         "name TEXT NOT NULL, unit TEXT, type INTEGER NOT NULL, temporality INTEGER NOT NULL, ts_unix_nano INTEGER NOT NULL, " +
+        "value REAL NOT NULL, count INTEGER, sum REAL, min REAL, max REAL, " +
+        "bucket_counts_json TEXT, explicit_bounds_json TEXT, " +
+        "attrs_json TEXT, resource_json TEXT, scope_name TEXT, scope_version TEXT)";
+
+    // Rollup-Tabelle (Workstream F): Spiegel von heim_metrics Wert-Spalten, aber
+    // ts_unix_nano -> bucket_start + resolution_seconds. Eine Zeile pro
+    // (name, Fingerprint, bucket). Impliziter rowid (kein PK). Additive Tabelle
+    // (CREATE IF NOT EXISTS, kein user_version-Bump) — Legacy-DBs legen sie nach
+    // der VACUUM-Migration frisch an (korrekt, s. Plan).
+    private const string SqlCreateMetricsRollup =
+        "CREATE TABLE IF NOT EXISTS heim_metrics_rollup (" +
+        "name TEXT NOT NULL, unit TEXT, type INTEGER NOT NULL, temporality INTEGER NOT NULL, " +
+        "bucket_start INTEGER NOT NULL, resolution_seconds INTEGER NOT NULL, " +
         "value REAL NOT NULL, count INTEGER, sum REAL, min REAL, max REAL, " +
         "bucket_counts_json TEXT, explicit_bounds_json TEXT, " +
         "attrs_json TEXT, resource_json TEXT, scope_name TEXT, scope_version TEXT)";

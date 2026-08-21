@@ -28,6 +28,14 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         var ps = new List<SqliteParameter>();
         if (fromUnixNano is not null) { sb.Append(" AND ts_unix_nano >= @from"); ps.Add(Param("@from", fromUnixNano.Value)); }
         if (toUnixNano is not null) { sb.Append(" AND ts_unix_nano <= @to"); ps.Add(Param("@to", toUnixNano.Value)); }
+        // Workstream F: bei aktivem Rollup auch die Rollup-Tabelle vereinigen —
+        // sonst verschwindet ein Name, sobald seine Raw-Punkte alle gealtert sind.
+        if (_options.RollupEnabledEffective)
+        {
+            sb.Append(" UNION SELECT DISTINCT name FROM heim_metrics_rollup WHERE 1=1");
+            if (fromUnixNano is not null) { sb.Append(" AND bucket_start >= @from2"); ps.Add(Param("@from2", fromUnixNano.Value)); }
+            if (toUnixNano is not null) { sb.Append(" AND bucket_start <= @to2"); ps.Add(Param("@to2", toUnixNano.Value)); }
+        }
         sb.Append(" ORDER BY name");
 
         var names = new List<string>();
@@ -94,7 +102,11 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
     }
 
     // Reelle Metrik-Punkte aus heim_metrics (alter FetchPoints-Koerper, auf
-    // `names` statt query.Names parametrisiert).
+    // `names` statt query.Names parametrisiert). Bei aktivem Rollup (Workstream F)
+    // UNION ALL mit heim_metrics_rollup (bucket_start AS ts_unix_nano) — disjunktiv
+    // konstruktiv (eine Rollup-Zeile entsteht nur, wenn ihre Raw-Zeilen geloescht
+    // wurden), darum KEIN Boundary-Filter (sonst Gefahr, noch nicht gerollte Raw-
+    // Punkte auszuschliessen, wenn die Query-Boundary der Sweep-Boundary voraus ist).
     private IReadOnlyList<HMetricPointView> FetchRealPoints(IReadOnlyList<string> names, HMetricQuery query)
     {
         var sb = SqlBuilder();
@@ -112,6 +124,22 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         sb.Append(')');
         if (query.FromUnixNano is not null) { sb.Append(" AND ts_unix_nano >= @from"); ps.Add(Param("@from", query.FromUnixNano.Value)); }
         if (query.ToUnixNano is not null) { sb.Append(" AND ts_unix_nano <= @to"); ps.Add(Param("@to", query.ToUnixNano.Value)); }
+        if (_options.RollupEnabledEffective)
+        {
+            sb.Append(" UNION ALL SELECT name, unit, type, temporality, bucket_start, value, count, sum, min, max, " +
+                      "bucket_counts_json, explicit_bounds_json, attrs_json, resource_json, scope_name " +
+                      "FROM heim_metrics_rollup WHERE name IN (");
+            for (int i = 0; i < names.Count; i++)
+            {
+                if (i > 0) sb.Append(',');
+                var pname = "@r" + i.ToString(CultureInfo.InvariantCulture);
+                sb.Append(pname);
+                ps.Add(Param(pname, names[i]));
+            }
+            sb.Append(')');
+            if (query.FromUnixNano is not null) { sb.Append(" AND bucket_start >= @from2"); ps.Add(Param("@from2", query.FromUnixNano.Value)); }
+            if (query.ToUnixNano is not null) { sb.Append(" AND bucket_start <= @to2"); ps.Add(Param("@to2", query.ToUnixNano.Value)); }
+        }
         sb.Append(" ORDER BY name, ts_unix_nano ASC LIMIT @lim");
         ps.Add(Param("@lim", Math.Max(1, query.Limit)));
 
@@ -139,6 +167,14 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         var ps = new List<SqliteParameter>();
         if (fromUnixNano is not null) { sb.Append(" AND ts_unix_nano >= @from"); ps.Add(Param("@from", fromUnixNano.Value)); }
         if (toUnixNano is not null) { sb.Append(" AND ts_unix_nano <= @to"); ps.Add(Param("@to", toUnixNano.Value)); }
+        // Workstream F: bei aktivem Rollup Labels beider Tabellen vereinigen —
+        // Labels ueberleben fuer voll gealterte Metriken (Cap unverändert).
+        if (_options.RollupEnabledEffective)
+        {
+            sb.Append(" UNION ALL SELECT attrs_json, resource_json FROM heim_metrics_rollup WHERE 1=1");
+            if (fromUnixNano is not null) { sb.Append(" AND bucket_start >= @from2"); ps.Add(Param("@from2", fromUnixNano.Value)); }
+            if (toUnixNano is not null) { sb.Append(" AND bucket_start <= @to2"); ps.Add(Param("@to2", toUnixNano.Value)); }
+        }
         sb.Append(" LIMIT @cap");
         ps.Add(Param("@cap", SourceScanCap));
 

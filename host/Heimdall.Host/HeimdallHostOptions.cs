@@ -89,6 +89,16 @@ public sealed class HeimdallStorageOptions
     /// Teuer/exklusiv, self-gating via user_version. false = Notaus. Default true.
     /// </summary>
     public bool VacuumMigrateLegacy { get; set; } = true;
+
+    /// <summary>
+    /// Metriken-Downsampling (Rollup): rohe Metrik-Punkte werden nach
+    /// <see cref="HeimdallRollupOptions.RawDays"/> Tagen zu
+    /// <see cref="HeimdallRollupOptions.ResolutionSeconds"/>-Buckets aggregiert
+    /// (statt hart geloescht) und bis <c>MetricsDaysEffective</c> gehalten.
+    /// **Opt-In** (Default off) — bestehende Deployments unveraendert. Siehe
+    /// Workstream F (ROADMAP). 1.0: eine Stufe (1 Min); mehrstufig post-1.0.
+    /// </summary>
+    public HeimdallRollupOptions Rollup { get; set; } = new();
 }
 
 /// <summary>
@@ -103,6 +113,30 @@ public sealed class HeimdallRetentionOptions
     public int? LogsDays { get; set; }
     /// <summary>Metric-Retention in Tagen (null = Fallback, 0 = unbegrenzt).</summary>
     public int? MetricsDays { get; set; }
+}
+
+/// <summary>
+/// Metriken-Downsampling (Rollup) — rohe Metrik-Punkte werden nach
+/// <see cref="RawDays"/> Tagen zu <see cref="ResolutionSeconds"/>-Buckets
+/// aggregiert (statt hart geloescht) und bis zur gesamten Metric-Retention
+/// (<c>MetricsDaysEffective</c>) gehalten. **Opt-In** (Default off). Siehe
+/// Workstream F (ROADMAP). 1.0: eine Stufe (1 Min); mehrstufig post-1.0.
+/// </summary>
+public sealed class HeimdallRollupOptions
+{
+    /// <summary>Rollup aktivieren. Default false (bestehende Deployments unveraendert).</summary>
+    public bool Enabled { get; set; }
+    /// <summary>
+    /// Bucket-Aufloesung in Sekunden. Default 60 (1 Min — lookback-sicher fuer den
+    /// fixen 5-Min-Prom-Lookback). Stufen &gt; 300 wuerden Instant-Queries luecken.
+    /// </summary>
+    public int ResolutionSeconds { get; set; } = 60;
+    /// <summary>
+    /// Tage, die rohe Metrik-Punkte unangetastet bleiben, bevor sie zu Buckets
+    /// aggregiert werden. Default 1. 0 = sofort rollen. Muss &le; MetricsDaysEffective
+    /// sein (sonst ist das Rollup-Fenster leer — siehe ValidateOptions).
+    /// </summary>
+    public int RawDays { get; set; } = 1;
 }
 
 /// <summary>OTLP-Empfänger-Konfiguration (HTTP und gRPC unabhängig schaltbar).</summary>

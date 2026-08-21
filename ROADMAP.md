@@ -1,7 +1,8 @@
 # Heimdall — Roadmap zur 1.0
 
 > Stand: 2026-08-21. 0.1.0 gebaut (313 Tests grün, SQLite-only, auf GitHub privat).
-> Workstream A fertig (332 Tests grün, Commit 60a26f8). Entscheidungen #3–#7
+> Workstream A fertig (332 Tests grün, Commit 60a26f8). Workstream F (Metriken-
+> Rollup, zwei-stufig raw+1m) umgesetzt (340 Tests grün). Entscheidungen #3–#7
 > geklärt (siehe unten). Diese Roadmap ist ein lebendes Dokument — Stränge und
 > Reihenfolge sind Vorschläge.
 
@@ -161,25 +162,70 @@ nuget.org-Push (nuget.org kann später folgen).
 
 ---
 
-## Workstream F — Metriken-Downsampling (Rollup)  *(neu in 1.0 — Entscheidung #3)*
+## Workstream F — Metriken-Downsampling (Rollup)  *(umgesetzt, Entscheidung #3)*
 
 Alte rohe Metrik-Punkte werden nicht nur hart gelöscht (A1/A2), sondern zuvor zu
 niedriger Auflösung **aggregiert** — operativ nutzbare Langzeit-Trends bei
-kleinem Footprint. Größerer Eingriff in `IHeimdallMetricSource` / die SQLite-
-Metrik-Seite, darum eigener Strang.
+kleinem Footprint (1 Punkt/Min statt viele/Sek). **Umgesetzt als zwei-stufiges
+Modell (raw + eine 1-Min-Stufe); Mehrstufig (1h/1d) post-1.0**, weil der Prom-
+Lookback fix 5 Min ist (`SeriesResolver.DefaultLookbackMs=300_000`) und Stufen
+>5 Min Lücken in Instant-Queries reißen würden. 1 Min ist lookback-sicher
+(≥5 Rollup-Punkte im Lookback).
 
-- Rollup-Stufen (z. B. raw → 1 m → 1 h → 1 d); pro Stufe Aggregation nach
-  Metriktyp (Counter: letzter Wert/Rate, Gauge: avg/min/max, Histogram: Buckets
-  konsolidieren).
-- Übergang: beim Sweep einer rohen Stufe werden die Punkte in die nächste Stufe
-  zusammengefasst (statt verworfen); erst die gröbste Stufe altert hart heraus.
-- Config: `Rollup`-Abschnitt in `HeimdallStorageOptions` (Stufen, Aktivierung).
-- Query-Pfad: `FetchPoints` liefert für alte Fenster die rollup-Punkte (typ- und
-  stufengerecht), für neue das Raw — transparent für PromEngine/Grafana.
-- Achtung: berührt `IHeimdallMetricSource` (Vertrag) — sauber als additive
-  Erweiterung halten oder separaten Rollup-Source im Composite.
-- Tests: Aggregations-Korrektheit pro Typ, Stufenübergang beim Sweep, Query-Parität
-  Raw-vs-Rollup im überlappenden Fenster.
+**Architektur:** gesamte Rollup-Logik liegt *inside* `Heimdall.Storage.SQLite`
+(Sink + MetricSource-Partial) — kein Decorator, **null Vertragsänderung an
+`Heimdall.Abstractions`**. Separate `heim_metrics_rollup`-Tabelle (Spiegel der
+Wert-Spalten, `ts_unix_nano`→`bucket_start`+`resolution_seconds`, Index
+`idx_heim_metrics_rollup_name_ts`). Additive Anlage via `CREATE IF NOT EXISTS`,
+kein `user_version`-Bump.
+
+- **Sweep-Übergang** (`RollupRawMetrics`, aufgerufen in `SweepRetention` *vor* der
+  TTL-Löschung): Raw-Punkte mit `ts < boundary` (letzter voller Bucket ≤
+  `now-RawDays`) in 5000er Batches lesen, in C# pro (Fingerprint, Bucket)
+  aggregieren, ein Tx pro Batch: INSERT Rollup + DELETE Raw (idempotent — nach
+  Commit sind die Raw-Zeilen weg). Aggregation pro Typ/Temporality: Gauge→LAST,
+  Sum/Delta→SUM, Sum/Cumulative→LAST, Hist/Delta→elementweise SUM Buckets+sum+
+  count, Hist/Cumulative→LAST; MIN/MAX je Range. `attrs_json`/`resource_json`
+  verbatim (Labels/Matcher arbeiten identisch).
+- **Disjointness konstruktiv:** eine Rollup-Zeile entsteht nur, wenn ihre Raw-
+  Zeilen im selben Tx gelöscht wurden → `heim_metrics` und `heim_metrics_rollup`
+  sind disjunkt; `FetchRealPoints` UNION ALL beider Tabellen **ohne Boundary-
+  Filter** zählt kein logisches Sample doppelt.
+- **Config:** `HeimdallRollupOptions { Enabled=false, ResolutionSeconds=60,
+  RawDays=1 }` auf `SQLiteTelemetryOptions` UND host-seitig `HeimdallStorageOptions`.
+  **Opt-In (Default off)** — bestehende Deployments unverändert. Validierung:
+  `ResolutionSeconds<=0`, `RawDays<0`, `RawDays>MetricsDaysEffective` (bei Enabled)
+  → Startup-Fehler.
+- **Cap-Eviction (A2):** Rollup-Zeilen zählen fürs `MaxBytes`-Cap und sind evictbar
+  (`OldestRows`-UNION, `SourceTable`-Mapping); Eviction-Counter in
+  `heimdall.retention.evicted{signal=metrics}` gefaltet (keine Kardinalitäts-/
+  Dashboard-Breakage). Rollup-TTL über `bucket_start` mit `MetricsDaysEffective`,
+  in `heimdall.retention.deleted{signal=metrics}` gefaltet.
+- **Query-Merge:** `FetchRealPoints` UNION ALL raw+rollup (wenn enabled),
+  `ListMetricNames`/`ScanLabelRows` UNION beider Tabellen — sonst verschwindet ein
+  Name/Label, sobald seine Raw-Punkte alle gealtert sind. Disabled = heute
+  (regression-sicher).
+- **Tests:** `RollupTests.cs` (8): Validierung, Aggregation pro Typ, Disjointness,
+  Query-Parität Raw/Roll, Discovery-Parität nach Alterung, Sweep-Idempotenz,
+  Cap-Eviction über Rollup, Disabled==heute. 340 Tests grün.
+
+### 1.0-Limitationen
+
+- Opt-In (`Enabled=false` Default); **eine Stufe (1 Min)**; Mehrstufig post-1.0.
+- `*_over_time` über Roll-Fenster grob (1 Pt/Min); `count_over_time` liefert
+  ~Minuten, nicht den originalen Sample-Count.
+- Sub-Resolution `rate()`/`irate()` (`[<1m]`) über alte Daten jenseits `RawDays`
+  → NaN.
+- Cumulative-Sum/Gauge-Rollup-Punkte sind „as-of bucket_start"-Snapshots; Inter-
+  Punkt-Zeitdelta ~Resolution, nicht echtes Inter-Sample-Delta.
+- Attribut-Reihenfolge-Variation kann eine logische Serie in mehrere Rollup-Serien
+  spalten (selbstkorrigierend, selten — selbes Verhalten wie bei Raw-Queries).
+- Cap kann die effektive Rollup-Retention unter `MetricsDaysEffective` drücken
+  (Cap ist harte Schranke).
+- **Erstlauf auf großer Alt-DB:** Roll aktiviert auf DB mit Monaten Raw → erster
+  Sweep rollt riesigen Bereich in 5000er Batches (kurze Tx je Batch, `try/catch`
+  im Sweep, Crash nicht fatal). Erst-Aktivierung kann mehrere Sweep-Zyklen
+  brauchen; Queries sehen bis dahin Raw (korrekt).
 
 ---
 
