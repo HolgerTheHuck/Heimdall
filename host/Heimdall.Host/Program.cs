@@ -89,6 +89,15 @@ static void ValidateOptions(HeimdallHostOptions o)
             $"Heimdall:Storage:Backend „{o.Storage.Backend}“ ungültig — 1.0 unterstützt nur „sqlite“. " +
             "Das Walhalla-Backend kehrt als NuGet-Konsument zurück, sobald Heimdall.Abstractions gepackt ist.");
     o.Storage.Backend = backend;
+    if (o.Storage.RetentionDays < 0)
+        throw new InvalidOperationException("Heimdall:Storage:RetentionDays darf nicht negativ sein (0 = unbegrenzt).");
+    var ret = o.Storage.Retention;
+    if (ret is not null && (ret.TracesDays < 0 || ret.LogsDays < 0 || ret.MetricsDays < 0))
+        throw new InvalidOperationException("Heimdall:Storage:Retention:{Traces,Logs,Metrics}Days dürfen nicht negativ sein (0 = unbegrenzt, null = Fallback).");
+    if (o.Storage.MaxBytes < 0)
+        throw new InvalidOperationException("Heimdall:Storage:MaxBytes darf nicht negativ sein (0 = unbegrenzt).");
+    if (o.Storage.RetentionSweepMinutes < 0)
+        throw new InvalidOperationException("Heimdall:Storage:RetentionSweepMinutes darf nicht negativ sein (0 = deaktiviert).");
     if (o.Auth.Enabled && string.IsNullOrEmpty(o.Auth.ApiKey))
         throw new InvalidOperationException("Heimdall:Auth:Enabled=true erfordert ApiKey (x-heimdall-key).");
     if (o.Auth.Enabled && string.IsNullOrEmpty(o.Auth.UiPassword))
@@ -110,8 +119,17 @@ static (IHeimdallSink Sink, IHeimdallQuery Query, IHeimdallMetricSource Metrics,
         {
             DataPath = o.Storage.DataPath,
             RetentionDays = o.Storage.RetentionDays,
+            Retention = new Heimdall.Storage.SQLite.HeimdallRetentionOptions
+            {
+                TracesDays = o.Storage.Retention?.TracesDays,
+                LogsDays = o.Storage.Retention?.LogsDays,
+                MetricsDays = o.Storage.Retention?.MetricsDays,
+            },
+            MaxBytes = o.Storage.MaxBytes,
             RetentionSweepMinutes = o.Storage.RetentionSweepMinutes,
             WalMode = o.Storage.WalMode,
+            AutoVacuum = o.Storage.AutoVacuum,
+            VacuumMigrateLegacy = o.Storage.VacuumMigrateLegacy,
         });
         return (s, s, s, s);
     }

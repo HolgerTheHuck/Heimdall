@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -34,9 +35,14 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     private readonly Dictionary<string, Regex> _regexCache = new(StringComparer.Ordinal);
     private int _disposed;
 
+    // Retention- & Eviction-Zähler (A4-Observability, siehe SQLiteTelemetrySink.MetricSource.cs).
+    private long _retDeletedSpans, _retDeletedLogs, _retDeletedMetrics;
+    private long _retEvictedSpans, _retEvictedLogs, _retEvictedMetrics;
+
     public SQLiteTelemetrySink(SQLiteTelemetryOptions? options = null)
     {
         _options = options ?? new SQLiteTelemetryOptions();
+        _options.Validate();
         // Pooling=False: Dispose gibt den Datei-Handle frei (wichtig fuer Tests/Cleanup
         // und fuer den eingebetteten Betrieb, in dem die Datei bei Bedarf verschoben
         // werden koennen soll).
@@ -65,13 +71,24 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         }
         Exec("PRAGMA foreign_keys=ON;");
 
+        // auto_vacuum + Legacy-Migration (A3). auto_vacuum muss VOR der ersten
+        // Tabellen-Anlage stehen (wirkt nur auf frische DBs); bestehende Legacy-
+        // DBs (auto_vacuum=0, user_version=0) werden einmalig per VACUUM migriert.
+        BootstrapAutoVacuum();
+
         BootstrapSchema();
+
+        // Frische DB (jetzt mit Tabellen) auf user_version=1 heben. Legacy-DBs
+        // mit Notaus (nicht migriert) bleiben auf 0, damit sie spaeter noch
+        // migriert werden koennen.
+        if (_options.AutoVacuum && (int)PragmaLong("auto_vacuum") == 2 && PragmaLong("user_version") == 0)
+            Exec("PRAGMA user_version = 1;");
 
         (_insSpan, _pSpan) = Prepare(SqlInsertSpan, 16);
         (_insLog, _pLog) = Prepare(SqlInsertLog, 10);
         (_insMetric, _pMetric) = Prepare(SqlInsertMetric, 16);
 
-        if (_options.RetentionDays > 0 && _options.RetentionSweepMinutes > 0)
+        if (_options.SweepActive)
         {
             _retentionTimer = new Timer(_ => SweepRetention(), null,
                 TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(_options.RetentionSweepMinutes));
@@ -473,26 +490,195 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         cmd.ExecuteNonQuery();
     }
 
-    private void SweepRetention()
+    internal void SweepRetention()
     {
-        if (_options.RetentionDays <= 0) return;
-        var cutoff = DateTimeOffset.UtcNow.AddDays(-_options.RetentionDays).ToUnixTimeSeconds() * 1_000_000_000L;
+        // Guard by timer (SweepActive), aber doppelt-halten: auch ein manuell
+        // angerufener Sweep (z. B. durch Tests) respektiert die Konfiguration.
+        if (!_options.AnyTimeRetention && _options.MaxBytes <= 0) return;
         lock (_gate)
         {
             try
             {
-                using var tx = _conn.BeginTransaction();
-                using var d1 = new SqliteCommand($"DELETE FROM heim_spans WHERE start_unix_nano < @c", _conn, tx);
-                d1.Parameters.AddWithValue("@c", cutoff); d1.ExecuteNonQuery();
-                using var d2 = new SqliteCommand($"DELETE FROM heim_logs WHERE ts_unix_nano < @c", _conn, tx);
-                d2.Parameters.AddWithValue("@c", cutoff); d2.ExecuteNonQuery();
-                using var d3 = new SqliteCommand($"DELETE FROM heim_metrics WHERE ts_unix_nano < @c", _conn, tx);
-                d3.Parameters.AddWithValue("@c", cutoff); d3.ExecuteNonQuery();
-                tx.Commit();
+                bool anyDeleted = false;
+                // 1. Zeitbasierte Retention pro Signal (A1). Tabelle nur anfassen,
+                // wenn ihr effektiver Wert > 0 (0 = unbegrenzt).
+                if (_options.TracesDaysEffective > 0)
+                {
+                    long n = DeleteByCutoff("heim_spans", "start_unix_nano", _options.TracesDaysEffective);
+                    Interlocked.Add(ref _retDeletedSpans, n); anyDeleted |= n > 0;
+                }
+                if (_options.LogsDaysEffective > 0)
+                {
+                    long n = DeleteByCutoff("heim_logs", "ts_unix_nano", _options.LogsDaysEffective);
+                    Interlocked.Add(ref _retDeletedLogs, n); anyDeleted |= n > 0;
+                }
+                if (_options.MetricsDaysEffective > 0)
+                {
+                    long n = DeleteByCutoff("heim_metrics", "ts_unix_nano", _options.MetricsDaysEffective);
+                    Interlocked.Add(ref _retDeletedMetrics, n); anyDeleted |= n > 0;
+                }
+
+                // 2. Größen-Cap mit signalübergreifender Eviction (A2).
+                if (_options.MaxBytes > 0) anyDeleted |= EvictByCap();
+
+                // 3. Space-Reclaim (A3) — NUR wenn gelöscht wurde: FTS5-Shadow-
+                // Tabellen geben Seiten bei DELETE nicht frei (Tombstones bleiben
+                // in den Segmenten), darum rebuild + incremental_vacuum, sonst
+                // würde die Datei über die Tombstones monoton wachsen. Base-Pages
+                // sind danach ebenfalls zurückgewonnen; die Datei schrumpft.
+                if (anyDeleted)
+                {
+                    RebuildFtsIndexes();
+                    RunIncrementalVacuum();
+                }
             }
             catch { /* Sweeper darf nie den Host killen */ }
         }
     }
+
+    // FTS5-Indizes aus den aktuellen Base-Tabellen neu aufbauen (befreit die
+    // alten Segment-Pages mit ihren Tombstones → landen auf der Freelist →
+    // incremental_vacuum gibt sie an die Datei zurück).
+    private void RebuildFtsIndexes()
+    {
+        Exec("INSERT INTO heim_spans_fts(heim_spans_fts) VALUES('rebuild');");
+        Exec("INSERT INTO heim_logs_fts(heim_logs_fts) VALUES('rebuild');");
+    }
+
+    // Loescht Zeilen aelter als `days` aus `table` (Zeit-Spalte `timeCol`,
+    // indexgestuetzt) und liefert die Anzahl geloeschter Zeilen (-> A4-Zaehler).
+    private long DeleteByCutoff(string table, string timeCol, int days)
+    {
+        var cutoff = DateTimeOffset.UtcNow.AddDays(-days).ToUnixTimeSeconds() * 1_000_000_000L;
+        using var tx = _conn.BeginTransaction();
+        using var cmd = new SqliteCommand($"DELETE FROM {table} WHERE {timeCol} < @c", _conn, tx);
+        cmd.Parameters.AddWithValue("@c", cutoff);
+        long n = cmd.ExecuteNonQuery();
+        tx.Commit();
+        return n;
+    }
+
+    // A2: aelteste Zeilen signaluebergreifend evicten, bis die belegte DB-Groesse
+    // unter den Ziel-Fuellgrad (90 % von MaxBytes) sinkt. Gemessen wird an
+    // BELEGTEN Pages (page_count - freelist_count) * page_size — nicht an der
+    // Dateigroesse: Base-Pages landen bei DELETE sofort auf der Freelist (die
+    // Schleife kommt runter), FTS5-Segment-Pages erst nach RebuildFtsIndexes.
+    // Liefert true, falls Zeilen evictet wurden (-> A4-Zaehler + Reclaim).
+    private bool EvictByCap()
+    {
+        if (UsedBytes() <= _options.MaxBytes) return false;
+        const int tranche = 1000;
+        long target = _options.MaxBytes * 9 / 10;   // 90 % Ziel-Fuellgrad (Puffer)
+        bool evicted = false;
+        while (UsedBytes() > target)
+        {
+            var oldest = OldestRows(tranche);
+            if (oldest.Count == 0) break;           // DB leer — nichts mehr zu evicten
+            long deleted = 0;
+            using (var tx = _conn.BeginTransaction())
+            {
+                foreach (var g in oldest.GroupBy(r => r.Src))
+                {
+                    var ids = string.Join(',', g.Select(r => r.Rowid.ToString(CultureInfo.InvariantCulture)));
+                    using var cmd = new SqliteCommand(
+                        $"DELETE FROM {SourceTable(g.Key)} WHERE rowid IN ({ids})", _conn, tx);
+                    deleted += cmd.ExecuteNonQuery();
+                }
+                tx.Commit();
+            }
+            // Eviction-Zaehler pro Signal (A4).
+            foreach (var g in oldest.GroupBy(r => r.Src))
+            {
+                long n = g.Count();
+                switch (g.Key)
+                {
+                    case "spans": Interlocked.Add(ref _retEvictedSpans, n); break;
+                    case "logs": Interlocked.Add(ref _retEvictedLogs, n); break;
+                    case "metrics": Interlocked.Add(ref _retEvictedMetrics, n); break;
+                }
+            }
+            if (deleted == 0) break;                // Sicherheitsbremse
+            evicted = true;
+        }
+        return evicted;
+    }
+
+    // Aelteste `k` Zeilen ueber alle drei Signal-Tabellen (geordnet nach Zeit).
+    private List<(long Rowid, string Src)> OldestRows(int k)
+    {
+        const string sql =
+            "SELECT rowid, src FROM (" +
+            "SELECT rowid, start_unix_nano AS t, 'spans' AS src FROM heim_spans " +
+            "UNION ALL SELECT rowid, ts_unix_nano, 'logs' FROM heim_logs " +
+            "UNION ALL SELECT rowid, ts_unix_nano, 'metrics' FROM heim_metrics) " +
+            "ORDER BY t ASC LIMIT @k";
+        var list = new List<(long, string)>();
+        using var cmd = new SqliteCommand(sql, _conn);
+        cmd.Parameters.AddWithValue("@k", k);
+        using var r = cmd.ExecuteReader();
+        while (r.Read()) list.Add((r.GetInt64(0), r.GetString(1)));
+        return list;
+    }
+
+    private static string SourceTable(string src) => src switch
+    {
+        "spans" => "heim_spans",
+        "logs" => "heim_logs",
+        "metrics" => "heim_metrics",
+        _ => throw new InvalidOperationException("Unbekannte Signal-Quelle: " + src)
+    };
+
+    // Belegte DB-Groesse = (page_count - freelist_count) * page_size.
+    internal long UsedBytes() =>
+        (PragmaLong("page_count") - PragmaLong("freelist_count")) * PragmaLong("page_size");
+
+    // A3: Free-Pages nach DELETE/Eviction an die Datei zurueckgeben (Datei
+    // schrumpft). Nur wirksam bei auto_vacuum=INCREMENTAL (==2), sonst no-op.
+    private void RunIncrementalVacuum()
+    {
+        if (!_options.AutoVacuum) return;
+        if (PragmaLong("auto_vacuum") != 2) return;
+        Exec("PRAGMA incremental_vacuum;");
+    }
+
+    // A3: auto_vacuum vor Tabellen-Anlage setzen (frische DB) bzw. eine Legacy-
+    // DB (user_version=0, auto_vacuum=0) einmalig per VACUUM migrieren.
+    private void BootstrapAutoVacuum()
+    {
+        int existingTables = Convert.ToInt32(Scalar("SELECT count(*) FROM sqlite_master WHERE type='table'"));
+        if (existingTables == 0)
+        {
+            // Frische DB: auto_vacuum wirkt jetzt (vor BootstrapSchema).
+            if (_options.AutoVacuum) Exec("PRAGMA auto_vacuum = INCREMENTAL;");
+            return;
+        }
+        // Bestehende DB: nur migrieren, wenn noch auf Legacy-Stand (user_version=0).
+        if (PragmaLong("user_version") > 0) return;
+        if (!_options.AutoVacuum) return;               // Operator will kein Reclaim.
+        int av = (int)PragmaLong("auto_vacuum");
+        if (av == 0)
+        {
+            if (!_options.VacuumMigrateLegacy) return;  // Notaus: bleibt migrierbar.
+            Exec("PRAGMA auto_vacuum = INCREMENTAL;");
+            Exec("VACUUM;");                            // teuer/exklusiv, einmalig
+        }
+        // user_version=1 markiert: auto_vacuum steht (gesetzt oder via VACUUM).
+        Exec("PRAGMA user_version = 1;");
+    }
+
+    internal long PragmaLong(string name)
+    {
+        using var cmd = new SqliteCommand($"PRAGMA {name};", _conn);
+        return Convert.ToInt64(cmd.ExecuteScalar()!);
+    }
+
+    private object? Scalar(string sql)
+    {
+        using var cmd = new SqliteCommand(sql, _conn);
+        return cmd.ExecuteScalar();
+    }
+
+    private static long NowUnixNano => DateTimeOffset.UtcNow.ToUnixTimeSeconds() * 1_000_000_000L;
 
     public void Dispose()
     {

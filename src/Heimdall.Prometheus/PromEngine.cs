@@ -86,6 +86,14 @@ public sealed class PromEngine
     /// <summary>Werte eines Prom-Labels (reverse-map prom→OTel-Keys, Werte vereinigt).</summary>
     public IReadOnlyList<string> ListLabelValues(string promLabel, long? fromUnixNano = null, long? toUnixNano = null)
     {
+        // __name__ ist ein Prom-Pseudo-Label: seine Werte sind die Metriknamen,
+        // nicht in OTel-Attribut-Keys gespeichert (kein OTel-Key mappt auf __name__,
+        // darum fiel es bisher durchs Raster und /label/__name__/values war leer).
+        // Prom-konform über ListMetricNames liefern — deckt echte OTel-Metriken
+        // UND die synthetisierten heimdall.*-Observability-Metriken (A4) ab.
+        if (promLabel == "__name__")
+            return ListMetricNames(fromUnixNano, toUnixNano);
+
         var rawNames = _source.ListLabelNames(null, fromUnixNano, toUnixNano);
         // Reverse-Map: ein Prom-Label kann aus mehreren OTel-Keys stammen (job/service_name
         // beide aus service.name). Werte aller treffenden OTel-Keys werden vereinigt.

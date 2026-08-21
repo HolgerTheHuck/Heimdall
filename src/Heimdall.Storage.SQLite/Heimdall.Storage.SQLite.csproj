@@ -13,6 +13,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <InternalsVisibleTo Include="Heimdall.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\Heimdall.Abstractions\Heimdall.Abstractions.csproj" />
     <!-- Microsoft.Data.Sqlite buendelt SQLite mit FTS5 aktiviert (e_sqlite3, SQLITE_ENABLE_FTS5). -->
     <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.11" />

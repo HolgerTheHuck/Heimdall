@@ -13,12 +13,103 @@ public sealed class SQLiteTelemetryOptions
     /// </summary>
     public string DataPath { get; set; } = "heimdall-otel.db";
 
-    /// <summary>Retention in Tagen; 0 = unbegrenzt. Default 7.</summary>
+    /// <summary>
+    /// Retention in Tagen; 0 = unbegrenzt. Default 7. Dient als **Abwaertskompat-
+    /// Fallback**: pro Signal gilt <see cref="HeimdallRetentionOptions"/> (falls
+    /// gesetzt), sonst dieser Wert. Bestehende appsettings (nur RetentionDays)
+    /// bleiben unverändert lauffähig.
+    /// </summary>
     public int RetentionDays { get; set; } = 7;
 
-    /// <summary>Intervall des Retention-Sweepers (Minuten). Default 30.</summary>
+    /// <summary>
+    /// Per-Signal-Retention (TTL pro Signal). null-Werte fallen auf
+    /// <see cref="RetentionDays"/> zurück; 0 = explizit unbegrenzt.
+    /// </summary>
+    public HeimdallRetentionOptions Retention { get; set; } = new();
+
+    /// <summary>
+    /// Harter Plafond über die gesamte DB-Datei in Bytes; 0 = unbegrenzt.
+    /// Bei Ueberschreitung evictet der Sweeper aelteste Zeilen signaluebergreifend
+    /// bis zum Ziel-Fuellgrad (90 %). Default 0.
+    /// </summary>
+    public long MaxBytes { get; set; }
+
+    /// <summary>Intervall des Retention-Sweepers (Minuten). 0 = Sweep deaktiviert. Default 30.</summary>
     public int RetentionSweepMinutes { get; set; } = 30;
 
     /// <summary>SQLite-Verbindung zusatzlich geoeffnet mit foreign_keys=ON und WAL.</summary>
     public bool WalMode { get; set; } = true;
+
+    /// <summary>
+    /// auto_vacuum=INCREMENTAL beim Bootstrap setzen und nach jedem Sweep
+    /// <c>PRAGMA incremental_vacuum</c> laufen lassen, damit die DB-Datei nach
+    /// DELETE/Eviction schrumpft. Default true. Nur wirksam bei frischen DBs
+    /// bzw. nach der <see cref="VacuumMigrateLegacy"/>-Migration.
+    /// </summary>
+    public bool AutoVacuum { get; set; } = true;
+
+    /// <summary>
+    /// Einmaliger <c>VACUUM</c> beim Start, falls eine Legacy-DB (auto_vacuum=0,
+    /// user_version=0) vorliegt — reorganisiert die DB mit dem neuen auto_vacuum.
+    /// Teuer/exklusiv, darum self-gating via user_version (nur einmal). false =
+    /// Notaus fuer große Alt-DBs (dann kein Space-Reclaim bis zur manuellen
+    /// Migration). Default true.
+    /// </summary>
+    public bool VacuumMigrateLegacy { get; set; } = true;
+
+    // -----------------------------------------------------------------------
+    // Effective-Werte (Fallback-Logik zentral hier, nicht im Sink/Host).
+    // int? ?? int: null -> RetentionDays; 0 bleibt 0 (explizit unbegrenzt).
+    // -----------------------------------------------------------------------
+
+    /// <summary>Effektive Trace-Retention in Tagen (0 = unbegrenzt).</summary>
+    public int TracesDaysEffective => Retention?.TracesDays ?? RetentionDays;
+    /// <summary>Effektive Log-Retention in Tagen (0 = unbegrenzt).</summary>
+    public int LogsDaysEffective => Retention?.LogsDays ?? RetentionDays;
+    /// <summary>Effektive Metric-Retention in Tagen (0 = unbegrenzt).</summary>
+    public int MetricsDaysEffective => Retention?.MetricsDays ?? RetentionDays;
+
+    /// <summary>True, wenn mindestens ein Signal eine zeitliche Frist hat.</summary>
+    public bool AnyTimeRetention =>
+        TracesDaysEffective > 0 || LogsDaysEffective > 0 || MetricsDaysEffective > 0;
+
+    /// <summary>True, wenn der Sweeper etwas zu tun hat (Frist ODER Cap).</summary>
+    public bool SweepActive => (AnyTimeRetention || MaxBytes > 0) && RetentionSweepMinutes > 0;
+
+    /// <summary>
+    /// Wirft bei ungueltigen Werten. Authoritativ (deckt Embedded-Nutzung ohne
+    /// Host-Validierung). Negativ-Fristen, MaxBytes&lt;0, SweepMinutes&lt;0.
+    /// </summary>
+    public void Validate()
+    {
+        if (RetentionDays < 0)
+            throw new InvalidOperationException(
+                $"Heimdall:Storage:RetentionDays „{RetentionDays}“ ungültig — negativ nicht erlaubt (0 = unbegrenzt).");
+        if (Retention is not null)
+        {
+            if (Retention.TracesDays < 0 || Retention.LogsDays < 0 || Retention.MetricsDays < 0)
+                throw new InvalidOperationException(
+                    "Heimdall:Storage:Retention:{Traces,Logs,Metrics}Days ungültig — negativ nicht erlaubt (0 = unbegrenzt, null = Fallback).");
+        }
+        if (MaxBytes < 0)
+            throw new InvalidOperationException(
+                $"Heimdall:Storage:MaxBytes „{MaxBytes}“ ungültig — negativ nicht erlaubt (0 = unbegrenzt).");
+        if (RetentionSweepMinutes < 0)
+            throw new InvalidOperationException(
+                $"Heimdall:Storage:RetentionSweepMinutes „{RetentionSweepMinutes}“ ungültig — negativ nicht erlaubt (0 = Sweep deaktiviert).");
+    }
+}
+
+/// <summary>
+/// Per-Signal-Retention (TTL pro Signal). null = nicht gesetzt (Fallback auf
+/// <see cref="SQLiteTelemetryOptions.RetentionDays"/>); 0 = explizit unbegrenzt.
+/// </summary>
+public sealed class HeimdallRetentionOptions
+{
+    /// <summary>Trace-Retention in Tagen (null = Fallback, 0 = unbegrenzt).</summary>
+    public int? TracesDays { get; set; }
+    /// <summary>Log-Retention in Tagen (null = Fallback, 0 = unbegrenzt).</summary>
+    public int? LogsDays { get; set; }
+    /// <summary>Metric-Retention in Tagen (null = Fallback, 0 = unbegrenzt).</summary>
+    public int? MetricsDays { get; set; }
 }

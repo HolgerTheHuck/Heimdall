@@ -32,6 +32,14 @@ public class HeimdallHostOptionsTests
         Assert.Equal("var/heimdall/otel.db", o.Storage.DataPath);
         Assert.Equal(7, o.Storage.RetentionDays);
         Assert.True(o.Storage.WalMode);
+        // Retention-Defaults: Sub-Objekt da, alle Signale null (→ Fallback auf RetentionDays).
+        Assert.NotNull(o.Storage.Retention);
+        Assert.Null(o.Storage.Retention.TracesDays);
+        Assert.Null(o.Storage.Retention.LogsDays);
+        Assert.Null(o.Storage.Retention.MetricsDays);
+        Assert.Equal(0, o.Storage.MaxBytes);              // 0 = unbegrenzt
+        Assert.True(o.Storage.AutoVacuum);
+        Assert.True(o.Storage.VacuumMigrateLegacy);
         Assert.True(o.Otlp.Http.Enabled);
         Assert.Equal("/otel", o.Otlp.Http.Prefix);
         Assert.True(o.Otlp.Grpc.Enabled);
@@ -100,6 +108,37 @@ public class HeimdallHostOptionsTests
         Assert.Equal("k-secret", o.Auth.ApiKey);
         Assert.Equal("pw", o.Auth.UiPassword);
         Assert.True(o.SeedDemoData);
+    }
+
+    [Fact]
+    public void Retention_Und_MaxBytes_Binden_Pro_Signal()
+    {
+        var json = @"{
+          ""Heimdall"": {
+            ""Storage"": {
+              ""Backend"": ""sqlite"",
+              ""DataPath"": ""/data/otel.db"",
+              ""RetentionDays"": 7,
+              ""Retention"": { ""TracesDays"": 3, ""LogsDays"": 14, ""MetricsDays"": 30 },
+              ""MaxBytes"": 1073741824,
+              ""RetentionSweepMinutes"": 15,
+              ""WalMode"": false,
+              ""AutoVacuum"": false,
+              ""VacuumMigrateLegacy"": false
+            }
+          }
+        }";
+
+        var o = Bind(json);
+        Assert.NotNull(o);
+        Assert.Equal(3, o!.Storage.Retention.TracesDays);
+        Assert.Equal(14, o.Storage.Retention.LogsDays);
+        Assert.Equal(30, o.Storage.Retention.MetricsDays);
+        Assert.Equal(7, o.Storage.RetentionDays);           // Fallback bleibt erhalten
+        Assert.Equal(1073741824L, o.Storage.MaxBytes);
+        Assert.Equal(15, o.Storage.RetentionSweepMinutes);
+        Assert.False(o.Storage.AutoVacuum);
+        Assert.False(o.Storage.VacuumMigrateLegacy);
     }
 
     [Fact]

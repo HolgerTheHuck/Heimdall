@@ -4,6 +4,7 @@ using System.Globalization;
 using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
+using System.Threading;
 using Heimdall;
 using Microsoft.Data.Sqlite;
 
@@ -32,6 +33,12 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         var names = new List<string>();
         lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
             while (r.Read()) names.Add(r.GetString(0));
+        // heimdall.*-Observability-Metriken (A4) — „now"-Metriken, immer gelistet
+        // (unabhaengig vom Zeitfenster, da sie den Live-Zustand beschreiben).
+        names.Add(MRetentionDeleted);
+        names.Add(MRetentionEvicted);
+        names.Add(MStorageBytes);
+        names.Add(MStorageRows);
         return names;
     }
 
@@ -68,17 +75,39 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         if (query is null || query.Names is null || query.Names.Count == 0)
             return Array.Empty<HMetricPointView>();
 
+        // heimdall.*-Observability-Metriken (A4) synthetisieren; reelle OTel-Namen
+        // ueber heim_metrics holen. Ein Query darf beide mischen.
+        var heimdall = new List<string>();
+        var real = new List<string>();
+        foreach (var n in query.Names)
+        {
+            if (IsHeimdallMetric(n)) heimdall.Add(n);
+            else real.Add(n);
+        }
+
+        var result = new List<HMetricPointView>();
+        if (heimdall.Count > 0)
+            result.AddRange(SynthesizeHeimdallMetrics(heimdall, query.Matchers));
+        if (real.Count > 0)
+            result.AddRange(FetchRealPoints(real, query));
+        return result;
+    }
+
+    // Reelle Metrik-Punkte aus heim_metrics (alter FetchPoints-Koerper, auf
+    // `names` statt query.Names parametrisiert).
+    private IReadOnlyList<HMetricPointView> FetchRealPoints(IReadOnlyList<string> names, HMetricQuery query)
+    {
         var sb = SqlBuilder();
         sb.Append("SELECT name, unit, type, temporality, ts_unix_nano, value, count, sum, min, max, " +
                   "bucket_counts_json, explicit_bounds_json, attrs_json, resource_json, scope_name " +
                   "FROM heim_metrics WHERE name IN (");
         var ps = new List<SqliteParameter>();
-        for (int i = 0; i < query.Names.Count; i++)
+        for (int i = 0; i < names.Count; i++)
         {
             if (i > 0) sb.Append(',');
             var pname = "@n" + i.ToString(CultureInfo.InvariantCulture);
             sb.Append(pname);
-            ps.Add(Param(pname, query.Names[i]));
+            ps.Add(Param(pname, names[i]));
         }
         sb.Append(')');
         if (query.FromUnixNano is not null) { sb.Append(" AND ts_unix_nano >= @from"); ps.Add(Param("@from", query.FromUnixNano.Value)); }
@@ -244,6 +273,82 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
                 }
             }
             return r.IsMatch(input);
+        }
+    }
+
+    // -----------------------------------------------------------------------
+    // A4: heimdall.*-Observability-Metriken (synthetisiert, nicht in heim_metrics
+    // gespeichert — keine rekursive Selbst-Befuellung). Der Sink ist via
+    // CompositeMetricSource als _real ans Prom-Layer angebunden; heimdall.*-Namen
+    // routen dort an _real.FetchPoints. Labels: signal=spans|logs|metrics.
+    // 1.0-Limitation: „now"-Punkte — historische Range-Queries sehen sie nur am
+    // aktuellen Rand, nicht in der Vergangenheit.
+    // -----------------------------------------------------------------------
+
+    private const string MRetentionDeleted = "heimdall.retention.deleted";
+    private const string MRetentionEvicted = "heimdall.retention.evicted";
+    private const string MStorageBytes = "heimdall.storage.bytes";
+    private const string MStorageRows = "heimdall.storage.rows";
+    private const string LSignal = "signal";
+    private const string ScopeHeimdall = "heimdall";
+
+    private static readonly HashSet<string> HeimdallMetricNames = new(StringComparer.Ordinal)
+    {
+        MRetentionDeleted, MRetentionEvicted, MStorageBytes, MStorageRows
+    };
+
+    private static bool IsHeimdallMetric(string name) => HeimdallMetricNames.Contains(name);
+
+    private IReadOnlyList<HMetricPointView> SynthesizeHeimdallMetrics(
+        IReadOnlyList<string> names, IReadOnlyList<HLabelMatcher>? matchers)
+    {
+        var list = new List<HMetricPointView>();
+        long now = NowUnixNano;
+        foreach (var n in names)
+        {
+            switch (n)
+            {
+                case MRetentionDeleted:
+                    AddSignalPoints(list, n, now, matchers, HMetricType.Sum, HTemporality.Cumulative,
+                        Interlocked.Read(ref _retDeletedSpans),
+                        Interlocked.Read(ref _retDeletedLogs),
+                        Interlocked.Read(ref _retDeletedMetrics));
+                    break;
+                case MRetentionEvicted:
+                    AddSignalPoints(list, n, now, matchers, HMetricType.Sum, HTemporality.Cumulative,
+                        Interlocked.Read(ref _retEvictedSpans),
+                        Interlocked.Read(ref _retEvictedLogs),
+                        Interlocked.Read(ref _retEvictedMetrics));
+                    break;
+                case MStorageBytes:
+                {
+                    var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+                    if (Matches(labels, matchers))
+                        list.Add(new HMetricPointView(n, "By", HMetricType.Gauge, HTemporality.Unspecified,
+                            now, UsedBytes(), null, null, null, null, null, null, labels, ScopeHeimdall));
+                    break;
+                }
+                case MStorageRows:
+                    AddSignalPoints(list, n, now, matchers, HMetricType.Gauge, HTemporality.Unspecified,
+                        CountSpans(), CountLogs(), CountMetrics());
+                    break;
+            }
+        }
+        return list;
+    }
+
+    // Ein Punkt pro Signal (spans/logs/metrics) mit signal-Label; matcher-gefiltert.
+    private static void AddSignalPoints(List<HMetricPointView> list, string name, long now,
+        IReadOnlyList<HLabelMatcher>? matchers, HMetricType type, HTemporality temp,
+        long spans, long logs, long metrics)
+    {
+        var signals = new[] { ("spans", spans), ("logs", logs), ("metrics", metrics) };
+        foreach (var (sig, val) in signals)
+        {
+            var labels = new Dictionary<string, string>(StringComparer.Ordinal) { [LSignal] = sig };
+            if (!Matches(labels, matchers)) continue;
+            list.Add(new HMetricPointView(name, null, type, temp, now, val,
+                null, null, null, null, null, null, labels, ScopeHeimdall));
         }
     }
 }

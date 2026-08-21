@@ -43,7 +43,7 @@ public sealed class HeimdallHostOptions
 public sealed class HeimdallStorageOptions
 {
     /// <summary>
-    /// Storage-Backend. 1.0 unterstützt nur „sqlite“. Das Walhalla-Backend kehrt als
+    /// Storage-Backend. 1.0 unterstützt nur „sqlite”. Das Walhalla-Backend kehrt als
     /// NuGet-Konsument zurück, sobald Heimdall.Abstractions gepackt ist. Default „sqlite“.
     /// </summary>
     public string Backend { get; set; } = "sqlite";
@@ -53,14 +53,56 @@ public sealed class HeimdallStorageOptions
     /// </summary>
     public string DataPath { get; set; } = "var/heimdall/otel.db";
 
-    /// <summary>Retention in Tagen; 0 = unbegrenzt. Default 7.</summary>
+    /// <summary>
+    /// Retention in Tagen; 0 = unbegrenzt. Default 7. Abwärtskompat-Fallback: pro
+    /// Signal gilt <see cref=”Retention”/> (falls gesetzt), sonst dieser Wert.
+    /// </summary>
     public int RetentionDays { get; set; } = 7;
 
-    /// <summary>Intervall des Retention-Sweepers (Minuten). Default 30.</summary>
+    /// <summary>
+    /// Per-Signal-Retention (TTL pro Signal). null-Werte fallen auf
+    /// <see cref=”RetentionDays”/> zurück; 0 = explizit unbegrenzt.
+    /// </summary>
+    public HeimdallRetentionOptions Retention { get; set; } = new();
+
+    /// <summary>
+    /// Harter Plafond über die gesamte DB-Datei in Bytes; 0 = unbegrenzt. Bei
+    /// Überschreitung evictet der Sweeper älteste Zeilen signalübergreifend bis
+    /// zum Ziel-Füllgrad (90 %). Default 0.
+    /// </summary>
+    public long MaxBytes { get; set; }
+
+    /// <summary>Intervall des Retention-Sweepers (Minuten). 0 = deaktiviert. Default 30.</summary>
     public int RetentionSweepMinutes { get; set; } = 30;
 
     /// <summary>SQLite: WAL-Modus + foreign_keys. Default true.</summary>
     public bool WalMode { get; set; } = true;
+
+    /// <summary>
+    /// auto_vacuum=INCREMENTAL beim Bootstrap + incremental_vacuum nach Sweeps
+    /// (Datei schrumpft nach DELETE/Eviction). Default true.
+    /// </summary>
+    public bool AutoVacuum { get; set; } = true;
+
+    /// <summary>
+    /// Einmaliger VACUUM beim Start für Legacy-DBs (auto_vacuum=0, user_version=0).
+    /// Teuer/exklusiv, self-gating via user_version. false = Notaus. Default true.
+    /// </summary>
+    public bool VacuumMigrateLegacy { get; set; } = true;
+}
+
+/// <summary>
+/// Per-Signal-Retention (TTL pro Signal). null = nicht gesetzt (Fallback auf
+/// <see cref=”HeimdallStorageOptions.RetentionDays”/>); 0 = explizit unbegrenzt.
+/// </summary>
+public sealed class HeimdallRetentionOptions
+{
+    /// <summary>Trace-Retention in Tagen (null = Fallback, 0 = unbegrenzt).</summary>
+    public int? TracesDays { get; set; }
+    /// <summary>Log-Retention in Tagen (null = Fallback, 0 = unbegrenzt).</summary>
+    public int? LogsDays { get; set; }
+    /// <summary>Metric-Retention in Tagen (null = Fallback, 0 = unbegrenzt).</summary>
+    public int? MetricsDays { get; set; }
 }
 
 /// <summary>OTLP-Empfänger-Konfiguration (HTTP und gRPC unabhängig schaltbar).</summary>

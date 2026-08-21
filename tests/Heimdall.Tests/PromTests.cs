@@ -434,6 +434,19 @@ public class PromTests
     }
 
     [Fact]
+    public void Discovery_ListLabelValues_Name_LiefertMetriknamen()
+    {
+        // __name__ ist ein Prom-Pseudo-Label: Werte = Metriknamen (nicht in OTel-
+        // Attribut-Keys gespeichert). Vorher fiel __name__ durchs Raster und
+        // /label/__name__/values lieferte leer — jetzt über ListMetricNames
+        // (deckt auch die synthetisierten heimdall.*-Observability-Metriken ab).
+        var eng = Engine(CounterSource());
+        var vals = eng.ListLabelValues("__name__");
+        Assert.Contains("orders_total", vals);
+        Assert.Contains("orders", vals);   // roher Alias
+    }
+
+    [Fact]
     public void Discovery_Metadata_TypCounter()
     {
         var eng = Engine(CounterSource());
