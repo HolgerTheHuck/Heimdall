@@ -1,7 +1,9 @@
 # Heimdall — Roadmap zur 1.0
 
 > Stand: 2026-08-21. 0.1.0 gebaut (313 Tests grün, SQLite-only, auf GitHub privat).
-> Diese Roadmap ist ein lebendes Dokument — Stränge und Reihenfolge sind Vorschläge.
+> Workstream A fertig (332 Tests grün, Commit 60a26f8). Entscheidungen #3–#7
+> geklärt (siehe unten). Diese Roadmap ist ein lebendes Dokument — Stränge und
+> Reihenfolge sind Vorschläge.
 
 ## 1.0-Ziel
 
@@ -13,7 +15,7 @@ und kehrt als NuGet-Konsument nach 1.0 zurück.
 
 ---
 
-## Workstream A — Storage & Retention konfigurierbar  *(aktiver Strang)*
+## Workstream A — Storage & Retention konfigurierbar  *(fertig, Commit 60a26f8)*
 
 Heute: ein globales `RetentionDays` (0 = unbegrenzt) für spans/logs/metrics
 gemeinsam; kein Größenlimit; keine Platzrückgewinnung. Indizes auf den Zeit-Spalten
@@ -110,15 +112,17 @@ Sweep-Zeit). Rein additiv, kein Vertragsbruch.
 ## Workstream B — NuGet-Packaging & Distribution
 
 Voraussetzung für den Walhalla-NuGet-Weg **und** für öffentliche 1.0-Pakete.
+Entscheidung #5: **nur GitHub-Release bei 1.0** — kein Code-Signing, kein
+nuget.org-Push (nuget.org kann später folgen).
 
 - `dotnet pack` für alle Src-Projekte (Loop steht im README). Version `0.1.0 → 1.0.0`.
 - Reproducible/Deterministic Builds (`ContinuousIntegrationBuild`-Flag,
   `Deterministic=true`, `SourceLink`, repo-URL in `Directory.Build.props`).
-- NuGet-Metadaten je Paket: Beschreibung, `README.md`-Embed, Lizenz-Expression,
-  Tags, `RepositoryUrl`, Source-Link.
+- NuGet-Metadaten je Paket: Beschreibung, `README.md`-Embed, Lizenz-Expression
+  (`Apache-2.0`, siehe #4), Tags, `RepositoryUrl`, Source-Link.
 - Lokaler Feed (`artifacts/nupkg`) für Walhalla-Integrationstest, bevor 1.0
   öffentlich geht.
-- Öffnen: paketsignierung (signieren?) und nuget.org-Publish-Flow.
+- Release-Artifacts via GitHub-Release (keine Signierung, kein nuget.org bei 1.0).
 
 ## Workstream C — Operative Härtung
 
@@ -127,17 +131,20 @@ Voraussetzung für den Walhalla-NuGet-Weg **und** für öffentliche 1.0-Pakete.
  Exporter.
 - Auth-Review: API-Key (OTLP/Prom) + Basic-Auth (UI) existieren minimal —
   Review auf 1.0-Anspruch (Timing-Safe-Vergleich, Header-Hygiene).
-- Self-Observability des SQLite-Hosts: da die Walhalla-Selbst-Obs entfallen ist,
-  optional eine schlanke `heimdall.host.*`-Metrik (Ingest-Raten, Buffer-Tiefstand,
-  Sweep-Latenz) — nur falls 1.0 das will.
+- **Self-Observability des Hosts (Entscheidung #6):** schlanke `heimdall.host.*`-
+  Metriken **in 1.0** — minimaler Satz: Ingest-Counter pro Signal
+  (`heimdall.host.ingest{signal=spans|logs|metrics}`) + Sweep-Latenz
+  (`heimdall.host.sweep.duration`). Synthetisiert wie A4 (in-memory, nicht in
+  heim_metrics gespeichert).
 - Graceful Shutdown steht (Sink wird disposet); Flush der Ingest-Puffer beim
   Stopping-Signal verifizieren.
 
 ## Workstream D — Public-Readiness
 
-- `LICENSE` (Datei) + Lizenz-Expression in den csproj — **offen: welche Lizenz?**
+- `LICENSE` (Datei, **Apache-2.0** — Entscheidung #4) + `License-Expression` in
+  den csproj.
 - CI: `.github/workflows/build.yml` — `dotnet build` + `dotnet test` auf
-  `net8/9/10` bei Push/PR (Windows + ubuntu).
+  `net8/9/10` bei Push/PR, **Windows + ubuntu** (Entscheidung #7).
 - `CHANGELOG.md` (Keep-a-Changelog-Stil), ab 1.0.0 gepflegt.
 - `SECURITY.md` (Meldeweg) und ggf. `CONTRIBUTING.md`.
 - README-Politur für Public: Quickstart, Badges (CI-Status, Lizenz, nuget), da
@@ -149,7 +156,30 @@ Voraussetzung für den Walhalla-NuGet-Weg **und** für öffentliche 1.0-Pakete.
 - Alle Tests grün auf allen drei TFM (net8/9/10) unter CI.
 - Smoke-Check im CI-Job (Host startet, `/otel` 200, OTLP-POST 200).
 - Release-Checkliste: Versionskonsistenz, CHANGELOG-Eintrag, Tag `v1.0.0`,
-  GitHub-Release, nuget.org-Push (falls gewünscht), Repo `private → public`.
+  GitHub-Release (Pakete als Artifacts), Repo `private → public`. Kein nuget.org-
+  Push bei 1.0 (#5).
+
+---
+
+## Workstream F — Metriken-Downsampling (Rollup)  *(neu in 1.0 — Entscheidung #3)*
+
+Alte rohe Metrik-Punkte werden nicht nur hart gelöscht (A1/A2), sondern zuvor zu
+niedriger Auflösung **aggregiert** — operativ nutzbare Langzeit-Trends bei
+kleinem Footprint. Größerer Eingriff in `IHeimdallMetricSource` / die SQLite-
+Metrik-Seite, darum eigener Strang.
+
+- Rollup-Stufen (z. B. raw → 1 m → 1 h → 1 d); pro Stufe Aggregation nach
+  Metriktyp (Counter: letzter Wert/Rate, Gauge: avg/min/max, Histogram: Buckets
+  konsolidieren).
+- Übergang: beim Sweep einer rohen Stufe werden die Punkte in die nächste Stufe
+  zusammengefasst (statt verworfen); erst die gröbste Stufe altert hart heraus.
+- Config: `Rollup`-Abschnitt in `HeimdallStorageOptions` (Stufen, Aktivierung).
+- Query-Pfad: `FetchPoints` liefert für alte Fenster die rollup-Punkte (typ- und
+  stufengerecht), für neue das Raw — transparent für PromEngine/Grafana.
+- Achtung: berührt `IHeimdallMetricSource` (Vertrag) — sauber als additive
+  Erweiterung halten oder separaten Rollup-Source im Composite.
+- Tests: Aggregations-Korrektheit pro Typ, Stufenübergang beim Sweep, Query-Parität
+  Raw-vs-Rollup im überlappenden Fenster.
 
 ---
 
@@ -157,9 +187,6 @@ Voraussetzung für den Walhalla-NuGet-Weg **und** für öffentliche 1.0-Pakete.
 
 - **Walhalla-Backend** — kehrt als NuGet-Konsument nach 1.0 zurück (sobald
   `Heimdall.Abstractions` gepackt ist; siehe README-Abschnitt „Walhalla-Backend").
-- **Metriken-Downsampling/Rollup** — alte rohe Metrik-Punkte zu niedriger Auflösung
-  aggregieren, statt sie zu löschen. Größerer Eingriff in `IHeimdallMetricSource`;
-  post-1.0.
 - **Per-Attribute-Retention** (z. B. `service.name=x` länger behalten) — post-1.0.
 - **Exemplars** (Metrics↔Traces punktscharf) — seit 0.1 offen, post-1.0.
 - **Multi-Tenancy / mehrere Speicherinstanzen** — nicht 1.0.
@@ -170,13 +197,11 @@ Voraussetzung für den Walhalla-NuGet-Weg **und** für öffentliche 1.0-Pakete.
 
 1. ~~**Cap-Granularität (A2):**~~ ✅ Gesamt-Cap `MaxBytes`.
 2. ~~**Space-Reclaim (A3):**~~ ✅ `auto_vacuum=INCREMENTAL` + VACUUM-Migration.
-3. **Metriken-Rollup:** bestätigen, dass Downsampling post-1.0 bleibt (kein
-   Rollup, sondern harte Löschung alter Metrik-Punkte in 1.0)?
-4. **Lizenz (D):** MIT, Apache-2.0 oder eine restriktivere? (Für Walhalla-Kompat
-   und Public-Ziel relevant.)
-5. **NuGet-Signing/Publish (B):** paketsigniert und auf nuget.org bei 1.0, oder
-   nur GitHub-Release?
-6. **Self-Observability des Hosts (C):** schlanke `heimdall.host.*`-Metriken in
-   1.0 aufnehmen oder aufschieben?
-7. **CI-Betriebssysteme (D):** Windows-only (aktuelle Dev-Umgebung) oder
-   zusätzlich ubuntu?
+3. ~~**Metriken-Rollup:**~~ ✅ **Downsampling IN 1.0** (Workstream F) — keine
+   harte Löschung, sondern Rollup alter Metrik-Punkte.
+4. ~~**Lizenz (D):**~~ ✅ **Apache-2.0** (LICENSE-Datei + `License-Expression`).
+5. ~~**NuGet-Signing/Publish (B):**~~ ✅ **nur GitHub-Release bei 1.0** — kein
+   Code-Signing, kein nuget.org-Push (nuget.org später).
+6. ~~**Self-Observability des Hosts (C):**~~ ✅ **minimales `heimdall.host.*`-Set
+   in 1.0** (Ingest-Counter pro Signal + Sweep-Latenz).
+7. ~~**CI-Betriebssysteme (D):**~~ ✅ **Windows + ubuntu** (build+test net8/9/10).
