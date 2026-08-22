@@ -18,10 +18,10 @@
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
 
-    <!-- Zentrale Versionierung (1.0). Ersetzt die per-csproj 0.1.0-Saetze. -->
-    <Version>1.0.0</Version>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.0.0</FileVersion>
+    <!-- Zentrale Versionierung (1.0.1). Ersetzt die per-csproj 0.1.0-Saetze. -->
+    <Version>1.0.1</Version>
+    <AssemblyVersion>1.0.1.0</AssemblyVersion>
+    <FileVersion>1.0.1.0</FileVersion>
 
     <!-- Deterministische Builds + SourceLink (Zukunftssicherung fuer 1.0 public). -->
     <Deterministic>true</Deterministic>

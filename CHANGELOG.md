@@ -7,7 +7,28 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
-_(keine Änderungen seit 1.0.0)_
+_(keine Änderungen seit 1.0.1)_
+
+## [1.0.1] — 2026-08-22
+
+Cleaner Nachfolger von 1.0.0. Funktional identisch; behebt ein
+Dokumentations-/Metadaten-Leck des 1.0.0-Release.
+
+### Geändert
+- **README: lokale Maschinenpfade entfernt.** Die 1.0.0-Pakete betteten
+  die Root-README ein (`PackageReadmeFile`), die noch lokale Dev-Pfade
+  (`D:/Own/Telnet`, `cd D:/Own/Telnet`) enthielt — sichtbar auf den
+  nuget.org-Paketseiten. Ersetzt durch portable Platzhalter
+  (`cd Heimdall`, `<HEIMDALL-REPO>/artifacts/nupkg`).
+- **`release.yml`:** Release-Notes werden jetzt versionsspezifisch passend
+  zum Tag (`${GITHUB_REF_NAME#v}`) extrahiert, nicht mehr hartkodiert auf
+  `[1.0.0]`.
+
+### Hinweis
+- Das ASP.NET-Core-Paket erscheint unter der ID
+  **`Heimdall.AspNetCore.Enrichment`** (Namespace bleibt
+  `Heimdall.AspNetCore`), da `Heimdall.AspNetCore` auf nuget.org fremd
+  belegt ist. Gilt bereits ab 1.0.0; hier nachgetragen dokumentiert.
 
 ## [1.0.0] — 2026-08-22
 

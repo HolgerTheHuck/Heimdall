@@ -48,10 +48,11 @@ jobs:
           --source https://api.nuget.org/v3/index.json
           --skip-duplicate
 
-      - name: Release-Notes extrahieren ([1.0.0]-Sektion)
+      - name: Release-Notes extrahieren (tag-spezifische Sektion)
         run: |
-          awk 'BEGIN{f=0} /^## \[1\.0\.0\]/{f=1} /^## \[/{if(f && !/^## \[1\.0\.0\]/) f=0} f{print}' CHANGELOG.md > release-notes.md
-          echo "--- Release-Notes ---"; cat release-notes.md
+          VER="${GITHUB_REF_NAME#v}"   # v1.0.1 -> 1.0.1
+          awk -v v="$VER" 'BEGIN{f=0} /^## \[/ { h=$0; sub(/^## /,"",h); sub(/ .*/,"",h); f=(h=="["v"]") } f{print}' CHANGELOG.md > release-notes.md
+          echo "--- Release-Notes ($VER) ---"; cat release-notes.md
 
       - name: GitHub-Release mit Paket-Assets
         env:
