@@ -2,6 +2,7 @@
 
 [![build](https://github.com/HolgerTheHuck/Heimdall/actions/workflows/build.yml/badge.svg)](https://github.com/HolgerTheHuck/Heimdall/actions/workflows/build.yml)
 [![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+[![nuget](https://img.shields.io/nuget/v/Heimdall.Abstractions)](https://www.nuget.org/packages/Heimdall.Abstractions)
 
 **Heimdall** ist ein eigenständiges, OTel-kompatibles .NET-Observability-System
 (Traces, Metriken, Logs) — eingebettet **und** stand-alone nutzbar. Es importiert
@@ -66,10 +67,12 @@ Signaturen ein. Version `1.0.0`, Target-Frameworks `net8.0;net9.0;net10.0`.
 
 ## Installation
 
-### 1. Lokalen NuGet-Feed einrichten
+### 1. Pakete beziehen
 
-Die Pakete liegen im Repo unter `artifacts/nupkg/`. Diesen Ordner als NuGet-Source
-hinzufügen (z. B. in der `nuget.config` eures API-Projekts):
+Ab der 1.0 liegen die Heimdall-Pakete auf **nuget.org** — dann reicht ein schlichtes
+`dotnet add package Heimdall.Sdk` (bzw. `--version 1.0.0`). Für Pre-Release- oder
+Integrationsbuilds liegt ein lokaler Feed unter `artifacts/nupkg/`; diesen als
+NuGet-Source hinzufügen (z. B. in der `nuget.config` eures API-Projekts):
 
 ```bash
 # im Projektverzeichnis der realen API
@@ -94,14 +97,9 @@ Falls sich der Code geändert hat, Pakete neu erzeugen:
 
 ```bash
 cd D:/Own/Telnet
-dotnet build Heimdall.slnx -c Release
-# packt alle Heimdall-Src-Projekte in artifacts/nupkg:
-for d in src/Heimdall.Abstractions src/Heimdall.AspNetCore src/Heimdall.Blazor \
-         src/Heimdall.Direct src/Heimdall.Ingest src/Heimdall.Otlp \
-         src/Heimdall.Otlp.Proto src/Heimdall.Otlp.Grpc src/Heimdall.Prometheus \
-         src/Heimdall.Sdk src/Heimdall.Storage.SQLite; do
-  dotnet pack "$d" -c Release --no-build -o artifacts/nupkg -p:PackageVersion=0.1.0
-done
+# packt alle Heimdall-Src-Projekte (IsPackable=true) nach artifacts/nupkg
+# (Version 1.0.0 zentral in Directory.Build.props):
+dotnet pack Heimdall.slnx -c Release -o artifacts/nupkg
 ```
 
 ### 3. Pakete referenzieren
@@ -109,11 +107,11 @@ done
 Für die **in-Process-Einbettung** (Pfad A) in eurer realen API:
 
 ```bash
-dotnet add package Heimdall.Sdk          --version 0.1.0
-dotnet add package Heimdall.Storage.SQLite --version 0.1.0
-dotnet add package Heimdall.Blazor         --version 0.1.0
-dotnet add package Heimdall.Prometheus     --version 0.1.0
-dotnet add package Heimdall.AspNetCore     --version 0.1.0
+dotnet add package Heimdall.Sdk          --version 1.0.0
+dotnet add package Heimdall.Storage.SQLite --version 1.0.0
+dotnet add package Heimdall.Blazor         --version 1.0.0
+dotnet add package Heimdall.Prometheus     --version 1.0.0
+dotnet add package Heimdall.AspNetCore     --version 1.0.0
 ```
 
 Heimdall-Pakete ziehen einander (jedes hängt an `Heimdall.Abstractions`); die
@@ -313,7 +311,7 @@ samples/
   Heimdall.OtelSample/        WebAPI + in-process Exporter + Live-Dashboard
   Heimdall.MvcSample/         WebAPI + Controller/Endpoint-Drilldown
 tests/Heimdall.Tests/         xUnit, net8/9/10 (siehe CI-Badge)
-artifacts/nupkg/              lokale NuGet-Pakete (0.1.0)
+artifacts/nupkg/              lokale NuGet-Pakete (1.0.0)
 ```
 
 ---

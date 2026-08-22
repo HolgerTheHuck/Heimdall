@@ -35,9 +35,16 @@
     <!-- Paket-Metadaten (gelten nur fuer packbare Projekte, harmlos fuer den Rest). -->
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
     <Copyright>Copyright (c) 2026 H. Huckfeldt</Copyright>
+    <!-- Root-README als Paket-README einbetten (NuGet "Readme"-Tab / nuget.org-Ansicht). -->
+    <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.400" PrivateAssets="All" />
+  </ItemGroup>
+
+  <!-- Root-README fuer packbare Projekte ins nupkg einbetten (Pfad = Repo-Root). -->
+  <ItemGroup Condition="'$(IsPackable)' != 'false'">
+    <None Include="$(MSBuildThisFileDirectory)README.md" Pack="true" PackagePath="\" />
   </ItemGroup>
 </Project>

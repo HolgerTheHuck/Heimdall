@@ -112,20 +112,23 @@ Sweep-Zeit). Rein additiv, kein Vertragsbruch.
 
 ---
 
-## Workstream B — NuGet-Packaging & Distribution
+## Workstream B — NuGet-Packaging & Distribution  *(umgesetzt — Packaging-Teil)*
 
 Voraussetzung für den Walhalla-NuGet-Weg **und** für öffentliche 1.0-Pakete.
-Entscheidung #5: **nur GitHub-Release bei 1.0** — kein Code-Signing, kein
-nuget.org-Push (nuget.org kann später folgen).
+Entscheidung #5 (revidiert): **1.0 geht auf nuget.org UND als GitHub-Release** —
+kein Code-Signing (nuget.org verlangt keines).
 
-- `dotnet pack` für alle Src-Projekte (Loop steht im README). Version `0.1.0 → 1.0.0`.
-- Reproducible/Deterministic Builds (`ContinuousIntegrationBuild`-Flag,
-  `Deterministic=true`, `SourceLink`, repo-URL in `Directory.Build.props`).
-- NuGet-Metadaten je Paket: Beschreibung, `README.md`-Embed, Lizenz-Expression
-  (`Apache-2.0`, siehe #4), Tags, `RepositoryUrl`, Source-Link.
-- Lokaler Feed (`artifacts/nupkg`) für Walhalla-Integrationstest, bevor 1.0
-  öffentlich geht.
-- Release-Artifacts via GitHub-Release (keine Signierung, kein nuget.org bei 1.0).
+- `dotnet pack Heimdall.slnx -c Release -o artifacts/nupkg` packt alle 11
+  Src-Projekte; Version zentral `1.0.0` (Directory.Build.props, siehe D2).
+- Reproducible/Deterministic Builds (`ContinuousIntegrationBuild`,
+  `Deterministic=true`, `SourceLink`, repo-URL) — umgesetzt in D3.
+- NuGet-Metadaten je Paket: `Description`, `PackageTags`, zentrale `README.md`-
+  Embed (`PackageReadmeFile` + Root-README ins nupkg), Lizenz-Expression
+  (`Apache-2.0`, siehe #4), `Copyright`, `RepositoryUrl` + Commit (SourceLink).
+- Verifiziert: 11 × `*.1.0.0.nupkg`, Nuspec mit License/Readme/Repo+Commit.
+- Lokaler Feed (`artifacts/nupkg`) für Walhalla-Integrationstest / Pre-Release.
+- **Offen (Release, Workstream E):** nuget.org-Push (API-Key) + GitHub-Release
+  mit Paket-Artifacts; Reihenfolge/Trigger beim 1.0-Release festlegen.
 
 ## Workstream C — Operative Härtung
 
@@ -160,19 +163,18 @@ nuget.org-Push (nuget.org kann später folgen).
 - `CHANGELOG.md` (Keep-a-Changelog, [Unreleased] + [1.0.0]-Platzhalter).
 - `SECURITY.md` (vertraulicher Meldeweg via GitHub Private Security Advisories
   / E-Mail).
-- README-Politur: CI- + Lizenz-Badges, Status-Zeile 1.0.0, Walhalla-
-  Discoverability-Pointer auf DESIGN.md (kein nuget-Badge — 1.0 GitHub-Release-
-  only, Entscheidung #5).
-- Offen für B: `dotnet pack`-Loop-`0.1.0`-Referenzen in der README (Paket-
-  Beispiele) auf 1.0.0 heben.
+- README-Politur: CI- + Lizenz- + nuget-Badges, Status-Zeile 1.0.0, Walhalla-
+  Discoverability-Pointer auf DESIGN.md (Entscheidung #5 revidiert: nuget.org).
+- README-`0.1.0`-Referenzen (Pack-Loop, Paket-Beispiele) auf `1.0.0` gehoben
+  (Workstream B abgeschlossen).
 
 ## Workstream E — Release-Gates
 
 - Alle Tests grün auf allen drei TFM (net8/9/10) unter CI.
 - Smoke-Check im CI-Job (Host startet, `/otel` 200, OTLP-POST 200).
 - Release-Checkliste: Versionskonsistenz, CHANGELOG-Eintrag, Tag `v1.0.0`,
-  GitHub-Release (Pakete als Artifacts), Repo `private → public`. Kein nuget.org-
-  Push bei 1.0 (#5).
+  **nuget.org-Push** (alle 11 Pakete, API-Key) + GitHub-Release (Pakete als
+  Artifacts), Repo `private → public`. Kein Code-Signing (#5).
 
 ---
 
@@ -260,8 +262,9 @@ kein `user_version`-Bump.
 3. ~~**Metriken-Rollup:**~~ ✅ **Downsampling IN 1.0** (Workstream F) — keine
    harte Löschung, sondern Rollup alter Metrik-Punkte.
 4. ~~**Lizenz (D):**~~ ✅ **Apache-2.0** (LICENSE-Datei + `License-Expression`).
-5. ~~**NuGet-Signing/Publish (B):**~~ ✅ **nur GitHub-Release bei 1.0** — kein
-   Code-Signing, kein nuget.org-Push (nuget.org später).
+5. ~~**NuGet-Signing/Publish (B):**~~ ✅ **nuget.org + GitHub-Release bei 1.0** —
+   kein Code-Signing (nuget.org verlangt keines). (Revidiert: ursprünglich nur
+   GitHub-Release; nuget.org-Push jetzt Teil von 1.0.)
 6. ~~**Self-Observability des Hosts (C):**~~ ✅ **minimales `heimdall.host.*`-Set
    in 1.0** (Ingest-Counter pro Signal + Sweep-Latenz).
 7. ~~**CI-Betriebssysteme (D):**~~ ✅ **Windows + ubuntu** (build+test net8/9/10).

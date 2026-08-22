@@ -24,6 +24,10 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 - Workstream F — Metriken-Rollup (zwei-stufig raw + 1m, Opt-In, all-in-Sink):
   rohe Metrik-Punkte älter als `RawDays` werden zu 1-Min-Buckets aggregiert
   statt hart gelöscht.
+- Workstream B — NuGet-Packaging: `dotnet pack Heimdall.slnx` erzeugt 11
+  `1.0.0`-Pakete (Lizenz-Expression, Root-README-Embed, Repository+Commit via
+  SourceLink, Tags). **1.0 erscheint auf nuget.org UND als GitHub-Release**
+  (Entscheidung #5 revidiert; kein Code-Signing).
 
 ### Geändert
 - **Zentrale Versionierung** in `Directory.Build.props` (`1.0.0`,
