@@ -1,3 +1,4 @@
+#if NET10_0
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
@@ -64,3 +65,4 @@ public class HostCompositionTests : HostBootTestBase
         Assert.Same(sink, query);
     }
 }
+#endif

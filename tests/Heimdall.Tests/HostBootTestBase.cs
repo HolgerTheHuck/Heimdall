@@ -1,3 +1,4 @@
+#if NET10_0
 using System.Net.Http;
 using Google.Protobuf;
 using Heimdall;
@@ -111,3 +112,4 @@ public abstract class HostBootTestBase : IDisposable
         try { Directory.Delete(_dir, recursive: true); } catch { }
     }
 }
+#endif

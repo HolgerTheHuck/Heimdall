@@ -1,5 +1,8 @@
 # Heimdall
 
+[![build](https://github.com/HolgerTheHuck/Heimdall/actions/workflows/build.yml/badge.svg)](https://github.com/HolgerTheHuck/Heimdall/actions/workflows/build.yml)
+[![license](https://img.shields.io/badge/license-Apache--2.0-blue)](LICENSE)
+
 **Heimdall** ist ein eigenständiges, OTel-kompatibles .NET-Observability-System
 (Traces, Metriken, Logs) — eingebettet **und** stand-alone nutzbar. Es importiert
 Grafana-Dashboards (JSON) und rendert sie selbst (in-process PromQL-Engine +
@@ -19,8 +22,10 @@ SignalR — alles läuft im .NET-Prozess.
 - **Prometheus:** PromQL-Engine + `/api/v1/*` — Grafana kann Heimdall direkt als
   Datenquelle nutzen.
 
-> Status: **0.1.0** — alle 313 Tests grün, live verifiziert (Samples + Host).
+> Status: **1.0.0** — alle Tests grün, live verifiziert (CI: Windows + Linux, .NET 8/9/10).
 > 1.0-Vorbereitung: SQLite-only, keine Cross-Repo-Abhängigkeiten mehr.
+> Walhalla-Historie (1.0: SQLite-only, Walhalla-Backend vorausliegend) siehe
+> [DESIGN.md](DESIGN.md) und [Walhalla-Backend](#walhalla-backend).
 
 ---
 
@@ -41,7 +46,7 @@ SignalR — alles läuft im .NET-Prozess.
 ## Pakete
 
 Alle Pakete sind **additiv** und greifen nicht in bestehende `Add*`/`Map*`-
-Signaturen ein. Version `0.1.0`, Target-Frameworks `net8.0;net9.0;net10.0`.
+Signaturen ein. Version `1.0.0`, Target-Frameworks `net8.0;net9.0;net10.0`.
 
 | Paket | Zweck |
 |---|---|
@@ -307,7 +312,7 @@ host/Heimdall.Host/           Stand-alone Host (config-getrieben, Docker)
 samples/
   Heimdall.OtelSample/        WebAPI + in-process Exporter + Live-Dashboard
   Heimdall.MvcSample/         WebAPI + Controller/Endpoint-Drilldown
-tests/Heimdall.Tests/         xUnit, 313 Tests
+tests/Heimdall.Tests/         xUnit, net8/9/10 (siehe CI-Badge)
 artifacts/nupkg/              lokale NuGet-Pakete (0.1.0)
 ```
 

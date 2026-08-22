@@ -9,7 +9,6 @@
     <PackageId>Heimdall.Storage.SQLite</PackageId>
     <Description>Heimdall storage backend backed by SQLite (Microsoft.Data.Sqlite) with FTS5 fulltext search. Mature, stable alternative to the Walhalla backend.</Description>
     <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;sqlite;fts5</PackageTags>
-    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

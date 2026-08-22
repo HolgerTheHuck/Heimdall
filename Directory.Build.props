@@ -2,19 +2,42 @@
 <!-- Zentrale Build-Eigenschaften fuer den Heimdall-Baum.
 
      Heimdall ist eine eingebettbare OTel-Infrastruktur fuer .NET:
-     empfängt OTLP, speichert Traces/Logs/Metriken in Walhalla (embedded)
-     und zeigt sie via Blazor (embedded) bzw. REST-SPI + Svelte (public).
+     empfaengt OTLP, speichert Traces/Logs/Metriken in SQLite (1.0: SQLite-only)
+     und zeigt sie via Blazor (embedded) bzw. REST-API + Svelte (public).
      Siehe DESIGN.md.
 
-     Konventionen (an Walhalla angelehnt):
+     Konventionen:
        - Doku/Kommentare auf Deutsch.
        - Kernbibliotheken ohne ImplicitUsings (explizite usings), API/Tests mit.
-       - Mehrfach-Targeting net8/9/10 fuer Bibliotheken; Executables/Tests net10. -->
+       - Mehrfach-Targeting net8/9/10 fuer Bibliotheken; Host/Samples net10;
+         Tests net8/9/10 (Host-Boot-Tests via #if NET10_0 auf net10 beschraenkt). -->
 <Project>
   <PropertyGroup>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
     <GenerateDocumentationFile>false</GenerateDocumentationFile>
+
+    <!-- Zentrale Versionierung (1.0). Ersetzt die per-csproj 0.1.0-Saetze. -->
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+
+    <!-- Deterministische Builds + SourceLink (Zukunftssicherung fuer 1.0 public). -->
+    <Deterministic>true</Deterministic>
+    <ContinuousIntegrationBuild Condition="'$(GITHUB_ACTIONS)' == 'true'">true</ContinuousIntegrationBuild>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
+    <EmbedUntrackedSources>true</EmbedUntrackedSources>
+    <RepositoryUrl>https://github.com/HolgerTheHuck/Heimdall</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <RepositoryCommit Condition="'$(GITHUB_SHA)' != ''">$(GITHUB_SHA)</RepositoryCommit>
+
+    <!-- Paket-Metadaten (gelten nur fuer packbare Projekte, harmlos fuer den Rest). -->
+    <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <Copyright>Copyright (c) 2026 H. Huckfeldt</Copyright>
   </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.SourceLink.GitHub" Version="10.0.400" PrivateAssets="All" />
+  </ItemGroup>
 </Project>

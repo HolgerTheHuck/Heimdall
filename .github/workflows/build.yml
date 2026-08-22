@@ -1,0 +1,51 @@
+name: build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # SDKs 8/9/10 installieren: je SDK kommt die passende Runtime, sodass die
+      # net8/9/10-Test-Legs ausgefuehrt werden koennen. global.json (10.0.302,
+      # rollForward latestPatch) wird vom CLI gegen die installierte 10.0.x aufgeloest.
+      - name: Setup .NET (SDK 8/9/10 + passende Runtimes)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Cache NuGet
+        uses: actions/cache@v4
+        with:
+          path: ~/.nuget/packages
+          key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj', '**/Directory.Build.props') }}
+          restore-keys: ${{ runner.os }}-nuget-
+
+      - name: Restore
+        run: dotnet restore Heimdall.slnx
+
+      - name: Build
+        run: dotnet build Heimdall.slnx -c Release --no-restore
+
+      # dotnet test faehrt automatisch alle TFM-Legs des Multi-Target-Testprojekts:
+      # net8/9 laufen die ~300 Lib-Tests, net10 zusaetzlich die Host-Boot-Tests.
+      - name: Test
+        run: dotnet test Heimdall.slnx -c Release --no-build --verbosity normal

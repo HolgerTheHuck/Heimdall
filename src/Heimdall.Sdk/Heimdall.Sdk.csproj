@@ -9,7 +9,6 @@
     <PackageId>Heimdall.Sdk</PackageId>
     <Description>Heimdall in-process exporter for the OpenTelemetry SDK: AddOpenTelemetry().UseHeimdallExporter() — traces/logs/metrics land directly in Heimdall without OTLP/HTTP/gRPC.</Description>
     <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;exporter;inproc</PackageTags>
-    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

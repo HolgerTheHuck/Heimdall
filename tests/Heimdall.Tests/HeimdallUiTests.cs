@@ -1,3 +1,4 @@
+#if NET10_0
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -239,3 +240,4 @@ public class HeimdallUiTests : HostBootTestBase
         return count;
     }
 }
+#endif

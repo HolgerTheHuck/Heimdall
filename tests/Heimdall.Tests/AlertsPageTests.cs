@@ -1,3 +1,4 @@
+#if NET10_0
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -131,3 +132,4 @@ public class AlertsPageTests : HostBootTestBase, IDisposable
         Assert.Null(RuleStore.Get(id));
     }
 }
+#endif

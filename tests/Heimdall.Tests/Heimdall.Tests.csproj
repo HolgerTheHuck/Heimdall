@@ -1,7 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net10.0</TargetFramework>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>
@@ -16,8 +16,12 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0" />
-    <PackageReference Include="Grpc.Net.Client" Version="2.71.0" />
+    <!-- Mvc.Testing 10.0.0 ist net10-only -> Restore wuerde auf net8/9 brechen (NU1202), daher bedingt. -->
+    <PackageReference Include="Microsoft.AspNetCore.Mvc.Testing" Version="10.0.0"
+                      Condition="'$(TargetFramework)' == 'net10.0'" />
+    <!-- Nur von OtlpGrpcReceiverTests genutzt (auf net10 gegated). Bedingt, damit net8/9 keine grpc-Transitives ziehen. -->
+    <PackageReference Include="Grpc.Net.Client" Version="2.71.0"
+                      Condition="'$(TargetFramework)' == 'net10.0'" />
   </ItemGroup>
 
   <ItemGroup>
@@ -32,7 +36,9 @@
     <ProjectReference Include="..\..\src\Heimdall.Prometheus\Heimdall.Prometheus.csproj" />
     <ProjectReference Include="..\..\src\Heimdall.AspNetCore\Heimdall.AspNetCore.csproj" />
     <ProjectReference Include="..\..\src\Heimdall.Blazor\Heimdall.Blazor.csproj" />
-    <ProjectReference Include="..\..\host\Heimdall.Host\Heimdall.Host.csproj" />
+    <!-- Host ist net10-only (Microsoft.NET.Sdk.Web) -> ProjectReference bedingt, sonst net8/9-Compile-Bruch. -->
+    <ProjectReference Include="..\..\host\Heimdall.Host\Heimdall.Host.csproj"
+                      Condition="'$(TargetFramework)' == 'net10.0'" />
   </ItemGroup>
 
   <ItemGroup>

@@ -9,7 +9,6 @@
     <PackageId>Heimdall.Direct</PackageId>
     <Description>Heimdall native API (HeimdallHub: tracer/logger/meter) for in-process embedding without the OTel SDK. F#-friendly.</Description>
     <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;fsharp</PackageTags>
-    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

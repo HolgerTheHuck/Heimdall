@@ -1,10 +1,12 @@
 # Heimdall — Roadmap zur 1.0
 
-> Stand: 2026-08-21. 0.1.0 gebaut (313 Tests grün, SQLite-only, auf GitHub privat).
+> Stand: 2026-08-22. Version 1.0.0 (SQLite-only, auf GitHub privat).
 > Workstream A fertig (332 Tests grün, Commit 60a26f8). Workstream F (Metriken-
-> Rollup, zwei-stufig raw+1m) umgesetzt (340 Tests grün). Entscheidungen #3–#7
-> geklärt (siehe unten). Diese Roadmap ist ein lebendes Dokument — Stränge und
-> Reihenfolge sind Vorschläge.
+> Rollup, zwei-stufig raw+1m) umgesetzt (340 Tests grün, Commit 8e79c59).
+> Workstream D (Public-Readiness: Apache-2.0, zentrale 1.0.0, Deterministic/
+> SourceLink, CI Windows+Linux, Multi-Target-Tests net8/9/10, CHANGELOG/
+> SECURITY) umgesetzt. Entscheidungen #3–#7 geklärt (siehe unten). Diese Roadmap
+> ist ein lebendes Dokument — Stränge und Reihenfolge sind Vorschläge.
 
 ## 1.0-Ziel
 
@@ -140,17 +142,29 @@ nuget.org-Push (nuget.org kann später folgen).
 - Graceful Shutdown steht (Sink wird disposet); Flush der Ingest-Puffer beim
   Stopping-Signal verifizieren.
 
-## Workstream D — Public-Readiness
+## Workstream D — Public-Readiness  *(umgesetzt)*
 
-- `LICENSE` (Datei, **Apache-2.0** — Entscheidung #4) + `License-Expression` in
-  den csproj.
+- `LICENSE` (Datei, **Apache-2.0** — Entscheidung #4) + `NOTICE` +
+  `PackageLicenseExpression=Apache-2.0` zentral in `Directory.Build.props`.
+- **Zentrale Versionierung 1.0.0** in `Directory.Build.props` (`Version`/
+  `AssemblyVersion`/`FileVersion`); die per-csproj `0.1.0`-Sätze entfernt.
+- **Deterministische Builds + SourceLink** (`Deterministic`,
+  `ContinuousIntegrationBuild`, `PublishRepositoryUrl`, `EmbedUntrackedSources`,
+  `Microsoft.SourceLink.GitHub` 10.0.400) — Zukunftssicherung (Repo bleibt bis
+  1.0 privat).
 - CI: `.github/workflows/build.yml` — `dotnet build` + `dotnet test` auf
-  `net8/9/10` bei Push/PR, **Windows + ubuntu** (Entscheidung #7).
-- `CHANGELOG.md` (Keep-a-Changelog-Stil), ab 1.0.0 gepflegt.
-- `SECURITY.md` (Meldeweg) und ggf. `CONTRIBUTING.md`.
-- README-Politur für Public: Quickstart, Badges (CI-Status, Lizenz, nuget), da
-  die Walhalla-Historie für Außenstehende aus dem DESIGN.md-Banner ersichtlich ist.
-- Versionsbumpte aller Pakete auf `1.0.0`.
+  `net8/9/10` bei Push/PR, **Windows + ubuntu** (Entscheidung #7); SDKs 8/9/10.
+- **Testprojekt multi-targetet** `net8/9/10`; Host-Boot-Tests via `#if NET10_0`
+  auf net10 beschränkt, Mvc.Testing/Grpc/Host-Bezug bedingt (net8/9: ~302 Lib-
+  Tests, net10: 340 inkl. Host-Boot-Tests).
+- `CHANGELOG.md` (Keep-a-Changelog, [Unreleased] + [1.0.0]-Platzhalter).
+- `SECURITY.md` (vertraulicher Meldeweg via GitHub Private Security Advisories
+  / E-Mail).
+- README-Politur: CI- + Lizenz-Badges, Status-Zeile 1.0.0, Walhalla-
+  Discoverability-Pointer auf DESIGN.md (kein nuget-Badge — 1.0 GitHub-Release-
+  only, Entscheidung #5).
+- Offen für B: `dotnet pack`-Loop-`0.1.0`-Referenzen in der README (Paket-
+  Beispiele) auf 1.0.0 heben.
 
 ## Workstream E — Release-Gates
 

@@ -1,3 +1,4 @@
+#if NET10_0
 using System.IO;
 using System.Text;
 using Heimdall.Blazor.Alerts;
@@ -212,3 +213,4 @@ public class HeimdallHostOptionsTests
         Assert.False(o.Alerting.LoggerEnabled);
     }
 }
+#endif

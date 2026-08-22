@@ -10,7 +10,6 @@
     <PackageId>Heimdall.Otlp.Grpc</PackageId>
     <Description>Heimdall OTLP/gRPC-Receiver: implementiert TraceService/LogsService/MetricsService.Export (opentelemetry-proto v1.7.0) und schreibt in IHeimdallSink. Generiert Client- und Server-Stubs (GrpcServices="Both") — Server für den Receiver-Betrieb, Client für Integrationstests/Aufrufer. Benötigt HTTP/2 (Kestrel). Heimdall.Otlp bleibt gRPC-frei — diese Assembly zieht Grpc.AspNetCore; Einbetter, die nur OTLP/HTTP wollen, referenzieren nur Heimdall.Otlp.</Description>
     <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;otlp;grpc;receiver</PackageTags>
-    <Version>0.1.0</Version>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 

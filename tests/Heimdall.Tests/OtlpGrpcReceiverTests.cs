@@ -1,3 +1,4 @@
+#if NET10_0
 using System.Threading.Tasks;
 using Grpc.Net.Client;
 using Heimdall;
@@ -34,3 +35,4 @@ public class OtlpGrpcReceiverTests : HostBootTestBase
         Assert.Equal(1, Query.CountSpans());
     }
 }
+#endif

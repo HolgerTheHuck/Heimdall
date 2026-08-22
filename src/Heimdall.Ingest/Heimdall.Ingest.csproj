@@ -9,7 +9,6 @@
     <PackageId>Heimdall.Ingest</PackageId>
     <Description>Heimdall in-process ingest: bounded buffer, batching, backpressure and recursion guard over IHeimdallSink.</Description>
     <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall</PackageTags>
-    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>

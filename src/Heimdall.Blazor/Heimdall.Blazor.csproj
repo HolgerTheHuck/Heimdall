@@ -10,7 +10,6 @@
     <PackageId>Heimdall.Blazor</PackageId>
     <Description>Heimdall embedded observability UI: server-rendered Blazor dashboard (traces / logs / metrics) consuming IHeimdallQuery. No SignalR/JS required — static SSR, maximally embeddable.</Description>
     <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;blazor;ui</PackageTags>
-    <Version>0.1.0</Version>
   </PropertyGroup>
 
   <ItemGroup>
