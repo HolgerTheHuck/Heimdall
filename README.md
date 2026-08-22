@@ -61,7 +61,7 @@ Signaturen ein. Version `1.0.0`, Target-Frameworks `net8.0;net9.0;net10.0`.
 | `Heimdall.Otlp.Grpc` | OTLP/gRPC-Empfänger (`localhost:4317`). Zieht `Grpc.AspNetCore`. |
 | `Heimdall.Prometheus` | PromQL-Engine + Prometheus-HTTP-API (`/api/v1/*`) + RED-Ableitung aus Spans. Storage-agnostisch. |
 | `Heimdall.Blazor` | Die Web-UI: Traces/Logs/Metriken/Endpoints/Dashboards/Alerts, server-gerendert. **Enthält das Alarm-Subsystem.** |
-| `Heimdall.AspNetCore` | Dünne Middleware: taggt den OTel-Server-Span mit `aspnetmvc.controller/action/route` für den Controller/Endpoint-Drilldown. |
+| `Heimdall.AspNetCore.Enrichment` | Dünne Middleware: taggt den OTel-Server-Span mit `aspnetmvc.controller/action/route` für den Controller/Endpoint-Drilldown. _(Paket-ID; Namespace bleibt `Heimdall.AspNetCore`.)_ |
 
 ---
 
@@ -111,7 +111,7 @@ dotnet add package Heimdall.Sdk          --version 1.0.0
 dotnet add package Heimdall.Storage.SQLite --version 1.0.0
 dotnet add package Heimdall.Blazor         --version 1.0.0
 dotnet add package Heimdall.Prometheus     --version 1.0.0
-dotnet add package Heimdall.AspNetCore     --version 1.0.0
+dotnet add package Heimdall.AspNetCore.Enrichment --version 1.0.0
 ```
 
 Heimdall-Pakete ziehen einander (jedes hängt an `Heimdall.Abstractions`); die

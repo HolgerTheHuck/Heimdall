@@ -7,7 +7,10 @@
     <RootNamespace>Heimdall.AspNetCore</RootNamespace>
     <AssemblyName>Heimdall.AspNetCore</AssemblyName>
     <IsPackable>true</IsPackable>
-    <PackageId>Heimdall.AspNetCore</PackageId>
+    <!-- PackageId umbenannt: Heimdall.AspNetCore ist auf nuget.org fremd belegt
+         (mateusgcoelho, inhaltlich aehnlich). AssemblyName/Namespace bleiben
+         Heimdall.AspNetCore; nur die nuget-Paket-ID wechselt. -->
+    <PackageId>Heimdall.AspNetCore.Enrichment</PackageId>
     <Description>Heimdall ASP.NET Core enrichment plugin: a thin middleware that tags the OTel server span with aspnetmvc.controller / aspnetmvc.action / aspnetmvc.route read from the MVC pipeline metadata, so the Heimdall dashboard can drill down API → Controller → Endpoint by real names (not by route-template parsing). No own metric, no measurement — pure Activity-tag enrichment.</Description>
     <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;aspnetcore;aspnetmvc;enrichment</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
