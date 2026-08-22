@@ -75,8 +75,8 @@ Integrationsbuilds liegt ein lokaler Feed unter `artifacts/nupkg/`; diesen als
 NuGet-Source hinzufügen (z. B. in der `nuget.config` eures API-Projekts):
 
 ```bash
-# im Projektverzeichnis der realen API
-dotnet nuget add source "D:/Own/Telnet/artifacts/nupkg" -n HeimdallLocal
+# im Projektverzeichnis der realen API; <HEIMDALL-REPO> = Pfad zum Heimdall-Checkout
+dotnet nuget add source "<HEIMDALL-REPO>/artifacts/nupkg" -n HeimdallLocal
 ```
 
 oder als `nuget.config`:
@@ -86,7 +86,7 @@ oder als `nuget.config`:
 <configuration>
   <packageSources>
     <add key="nuget.org" value="https://api.nuget.org/v3/index.json" />
-    <add key="HeimdallLocal" value="D:/Own/Telnet/artifacts/nupkg" />
+    <add key="HeimdallLocal" value="<HEIMDALL-REPO>/artifacts/nupkg" />
   </packageSources>
 </configuration>
 ```
@@ -96,7 +96,7 @@ oder als `nuget.config`:
 Falls sich der Code geändert hat, Pakete neu erzeugen:
 
 ```bash
-cd D:/Own/Telnet
+cd Heimdall
 # packt alle Heimdall-Src-Projekte (IsPackable=true) nach artifacts/nupkg
 # (Version 1.0.0 zentral in Directory.Build.props):
 dotnet pack Heimdall.slnx -c Release -o artifacts/nupkg
@@ -224,7 +224,7 @@ Wenn die reale API bereits OTLP exportiert (oder soll), läuft Heimdall als
 eigenständiger Empfänger (Grafana-Stack-Äquivalent), konfiggetrieben:
 
 ```bash
-cd D:/Own/Telnet
+cd Heimdall
 dotnet run --project host/Heimdall.Host -c Release
 # UI:        http://localhost:5099/otel
 # OTLP/HTTP: POST http://localhost:5099/otel/v1/{traces,metrics,logs}
@@ -333,7 +333,7 @@ artifacts/nupkg/              lokale NuGet-Pakete (1.0.0)
 ## Bauen aus dem Source
 
 ```bash
-cd D:/Own/Telnet
+cd Heimdall
 
 # Solution bauen (net8/9/10)
 dotnet build Heimdall.slnx -c Release
