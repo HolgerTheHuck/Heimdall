@@ -181,13 +181,23 @@ kein Code-Signing (nuget.org verlangt keines).
 - README-`0.1.0`-Referenzen (Pack-Loop, Paket-Beispiele) auf `1.0.0` gehoben
   (Workstream B abgeschlossen).
 
-## Workstream E — Release-Gates
+## Workstream E — Release-Gates  *(umgesetzt, Entscheidung #5)*
 
-- Alle Tests grün auf allen drei TFM (net8/9/10) unter CI.
-- Smoke-Check im CI-Job (Host startet, `/otel` 200, OTLP-POST 200).
-- Release-Checkliste: Versionskonsistenz, CHANGELOG-Eintrag, Tag `v1.0.0`,
-  **nuget.org-Push** (alle 11 Pakete, API-Key) + GitHub-Release (Pakete als
-  Artifacts), Repo `private → public`. Kein Code-Signing (#5).
+- **SQLitePCLRaw-Fix:** `Microsoft.Data.Sqlite` 8.0.11 → 8.0.30 (zieht
+  `SQLitePCLRaw.bundle_e_sqlite3` 2.1.12 / SQLite 3.53.3) schließt
+  CVE-2025-6965 / GHSA-2m69-gcr7-jv3q / NU1903. Alle Tests grün auf allen drei
+  TFM (net8/9/10) unter CI; NU1903-Warnung beseitigt.
+- **Smoke-Check im CI-Job:** die net10 `HostCompositionTests` booten den
+  Stand-alone-Host in-prozess (WebApplicationFactory) und prüfen `/otel` 200,
+  OTLP-POST 200, `/api/v1/status/buildinfo` — dokumentiert im `build.yml`-
+  Test-Step-Kommentar (kein separater Smoke-Job).
+- **Release-Workflow** (`release.yml`, tag-getriggert auf `v*`): packt 11 ×
+  `1.0.0.nupkg`, pusht sie nach nuget.org (`NUGET_API_KEY`-Secret,
+  `--skip-duplicate`) und erstellt den GitHub-Release `v1.0.0` mit Paket-Assets
+  + CHANGELOG-Release-Notes. Kein Code-Signing (#5).
+- **Release-Checkliste umgesetzt:** Versionskonsistenz (zentrale `1.0.0` in
+  `Directory.Build.props`, keine per-csproj-Overrides), CHANGELOG `[1.0.0] —
+  2026-08-22`, Tag `v1.0.0`, Repo `private → public` (letzter Schritt).
 
 ---
 

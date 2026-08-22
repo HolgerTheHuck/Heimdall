@@ -7,6 +7,15 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+_(keine Änderungen seit 1.0.0)_
+
+## [1.0.0] — 2026-08-22
+
+Erste öffentliche Veröffentlichung. SQLite-only, keine Cross-Repo-Abhängigkeiten.
+Walhalla-Backend vorausliegend, kehrt als NuGet-Konsument nach 1.0 zurück
+(siehe [DESIGN.md](DESIGN.md)). Erscheint auf nuget.org (11 Pakete) und als
+GitHub-Release; kein Code-Signing (Entscheidung #5). Repo wird mit 1.0 public.
+
 ### Hinzugefügt
 - **CI-Workflow** (GitHub Actions `build.yml`): `dotnet build` + `dotnet test`
   auf Windows und Linux, .NET 8/9/10 — bei Push/PR auf `main`.
@@ -39,6 +48,13 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
     in `heim_metrics` gespeichert.
   - **`SecretComparer` (C2)** — zeitkonstanter Secret-Vergleich
     (`CryptographicOperations.FixedTimeEquals`) für API-Key + Basic-Auth.
+- Workstream E — **SQLitePCLRaw-Fix:** `Microsoft.Data.Sqlite` 8.0.11 → 8.0.30
+  (zieht `SQLitePCLRaw.bundle_e_sqlite3` 2.1.12 / SQLite 3.53.3) schließt
+  CVE-2025-6965 / GHSA-2m69-gcr7-jv3q / NU1903 (SQLite < 3.50.2, Memory-Corruption).
+- Workstream E — **Release-Workflow** (`release.yml`, tag-getriggert auf `v*`):
+  packt 11 × `1.0.0.nupkg`, pusht sie nach nuget.org (`NUGET_API_KEY`-Secret,
+  `--skip-duplicate`) und erstellt einen GitHub-Release mit den Paket-Assets +
+  den aus der CHANGELOG extrahierten Release-Notes.
 
 ### Geändert
 - **Zentrale Versionierung** in `Directory.Build.props` (`1.0.0`,
@@ -54,9 +70,3 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
   Dispose()` serialisiert mit Writes via `_gate`, `Write*` mit `_disposed`-
   Double-Check (Write nach Dispose = Noop). `IngestBuffer.Dispose()` draint
   vollständig (Flush-on-Shutdown).
-
-## [1.0.0] — TBD
-
-Erste öffentliche Veröffentlichung. SQLite-only, keine Cross-Repo-Abhängigkeiten.
-Walhalla-Backend vorausliegend, kehrt als NuGet-Konsument nach 1.0 zurück
-(siehe [DESIGN.md](DESIGN.md)).

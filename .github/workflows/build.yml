@@ -47,5 +47,8 @@ jobs:
 
       # dotnet test faehrt automatisch alle TFM-Legs des Multi-Target-Testprojekts:
       # net8/9 laufen die ~300 Lib-Tests, net10 zusaetzlich die Host-Boot-Tests.
+      # Der net10-Leg ist ZUGLEICH der Release-Smoke-Gate (Workstream E): die
+      # HostCompositionTests booten den Stand-alone-Host via WebApplicationFactory
+      # in-prozess und pruefen /otel 200 + OTLP-POST 200 + /api/v1/status/buildinfo.
       - name: Test
         run: dotnet test Heimdall.slnx -c Release --no-build --verbosity normal

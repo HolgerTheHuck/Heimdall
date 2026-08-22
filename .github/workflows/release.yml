@@ -1,0 +1,63 @@
+name: release
+
+# Workstream E — Release-Gates: tag-getriggerter Release-Job. Push eines Tags
+# `v*` packt die 11 Heimdall-1.0.0-Pakete, pusht sie nach nuget.org (API-Key als
+# Repo-Secret NUGET_API_KEY) und erstellt einen GitHub-Release mit den nupkg als
+# Assets. Quellen sind via SourceLink + EmbedUntrackedSources in die nupkg
+# eingebettet (kein separates snupkg noetig).
+#
+# Voraussetzung: Repo-Secret `NUGET_API_KEY` (nuget.org API-Key) in
+# Settings → Secrets and variables → Actions. --skip-duplicate macht Re-Runs
+# idempotent (bereits gepushte Versionen werden nicht doppelt abgelehnt).
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write   # fuer `gh release create` (default GITHUB_TOKEN)
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 1   # Tag-Ref → GITHUB_SHA = getaggter Commit (SourceLink)
+
+      - name: Setup .NET (SDK 8/9/10)
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: |
+            8.0.x
+            9.0.x
+            10.0.x
+
+      - name: Restore
+        run: dotnet restore Heimdall.slnx
+
+      - name: Build (Guard)
+        run: dotnet build Heimdall.slnx -c Release --no-restore
+
+      - name: Pack
+        run: dotnet pack Heimdall.slnx -c Release -o artifacts/nupkg --no-build
+
+      - name: Push nach nuget.org
+        run: >
+          dotnet nuget push "artifacts/nupkg/*.nupkg"
+          --api-key ${{ secrets.NUGET_API_KEY }}
+          --source https://api.nuget.org/v3/index.json
+          --skip-duplicate
+
+      - name: Release-Notes extrahieren ([1.0.0]-Sektion)
+        run: |
+          awk 'BEGIN{f=0} /^## \[1\.0\.0\]/{f=1} /^## \[/{if(f && !/^## \[1\.0\.0\]/) f=0} f{print}' CHANGELOG.md > release-notes.md
+          echo "--- Release-Notes ---"; cat release-notes.md
+
+      - name: GitHub-Release mit Paket-Assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >
+          gh release create ${{ github.ref_name }}
+          --title ${{ github.ref_name }}
+          --notes-file release-notes.md
+          artifacts/nupkg/*.nupkg
