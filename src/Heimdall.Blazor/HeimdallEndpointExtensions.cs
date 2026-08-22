@@ -33,15 +33,15 @@ public static class HeimdallEndpointExtensions
         group.MapGet("/", () =>
             new RazorComponentResult<HomePage>(new { BasePath = prefix }));
 
-        group.MapGet("/traces", (string? name, string? svc, string? err, int? limit, int? offset, string? preset, string? from, string? to) =>
+        group.MapGet("/traces", (string? name, string? svc, string? err, string? limit, string? offset, string? preset, string? from, string? to) =>
             new RazorComponentResult<TracesPage>(new
             {
                 BasePath = prefix,
                 NameContains = name,
                 ServiceName = svc,
                 HasError = ParseErr(err),
-                Limit = limit ?? 100,
-                Offset = offset ?? 0,
+                Limit = ParseInt(limit) ?? 100,
+                Offset = ParseInt(offset) ?? 0,
                 Preset = preset,
                 From = ParseNs(from),
                 To = ParseNs(to),
@@ -50,26 +50,26 @@ public static class HeimdallEndpointExtensions
         group.MapGet("/trace/{tid}", (string tid) =>
             new RazorComponentResult<TraceDetailPage>(new { BasePath = prefix, TraceId = tid }));
 
-        group.MapGet("/logs", (string? text, string? q, int? sev, int? limit, string? expand, string? preset, string? from, string? to) =>
+        group.MapGet("/logs", (string? text, string? q, string? sev, string? limit, string? expand, string? preset, string? from, string? to) =>
             new RazorComponentResult<LogsPage>(new
             {
                 BasePath = prefix,
                 Text = text,
                 Query1 = q,
-                MinSeverity = sev,
-                Limit = limit ?? 200,
+                MinSeverity = ParseInt(sev),
+                Limit = ParseInt(limit) ?? 200,
                 Expand = expand == "1",
                 Preset = preset,
                 From = ParseNs(from),
                 To = ParseNs(to),
             }));
 
-        group.MapGet("/metrics", (string? name, int? limit, string? preset, string? from, string? to) =>
+        group.MapGet("/metrics", (string? name, string? limit, string? preset, string? from, string? to) =>
             new RazorComponentResult<MetricsPage>(new
             {
                 BasePath = prefix,
-                Name = string.IsNullOrWhiteSpace(name) ? "orders" : name,
-                Limit = limit ?? 500,
+                Name = name,
+                Limit = ParseInt(limit) ?? 500,
                 Preset = preset,
                 From = ParseNs(from),
                 To = ParseNs(to),
@@ -79,14 +79,16 @@ public static class HeimdallEndpointExtensions
         // http.server.request.duration-Histogramm), Errorrate, Uptime, Spitzenlast,
         // plus „Logs im Zeitraum" und „Traces im Zeitraum" — alles über den
         // konfigurierbaren Zeitraum. Default-Preset 24h.
-        group.MapGet("/dashboard", (string? requests, string? errors, string? duration, int? limit, string? preset, string? from, string? to) =>
+        group.MapGet("/dashboard", (string? requests, string? errors, string? duration, string? limit, string? preset, string? from, string? to) =>
             new RazorComponentResult<DashboardPage>(new
             {
                 BasePath = prefix,
-                Requests = string.IsNullOrWhiteSpace(requests) ? "orders" : requests,
-                Errors = string.IsNullOrWhiteSpace(errors) ? "orders.errors" : errors,
+                Requests = requests,
+                Errors = errors,
+                // Duration ist die OTel-Semantik (http.server.request.duration) — kein
+                // Demo-Artefakt wie früher „orders"/„orders.errors", daher Default beibehalten.
                 Duration = string.IsNullOrWhiteSpace(duration) ? "http.server.request.duration" : duration,
-                Limit = limit ?? 500,
+                Limit = ParseInt(limit) ?? 500,
                 Preset = preset,
                 From = ParseNs(from),
                 To = ParseNs(to),
@@ -97,7 +99,7 @@ public static class HeimdallEndpointExtensions
         // /endpoints = Overview (Controller-Tabelle), /endpoints/{controller} =
         // Endpoints dieses Controllers. Dimensions-Attribute (Defaults vom
         // Heimdall.AspNetCore-Plugin) sind per Query-Param überschreibbar.
-        group.MapGet("/endpoints", (string? controllerAttr, string? actionAttr, string? routeAttr, int? limit, string? preset, string? from, string? to) =>
+        group.MapGet("/endpoints", (string? controllerAttr, string? actionAttr, string? routeAttr, string? limit, string? preset, string? from, string? to) =>
             new RazorComponentResult<EndpointsPage>(new
             {
                 BasePath = prefix,
@@ -105,13 +107,13 @@ public static class HeimdallEndpointExtensions
                 ControllerAttr = string.IsNullOrWhiteSpace(controllerAttr) ? "aspnetmvc.controller" : controllerAttr,
                 ActionAttr = string.IsNullOrWhiteSpace(actionAttr) ? "aspnetmvc.action" : actionAttr,
                 RouteAttr = string.IsNullOrWhiteSpace(routeAttr) ? "http.route" : routeAttr,
-                Limit = limit ?? 5000,
+                Limit = ParseInt(limit) ?? 5000,
                 Preset = preset,
                 From = ParseNs(from),
                 To = ParseNs(to),
             }));
 
-        group.MapGet("/endpoints/{controller}", (string controller, string? controllerAttr, string? actionAttr, string? routeAttr, int? limit, string? preset, string? from, string? to) =>
+        group.MapGet("/endpoints/{controller}", (string controller, string? controllerAttr, string? actionAttr, string? routeAttr, string? limit, string? preset, string? from, string? to) =>
             new RazorComponentResult<EndpointsPage>(new
             {
                 BasePath = prefix,
@@ -119,7 +121,7 @@ public static class HeimdallEndpointExtensions
                 ControllerAttr = string.IsNullOrWhiteSpace(controllerAttr) ? "aspnetmvc.controller" : controllerAttr,
                 ActionAttr = string.IsNullOrWhiteSpace(actionAttr) ? "aspnetmvc.action" : actionAttr,
                 RouteAttr = string.IsNullOrWhiteSpace(routeAttr) ? "http.route" : routeAttr,
-                Limit = limit ?? 5000,
+                Limit = ParseInt(limit) ?? 5000,
                 Preset = preset,
                 From = ParseNs(from),
                 To = ParseNs(to),
@@ -171,12 +173,12 @@ public static class HeimdallEndpointExtensions
         // === Alarm-Subsystem (Regeln ueber Logs/Metriken/Traces) ===
         // Liste + Editor + Detail. Store/UI immer verfuegbar (auch ohne aktiven Evaluator);
         // Auth-Abdeckung erbt der Host via Prefix-Middleware.
-        group.MapGet("/alerts", (string? state, int? limit, string? preset, string? from, string? to) =>
+        group.MapGet("/alerts", (string? state, string? limit, string? preset, string? from, string? to) =>
             new RazorComponentResult<AlertsPage>(new
             {
                 BasePath = prefix,
                 StateFilter = state,
-                Limit = limit ?? 100,
+                Limit = ParseInt(limit) ?? 100,
                 Preset = preset,
                 From = ParseNs(from),
                 To = ParseNs(to),

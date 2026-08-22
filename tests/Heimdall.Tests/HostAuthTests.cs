@@ -19,14 +19,14 @@ namespace Heimdall.Tests;
 public class HostAuthTests : HostBootTestBase
 {
     private const string ApiKey = "test-api-key-123";
-    private const string UiPassword = "test-ui-pw-456";
+    private const string Password = "test-ui-pw-456";
 
     public HostAuthTests()
     {
         // Basis setzt Auth.Enabled=false — hier überschreiben (vor lazily Host-Boot).
         SetEnv("Heimdall__Auth__Enabled", "true");
         SetEnv("Heimdall__Auth__ApiKey", ApiKey);
-        SetEnv("Heimdall__Auth__UiPassword", UiPassword);
+        SetEnv("Heimdall__Auth__Password", Password);
     }
 
     private ByteArrayContent TraceContent()
@@ -81,11 +81,35 @@ public class HostAuthTests : HostBootTestBase
     [Fact]
     public async Task Ui_Mit_Korrektem_BasicAuth_Liefert_200()
     {
-        var basic = System.Convert.ToBase64String(Encoding.UTF8.GetBytes("anyuser:" + UiPassword));
+        var basic = System.Convert.ToBase64String(Encoding.UTF8.GetBytes("anyuser:" + Password));
         using var msg = new HttpRequestMessage(HttpMethod.Get, "/otel");
         msg.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
         var resp = await Client.SendAsync(msg);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Ui_Mit_Korrektem_UsernameUndPasswort_Liefert_200()
+    {
+        // Username konfiguriert → muss zusätzlich zum Passwort passen.
+        SetEnv("Heimdall__Auth__Username", "admin");
+        var basic = System.Convert.ToBase64String(Encoding.UTF8.GetBytes("admin:" + Password));
+        using var msg = new HttpRequestMessage(HttpMethod.Get, "/otel");
+        msg.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
+        var resp = await Client.SendAsync(msg);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Ui_Mit_Falschem_Username_Liefert_401()
+    {
+        // Username konfiguriert, aber Request schickt einen anderen → 401.
+        SetEnv("Heimdall__Auth__Username", "admin");
+        var basic = System.Convert.ToBase64String(Encoding.UTF8.GetBytes("wrong:" + Password));
+        using var msg = new HttpRequestMessage(HttpMethod.Get, "/otel");
+        msg.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
+        var resp = await Client.SendAsync(msg);
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
     }
 }
 #endif

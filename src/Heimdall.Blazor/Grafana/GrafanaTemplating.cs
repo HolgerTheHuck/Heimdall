@@ -99,9 +99,11 @@ public static class GrafanaTemplating
     /// <summary>
     /// Formatiert eine Millisekunden-Dauer als PromQL-Duration-Literal
     /// (<c>&lt;s&gt;s</c>/<c>&lt;m&gt;m</c>/<c>&lt;h&gt;h</c>) — für die
-    /// Grafana-Built-in-Variablen <c>$__interval</c>/<c>$__rate_interval</c>,
-    /// die in <c>rate(…[$__rate_interval])</c>/<c>max_over_time(…[$__interval])</c>
-    /// stehen und ohne Interpolation vom PromQL-Parser abgewiesen würden.
+    /// Grafana-Built-in-Variablen <c>$__interval</c>/<c>$__rate_interval</c>/
+    /// <c>$__range</c>, die in <c>rate(…[$__rate_interval])</c>/
+    /// <c>max_over_time(…[$__interval])</c>/<c>increase(…[$__range])</c> stehen
+    /// und ohne Interpolation vom PromQL-Parser abgewiesen würden („unexpected
+    /// character '$'").
     /// </summary>
     public static string DurationLabel(long ms)
     {
@@ -109,6 +111,31 @@ public static class GrafanaTemplating
         if (ms < 60_000) return (ms / 1_000L).ToString(CultureInfo.InvariantCulture) + "s";
         if (ms < 3_600_000L) return (ms / 60_000L).ToString(CultureInfo.InvariantCulture) + "m";
         return (ms / 3_600_000L).ToString(CultureInfo.InvariantCulture) + "h";
+    }
+
+    /// <summary>
+    /// Liefert die Grafana-Built-in-Variablen als PromQL-Duration-Literale,
+    /// berechnet aus dem gewählten Zeitraum und Step:
+    /// <list type="bullet">
+    /// <item><c>__interval</c> = <paramref name="stepMs"/> (auflösungsabhängig).</item>
+    /// <item><c>__rate_interval</c> = 4 × <c>__interval</c>, ABER mindestens 1 m
+    ///   (Grafana floort <c>$__rate_interval</c> bei 1 m — sonst träfe
+    ///   <c>rate(…[30s])</c> bei 60-s-Export-Kadenz keine zwei Punkte).</item>
+    /// <item><c>__range</c> = <c>(toMs − fromMs)</c> — der GESAMTE gewählte
+    ///   Zeitraum, für <c>increase(…[$__range])</c>/<c>count_over_time(…[$__range])</c>
+    ///   in Stat-/Table-Panels (gnetId-19924-Pattern). Fehlte <c>__range</c>,
+    ///   bliebe <c>$__range</c> stehen → Parser-Fehler.</item>
+    /// </list>
+    /// Der Host mischt diese Werte ins <c>vars</c>-Dict vor der Panel-Auswertung.
+    /// </summary>
+    public static IReadOnlyDictionary<string, string> BuiltIns(long fromMs, long toMs, long stepMs)
+    {
+        return new Dictionary<string, string>(4, System.StringComparer.Ordinal)
+        {
+            ["__interval"] = DurationLabel(stepMs),
+            ["__rate_interval"] = DurationLabel(Math.Max(stepMs * 4, 60_000L)),
+            ["__range"] = DurationLabel(toMs - fromMs),
+        };
     }
 
     /// <summary>Kodiert einen Variablenwert fuer den PromQL-Kontext.</summary>

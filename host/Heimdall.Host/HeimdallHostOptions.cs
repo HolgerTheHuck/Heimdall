@@ -1,3 +1,4 @@
+using Heimdall.AspNetCore;
 using Heimdall.Blazor.Alerts;
 
 namespace Heimdall.Host;
@@ -216,25 +217,4 @@ public sealed class HeimdallDashboardsStoreOptions
 
     /// <summary>true = heimdall-overview.json beim Start ablegen, falls nicht vorhanden. Default false.</summary>
     public bool SeedExample { get; set; }
-}
-
-/// <summary>Minimal-Auth-Konfiguration.</summary>
-public sealed class HeimdallAuthOptions
-{
-    /// <summary>Auth aktiviert. false (Default) = Zero-Overhead-Passthrough (Demo/Embedded unverändert).</summary>
-    public bool Enabled { get; set; }
-
-    /// <summary>
-    /// Shared API-Key für OTLP/HTTP- und Prom-API-Pfade (Header <c>x-heimdall-key</c> —
-    /// Header only, kein Query-Fallback, da Query-Strings in Access-Logs landen).
-    /// Vergleich zeitkonstant (<see cref="SecretComparer"/>). Erforderlich, wenn
-    /// <see cref="Enabled"/> true. OTel-SDKs setzen ihn via
-    /// <c>OTEL_EXPORTER_OTLP_HEADERS="x-heimdall-key=…"</c>; Grafana als Custom-Header.
-    /// </summary>
-    public string? ApiKey { get; set; }
-
-    /// <summary>
-    /// Shared Passwort für die UI (Basic-Auth, Username ignoriert). null bei <see cref="Enabled"/>=false.
-    /// </summary>
-    public string? UiPassword { get; set; }
 }

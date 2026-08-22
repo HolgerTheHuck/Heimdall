@@ -11,13 +11,18 @@
          (mateusgcoelho, inhaltlich aehnlich). AssemblyName/Namespace bleiben
          Heimdall.AspNetCore; nur die nuget-Paket-ID wechselt. -->
     <PackageId>Heimdall.AspNetCore.Enrichment</PackageId>
-    <Description>Heimdall ASP.NET Core enrichment plugin: a thin middleware that tags the OTel server span with aspnetmvc.controller / aspnetmvc.action / aspnetmvc.route read from the MVC pipeline metadata, so the Heimdall dashboard can drill down API → Controller → Endpoint by real names (not by route-template parsing). No own metric, no measurement — pure Activity-tag enrichment.</Description>
+    <Description>Heimdall ASP.NET Core integration: (1) a thin enrichment middleware that tags the OTel server span with aspnetmvc.controller / aspnetmvc.action / aspnetmvc.route read from the MVC pipeline metadata, so the Heimdall dashboard can drill down API → Controller → Endpoint by real names (no own metric, no measurement — pure Activity-tag enrichment); (2) an optional, opt-in auth gate (HeimdallAuthMiddleware / UseHeimdallAuth) that protects the Heimdall surface behind a name/password Basic-Auth (UI) plus an x-heimdall-key API-Key (OTLP/HTTP + Prom-API), prefix-scoped so the host app's own routes stay free. SecretComparer (zeitkonstant) from Heimdall.Abstractions.</Description>
     <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;aspnetcore;aspnetmvc;enrichment</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>
 
   <ItemGroup>
     <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- SecretComparer (zeitkonstanter Vergleich) für HeimdallAuthMiddleware. -->
+    <ProjectReference Include="..\Heimdall.Abstractions\Heimdall.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

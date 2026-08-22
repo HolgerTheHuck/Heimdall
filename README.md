@@ -218,6 +218,39 @@ Dann:
 Die reale API erzeugt nun echte Server-Spans, ASP.NET-/Runtime-Metriken und Logs,
 die sofort im Dashboard erscheinen.
 
+### Eingebettet hinter einem Login (opt-in)
+
+Heimdall lässt sich **opt-in** hinter einen Name/Passwort-Login verbauen —
+nützlich, wenn das eingebettete Dashboard in einer App erreichbar ist, die nicht
+jeden Besucher zur Observability-Oberfläche lassen soll. Die Auth lebt in der
+Bibliothek (`Heimdall.AspNetCore`, `UseHeimdallAuth`) und ist dieselbe, die der
+Stand-alone-Host nutzt; konfiguriert wird sie in `appsettings.json`:
+
+```json
+"Heimdall": { "Auth": { "Enabled": true, "Username": "admin", "Password": "change-me", "ApiKey": "change-me-too" } }
+```
+
+Im Host der App drei Zeilen (vor `UseStaticFiles`/`Map*`):
+
+```csharp
+var auth = builder.Configuration.GetSection("Heimdall:Auth").Get<HeimdallAuthOptions>() ?? new();
+auth.ProtectedPrefix = "/otel";   // nur /otel/* schützen — App-Routes (/api/…) bleiben frei
+auth.Validate();
+…
+app.UseHeimdallAuth(auth);
+```
+
+- **UI** (`/otel/*`): HTTP-Basic-Auth (browser-nativer Login-Dialog, kein JS) gegen
+  `Username` + `Password`. `Username` null = beliebiger Name (Shared-Password).
+- **Prom-API** (`/otel/api/v1/*`): Header `x-heimdall-key` gegen `ApiKey`
+  (Header only — kein Query-Fallback; Query-Strings landen in Access-Logs).
+- **`ProtectedPrefix`**: nur dieser Subtree wird geschützt; die **App-eigenen
+  Routes bleiben frei** (im Gegensatz zum Stand-alone-Host, dessen Routes
+  sämtlich Heimdalls sind → dort kein Prefix, globale Auth).
+- **`Enabled=false`** (Default) = Zero-Overhead-Passthrough — bestehende
+  Deployments unverändert.
+- Vergleiche **zeitkonstant** (`SecretComparer`/`FixedTimeEquals`).
+
 ### Pfad B — Stand-alone Host + OTLP
 
 Wenn die reale API bereits OTLP exportiert (oder soll), läuft Heimdall als
@@ -247,7 +280,7 @@ builder.Services.AddOpenTelemetry()
 Die Host-Konfiguration liegt in `host/Heimdall.Host/appsettings.json` (Sektion
 `Heimdall`): Backend (1.0: `sqlite`), DataPath, Retention, OTLP-HTTP/gRPC (je
 `MaxConcurrentRequests`-Cap, C1), Prometheus, Dashboard, Alerting, Auth
-(`ApiKey`/`UiPassword`), SeedDemoData. Siehe auch `host/Heimdall.Host/README.md`.
+(`ApiKey`/`Username`/`Password`), SeedDemoData. Siehe auch `host/Heimdall.Host/README.md`.
 
 ---
 

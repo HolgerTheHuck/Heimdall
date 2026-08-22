@@ -327,23 +327,27 @@ a:hover { text-decoration: underline; }
 
 /* Relative Range als segmented control */
 .hmd-range-btns {
-    display: inline-flex; flex-wrap: wrap; gap: 0;
-    border: 1px solid var(--hmd-border); border-radius: var(--hmd-radius-sm);
-    overflow: hidden; background: var(--hmd-bg);
+    display: inline-flex; flex-wrap: wrap; gap: .35rem;
+    background: transparent;
 }
 .hmd-range-btn {
     appearance: none; -webkit-appearance: none;
-    background: transparent; color: var(--hmd-dim);
-    border: none; border-right: 1px solid var(--hmd-border);
+    background: var(--hmd-bg); color: var(--hmd-dim);
+    border: 1px solid var(--hmd-border); border-radius: var(--hmd-radius-sm);
     padding: .35rem .6rem; font-size: .78rem; cursor: pointer;
-    transition: background var(--hmd-tx), color var(--hmd-tx);
+    transition: background var(--hmd-tx), color var(--hmd-tx), border-color var(--hmd-tx);
 }
-.hmd-range-btn:last-child { border-right: none; }
 .hmd-range-btn:hover { background: var(--hmd-row-hover); color: var(--hmd-fg); }
 .hmd-range-btn[aria-pressed="true"] {
     background: var(--hmd-accent-dim); color: var(--hmd-fg);
-    font-weight: 600; box-shadow: inset 0 -2px 0 var(--hmd-accent);
+    font-weight: 600; border-color: var(--hmd-accent);
+    box-shadow: inset 0 -2px 0 var(--hmd-accent);
 }
+
+/* Metrik-Namen-Liste (Discovery-Modus der Metriken-Seite) */
+.hmd-metric-list { list-style: none; margin: .5rem 0; padding: 0; display: flex; flex-wrap: wrap; gap: .4rem .8rem; }
+.hmd-metric-list a { color: var(--hmd-accent); text-decoration: none; font-size: .82rem; }
+.hmd-metric-list a:hover { text-decoration: underline; }
 
 /* Benutzerdefinierter Zeitraum */
 .hmd-range-custom { margin-left: .2rem; }

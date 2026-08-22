@@ -19,6 +19,8 @@
     <ProjectReference Include="..\..\src\Heimdall.Prometheus\Heimdall.Prometheus.csproj" />
     <ProjectReference Include="..\..\src\Heimdall.Direct\Heimdall.Direct.csproj" />
     <ProjectReference Include="..\..\src\Heimdall.Storage.SQLite\Heimdall.Storage.SQLite.csproj" />
+    <!-- HeimdallAuthMiddleware/UseHeimdallAuth (gehoben aus dem Host) + Span-Enrichment. -->
+    <ProjectReference Include="..\..\src\Heimdall.AspNetCore\Heimdall.AspNetCore.csproj" />
   </ItemGroup>
 
   <ItemGroup>

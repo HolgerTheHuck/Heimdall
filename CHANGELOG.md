@@ -7,7 +7,46 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
-_(keine Änderungen seit 1.0.1)_
+_(keine Änderungen seit 1.0.2)_
+
+## [1.0.2] — 2026-08-22
+
+### Hinzugefügt
+- **Embedded-Auth (opt-in):** Eingebettetes Heimdall lässt sich hinter einen
+  Name/Passwort-Login verbergen (`Heimdall:Auth` in `appsettings.json`,
+  `Enabled` default false = Zero-Overhead-Passthrough). HTTP Basic-Auth
+  (browser-nativ, no-JS, konsistent mit dem statischen SSR).
+- **Auth-Middleware in `Heimdall.AspNetCore` gehoben:** Stand-alone-Host UND
+  eingebettete Apps nutzen jetzt dieselbe `UseHeimdallAuth(app,
+  HeimdallAuthOptions)` (früher host-lokal, gekoppelt an `HeimdallHostOptions`).
+  `HeimdallAuthOptions` additiv um `Username`, `ProtectedPrefix`,
+  `OtlpHttpPrefix`/`PrometheusPrefix` und `Validate()`.
+- **`ProtectedPrefix` (Embedded):** nur die Heimdall-Oberfläche (`/otel`) wird
+  geschützt; App-eigene Routes (`/api/…`) bleiben frei. Host setzt null = global.
+- **Dashboard-/Metrics-Discovery:** statt des hartkodierten `orders`-Beispiel-
+  Defaults listet die Seite bei leerem Metrik-Namen die im Zeitraum verfügbaren
+  Metrik-Namen als anklickbare Links.
+- **Grafana-Built-in `$__range`:** neu in `GrafanaTemplating.BuiltIns` (neben
+  `$__interval`/`$__rate_interval`). Fehlte bisher → Stat-/Table-Panels mit
+  `increase(…[$__range])` krachten mit `unexpected character '$'` (z. B.
+  gnetId-19924, ASP.NET Core: 6 von 10 Panels).
+
+### Geändert
+- **Username case-insensitiv:** „Admin" == „admin" beim Basic-Auth-Login
+  (Usernamen merkt man sich ohne exakte Groß-/Kleinschreibung). Passwort
+  bleibt case-sensitiv. Vergleiche weiterhin zeitkonstant
+  (`SecretComparer`).
+- **`SQLiteTelemetrySink.MetricSeries`:** leerer/fehlender Name liefert nun
+  eine leere Serie statt `InvalidOperationException: Value must be set`
+  (früher ausgelöst durch `Param("@n", null)` beim Dashboard-Klick mit
+  leerem Errors-Counter).
+
+### Tests
+- 320 (net8/9) / 384 (net10) grün. Neu: `EmbeddedAuthTests` (6 → 10 mit
+  case-insensitivem Username + case-sensitivem Passwort),
+  `DashboardSeite_OhneRequests_ListetVerfuegbareMetrikNamen`,
+  `MetricSeries_LeererName_LiefertLeer_StattZuWerfen`,
+  `Interpolate_BuiltInRange_WirdErsetzt` + `BuiltIns_*`.
 
 ## [1.0.1] — 2026-08-22
 

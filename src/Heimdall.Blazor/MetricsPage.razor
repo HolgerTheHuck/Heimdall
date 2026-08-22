@@ -13,13 +13,35 @@
     <h1>Metriken</h1>
 
     <form class="hmd-filters" method="get" action="@(BasePath + "/metrics")">
-        <label>Name <input type="search" name="name" value="@Name" placeholder="orders" /></label>
+        <label>Name <input type="search" name="name" value="@Name" placeholder="http.server.request.duration" /></label>
         <label>Limit <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
         <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
         <button type="submit">Laden</button>
     </form>
 
-    @if (_series.Count == 0)
+    @if (string.IsNullOrWhiteSpace(Name))
+    {
+        <h2 class="hmd-subhead">Verfügbare Metriken</h2>
+        @if (_availableNames.Count == 0)
+        {
+            <section class="hmd-empty-state">
+                <h2>Keine Metriken</h2>
+                <p>Im gewählten Zeitraum liegen keine Metrik-Punkte vor. Zeitraum erweitern oder Metriken senden.</p>
+                <p class="hmd-dim">OTLP/HTTP <code>POST @BasePath/v1/metrics</code> · gRPC <code>localhost:4317</code> · zurück zur <a href="@BasePath">Übersicht</a></p>
+            </section>
+        }
+        else
+        {
+            <p class="hmd-dim">@Query.CountMetrics() Metrik-Punkte gesamt im Zeitraum. Namen wählen zum Anzeigen der Serie:</p>
+            <ul class="hmd-metric-list">
+            @foreach (var n in _availableNames)
+            {
+                <li><a href="@(BasePath + "/metrics?" + RangeQuery(n))" class="hmd-mono">@n</a></li>
+            }
+            </ul>
+        }
+    }
+    else if (_series.Count == 0)
     {
         <section class="hmd-empty-state">
             <h2>Keine Messpunkte für „@Name"</h2>
@@ -72,7 +94,7 @@
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";
-    [Parameter] public string Name { get; set; } = "orders";
+    [Parameter] public string? Name { get; set; }
     [Parameter] public int Limit { get; set; } = 500;
     [Parameter] public string? Preset { get; set; }
     [Parameter] public long? From { get; set; }
@@ -82,14 +104,22 @@
     private List<ChartSeries> _chartSeries = new();
     private List<long> _histCounts = new();
     private List<double> _histBounds = new();
+    private List<string> _availableNames = new();
     private int _type;
     private int _temp;
     private string? _unit;
 
     protected override void OnInitialized()
     {
-        if (string.IsNullOrWhiteSpace(Name)) return;
         var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano());
+
+        // Ohne Namen: Discovery-Modus — verfügbare Metrik-Namen im Zeitraum auflisten.
+        if (string.IsNullOrWhiteSpace(Name))
+        {
+            _availableNames = new List<string>(Query.ListMetricNames(range.From, range.To));
+            return;
+        }
+
         _series = new List<Heimdall.MetricRow>(
             Query.MetricSeries(Name, range.From, range.To, Limit < 1 ? 500 : Limit));
         if (_series.Count == 0) return;
@@ -134,5 +164,18 @@
                 _histBounds = new List<double>(HeimdallCharting.ParseDoubles(last.ExplicitBoundsJson));
             }
         }
+    }
+
+    /// <summary>Baut den Query-Suffix für einen Metrik-Namen-Link (erhält den Zeitraum).</summary>
+    private string RangeQuery(string name)
+    {
+        var s = "name=" + System.Uri.EscapeDataString(name);
+        if (!string.IsNullOrEmpty(Preset)) s += "&preset=" + System.Uri.EscapeDataString(Preset);
+        else
+        {
+            if (From is not null) s += "&from=" + From.Value.ToString(CultureInfo.InvariantCulture);
+            if (To is not null) s += "&to=" + To.Value.ToString(CultureInfo.InvariantCulture);
+        }
+        return s;
     }
 }

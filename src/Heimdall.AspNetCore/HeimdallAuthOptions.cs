@@ -1,0 +1,75 @@
+using System;
+
+namespace Heimdall.AspNetCore;
+
+/// <summary>
+/// Minimal-Auth-Konfiguration für die Heimdall-Oberfläche (UI + OTLP/HTTP- +
+/// Prom-API-Pfade). Opt-in: <see cref="Enabled"/>=false (Default) =
+/// Zero-Overhead-Passthrough. POCO — gebunden via
+/// <c>Configuration.GetSection("Heimdall:Auth").Get&lt;HeimdallAuthOptions&gt;()</c>.
+/// </summary>
+/// <remarks>
+/// Lebte früher host-lokal in <c>Heimdall.Host</c> (als <c>UiPassword</c>-only
+/// Shared-Password, Username ignoriert). Jetzt in der <c>Heimdall.AspNetCore</c>-
+/// Bibliothek, sodass Stand-alone-Host UND eingebettete Apps dieselbe Auth nutzen.
+/// <see cref="Username"/> ist additiv: null = beliebiger Username (altes
+/// Shared-Password-Verhalten); gesetzt = muss zusätzlich zeitkonstant passen
+/// (<see cref="Heimdall.SecretComparer"/>). <see cref="ProtectedPrefix"/> null =
+/// global schützen (Host); gesetzt = nur dieser Subtree (Embedded, damit
+/// App-eigenen Routes frei bleiben).
+/// </remarks>
+public sealed class HeimdallAuthOptions
+{
+    /// <summary>Auth aktiviert. false (Default) = Passthrough (Zero-Overhead).</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>
+    /// Username für die UI-Basic-Auth. null = beliebiger Username (Shared-Password,
+    /// abwärtskompatibel zum alten Host-Verhalten); gesetzt = muss zusätzlich zum
+    /// <see cref="Password"/> zeitkonstant passen. Vergleich über
+    /// <see cref="Heimdall.SecretComparer"/>.
+    /// </summary>
+    public string? Username { get; set; }
+
+    /// <summary>
+    /// Passwort für die UI (Basic-Auth). Erforderlich, wenn <see cref="Enabled"/>
+    /// true (siehe <see cref="Validate"/>). Vergleich zeitkonstant.
+    /// </summary>
+    public string? Password { get; set; }
+
+    /// <summary>
+    /// Shared API-Key für OTLP/HTTP- und Prom-API-Pfade (Header
+    /// <c>x-heimdall-key</c> — Header only, kein Query-Fallback, da Query-Strings
+    /// in Access-Logs landen). Vergleich zeitkonstant. null/leer bei
+    /// <see cref="Enabled"/>=true → API-Pfade liefern 401 (sicherer Default);
+    /// der Host fordert ApiKey zusätzlich ein (siehe Host-ValidateOptions).
+    /// </summary>
+    public string? ApiKey { get; set; }
+
+    /// <summary>
+    /// Nur Pfade unter diesem Prefix werden geschützt; alles andere passiert
+    /// unverändert (<c>_next</c>). null (Default) = global schützen (Stand-alone-
+    /// Host, dessen Routes sämtlich Heimdalls sind). Für Embedded auf z. B.
+    /// <c>"/otel"</c> setzen, damit die App-eigenen Routes (<c>/api/…</c>)
+    /// frei bleiben und nur die Heimdall-Oberfläche hinter dem Login steht.
+    /// </summary>
+    public string? ProtectedPrefix { get; set; }
+
+    /// <summary>URL-Prefix der OTLP/HTTP-API (Wire-Pfad <c>{Prefix}/v1/*</c>). Default "/otel".</summary>
+    public string OtlpHttpPrefix { get; set; } = "/otel";
+
+    /// <summary>URL-Prefix der Prom-API (Wire-Pfad <c>{Prefix}/api/v1/*</c>). Default "/otel".</summary>
+    public string PrometheusPrefix { get; set; } = "/otel";
+
+    /// <summary>
+    /// Validiert die Baseline: <see cref="Enabled"/>=true erfordert ein nicht-leeres
+    /// <see cref="Password"/>. Wirft andernfalls <see cref="InvalidOperationException"/>.
+    /// Host-spezifische Zusatz-Validierung (ApiKey-Pflicht) bleibt dem Host überlassen.
+    /// </summary>
+    public void Validate()
+    {
+        if (Enabled && string.IsNullOrEmpty(Password))
+            throw new InvalidOperationException(
+                "Heimdall:Auth:Enabled=true erfordert Password (Basic-Auth).");
+    }
+}

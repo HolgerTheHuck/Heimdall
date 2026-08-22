@@ -171,4 +171,31 @@ public class SQLiteTelemetrySinkTests
         }
         finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
     }
+
+    /// <summary>
+    /// Regression: MetricSeries mit null/leerem Namen darf nicht werfen (früher
+    /// „InvalidOperationException: Value must be set" aus der SQLite-Bindung, weil
+    /// Param("@n", null) den Parameter ohne Value ließ). Aufrufer wie das Dashboard
+    /// rufen MetricSeries für einen optionalen Errors-Counter auf, der leer sein darf.
+    /// </summary>
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void MetricSeries_LeererName_LiefertLeer_StattZuWerfen(string? name)
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            sink.WriteMetrics(new[]
+            {
+                new HMetricPoint("orders", "1", HMetricType.Sum, HTemporality.Cumulative, NowNs, 1, 1, null, null, null, null, null,
+                    Array.Empty<HAttribute>(), null, null),
+            });
+            var series = sink.MetricSeries(name!, null, null, 10);
+            Assert.Empty(series);
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
 }

@@ -33,6 +33,17 @@ const string Url = "http://localhost:5198";
 var builder = WebApplication.CreateBuilder(args);
 builder.WebHost.UseUrls(Url);
 
+// Optionaler Login-Schutz für die Heimdall-Oberfläche (opt-in via appsettings
+// Sektion "Heimdall:Auth": Enabled=true + Username/Password + ggf. ApiKey).
+// ProtectedPrefix="/otel" → nur /otel/* wird geschützt; die App-eigenen Routes
+// (/api/{products,orders}, /) bleiben frei. Enabled=false (Default) =
+// Zero-Overhead-Passthrough (Status quo). Validate() wirft fail-fast bei
+// Enabled ohne Password.
+var auth = builder.Configuration.GetSection("Heimdall:Auth")
+                    .Get<HeimdallAuthOptions>() ?? new HeimdallAuthOptions();
+auth.ProtectedPrefix = "/otel";
+auth.Validate();
+
 // Eingebettetes Backend: SQLite implementiert IHeimdallSink (OTel-Exporter-Ziel)
 // UND IHeimdallQuery (Dashboard-Lesevertrag). Frische DB pro Start, damit das
 // Dashboard mit sauberen Daten befüllt wird.
@@ -117,6 +128,9 @@ builder.Services.AddControllers().AddJsonOptions(o =>
     o.JsonSerializerOptions.PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase);
 
 var app = builder.Build();
+
+// Opt-in Login-Schutz (vor UseStaticFiles + Map*; Passthrough bei Enabled=false).
+app.UseHeimdallAuth(auth);
 
 app.UseStaticFiles();                 // heimdall.css/js aus _content
 app.UseRouting();

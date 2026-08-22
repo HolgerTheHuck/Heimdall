@@ -1,4 +1,5 @@
 using Heimdall;
+using Heimdall.AspNetCore;
 using Heimdall.Blazor;
 using Heimdall.Direct;
 using Heimdall.Host;
@@ -53,15 +54,20 @@ builder.Services.AddHeimdallDashboards(opts.DashboardsStore.Dir);
 // Alarm-Subsystem: Store/UI immer (Route /otel/alerts funktioniert ohne aktiven Evaluator);
 // Evaluator + Kanäle nur wenn Alerting.Enabled.
 builder.Services.AddHeimdallAlerting(query, opts.Alerting);
-builder.Services.AddSingleton(opts);   // für HeimdallAuthMiddleware (Prefixe + Auth)
+builder.Services.AddSingleton(opts);   // HostShutdownTest + ggf. weitere DI-Konsumenten
 
 var app = builder.Build();
 
 // Beispiel-Dashboard seeden (idempotent), falls konfiguriert — vor Auth, nach Build.
 if (opts.DashboardsStore.SeedExample) HeimdallSeeder.SeedExampleDashboard(app.Services);
 
-// Auth vor den Map*-Aufrufen einhängen (Passthrough bei Enabled=false).
-if (opts.Auth.Enabled) app.UseHeimdallAuth(opts);
+// Auth vor den Map*-Aufrufen einhängen (Passthrough bei Enabled=false). Die
+// gehobene Lib-Middleware liest die API-Prefixe aus den Auth-Optionen (früher
+// direkt aus HeimdallHostOptions) → hier syncen. ProtectedPrefix bleibt null
+// (Host = global, dessen Routes sämtlich Heimdalls sind).
+opts.Auth.OtlpHttpPrefix = opts.Otlp.Http.Prefix;
+opts.Auth.PrometheusPrefix = opts.Prometheus.Prefix;
+if (opts.Auth.Enabled) app.UseHeimdallAuth(opts.Auth);
 
 app.UseStaticFiles();   // liefert /_content/Heimdall.Blazor/{css,js}
 
@@ -115,14 +121,15 @@ static void ValidateOptions(HeimdallHostOptions o)
                 $"Heimdall:Storage:Rollup:RawDays „{rollup.RawDays}“ > MetricsDaysEffective „{metricsDays}“ — " +
                 "Rollup-Fenster wäre leer (Raw wird vor dem Rollen gelöscht).");
     }
+    // Auth-Baseline (shared Lib-Validierung: Enabled erfordert Password) +
+    // Host-spezifischer ApiKey-Zwang (der Host exponiert immer OTLP/HTTP).
+    o.Auth.Validate();
     if (o.Auth.Enabled && string.IsNullOrEmpty(o.Auth.ApiKey))
-        throw new InvalidOperationException("Heimdall:Auth:Enabled=true erfordert ApiKey (x-heimdall-key).");
+        throw new InvalidOperationException("Heimdall:Auth:Enabled=true erfordert ApiKey (x-heimdall-key) — der Host exponiert immer OTLP/HTTP + Prom-API.");
     if (o.Otlp.Http.MaxConcurrentRequests < 0)
         throw new InvalidOperationException("Heimdall:Otlp:Http:MaxConcurrentRequests darf nicht negativ sein (0 = unbegrenzt).");
     if (o.Otlp.Grpc.MaxConcurrentRequests < 0)
         throw new InvalidOperationException("Heimdall:Otlp:Grpc:MaxConcurrentRequests darf nicht negativ sein (0 = unbegrenzt).");
-    if (o.Auth.Enabled && string.IsNullOrEmpty(o.Auth.UiPassword))
-        throw new InvalidOperationException("Heimdall:Auth:Enabled=true erfordert UiPassword (Basic-Auth).");
     if (o.Alerting.Enabled && o.Alerting.Smtp.Enabled &&
         (string.IsNullOrEmpty(o.Alerting.Smtp.Host) || string.IsNullOrEmpty(o.Alerting.Smtp.From) || string.IsNullOrEmpty(o.Alerting.Smtp.To)))
         throw new InvalidOperationException("Heimdall:Alerting:Smtp:Enabled=true erfordert Host, From und To.");

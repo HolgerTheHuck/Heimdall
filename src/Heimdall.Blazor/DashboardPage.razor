@@ -27,7 +27,29 @@
         <button type="submit">Laden</button>
     </form>
 
-    @if (_hasData)
+    @if (string.IsNullOrWhiteSpace(Requests))
+    {
+        <h2 class="hmd-subhead">Verfügbare Metriken</h2>
+        @if (_availableNames.Count == 0)
+        {
+            <section class="hmd-empty-state">
+                <h2>Keine Metriken</h2>
+                <p>Im gewählten Zeitraum liegen keine Metrik-Punkte vor. Zeitraum erweitern oder Metriken senden.</p>
+                <p class="hmd-dim">OTLP/HTTP <code>POST @BasePath/v1/metrics</code> · gRPC <code>localhost:4317</code> · zurück zur <a href="@BasePath">Übersicht</a></p>
+            </section>
+        }
+        else
+        {
+            <p class="hmd-dim">Request-Counter wählen zum Belegen des Dashboards (Errors optional, Latenz default <code>http.server.request.duration</code>):</p>
+            <ul class="hmd-metric-list">
+            @foreach (var n in _availableNames)
+            {
+                <li><a href="@(BasePath + "/dashboard?" + RangeQuery(n))" class="hmd-mono">@n</a></li>
+            }
+            </ul>
+        }
+    }
+    else if (_hasData)
     {
         <div class="hmd-kpi-row">
             <HeimdallKpi Value="@_callsPerSec" Label="calls/s aktuell" Sub="@($"∅ {HeimdallCharting.FmtValue(HeimdallSeries.Mean(_reqRate))}/s")" Tone="accent" />
@@ -104,7 +126,7 @@
     }
     else
     {
-        <p class="hmd-empty">Keine Daten für „@Requests" / „@Errors" — bitte Counter-Namen anpassen.</p>
+        <p class="hmd-empty">Keine Daten für „@Requests" — Counter-Namen prüfen, Zeitraum erweitern oder <a href="@(BasePath + "/dashboard?" + RangeQuery(""))">verfügbare Metriken</a> anzeigen.</p>
     }
 
     <HeimdallFooter BasePath="@BasePath" />
@@ -114,8 +136,8 @@
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";
-    [Parameter] public string Requests { get; set; } = "orders";
-    [Parameter] public string Errors { get; set; } = "orders.errors";
+    [Parameter] public string? Requests { get; set; }
+    [Parameter] public string? Errors { get; set; }
     [Parameter] public string Duration { get; set; } = "http.server.request.duration";
     [Parameter] public int Limit { get; set; } = 500;
     [Parameter] public string? Preset { get; set; }
@@ -135,6 +157,7 @@
     private List<ChartSeries> _latencyChart = new();
     private List<Heimdall.LogRow> _logs = new();
     private List<Heimdall.TraceSummary> _traces = new();
+    private List<string> _availableNames = new();
     private bool _hasData;
     private string _rangeLabel = "—";
 
@@ -155,6 +178,15 @@
         int lim = Limit < 1 ? 500 : Limit;
         var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano(), fallbackPreset: "24h");
         _rangeLabel = RangeLabel(Preset, From, To);
+
+        // Ohne Requests-Counter: Discovery-Modus — verfügbare Metrik-Namen auflisten
+        // (wie die Metriken-Seite). Früher war „orders" hartkodiert (altes Demo),
+        // so dass das Feld stets an „orders" klebte und die KPIs leer blieben.
+        if (string.IsNullOrWhiteSpace(Requests))
+        {
+            _availableNames = new List<string>(Query.ListMetricNames(range.From, range.To));
+            return;
+        }
 
         // Load + Errors aus den kumulativen Countern (bestehende Logik), im Zeitfenster.
         _reqPts = HeimdallSeries.PointsFromMetric(Query.MetricSeries(Requests, range.From, range.To, lim));
@@ -237,6 +269,19 @@
         var pts = new List<(long T, double V)>(s.Count);
         foreach (var p in s) pts.Add((p.T, p.R));
         return pts;
+    }
+
+    /// <summary>Baut den Query-Suffix für einen Request-Counter-Link (erhält den Zeitraum).</summary>
+    private string RangeQuery(string requestName)
+    {
+        var s = "requests=" + System.Uri.EscapeDataString(requestName);
+        if (!string.IsNullOrEmpty(Preset)) s += "&preset=" + System.Uri.EscapeDataString(Preset);
+        else
+        {
+            if (From is not null) s += "&from=" + From.Value.ToString(CultureInfo.InvariantCulture);
+            if (To is not null) s += "&to=" + To.Value.ToString(CultureInfo.InvariantCulture);
+        }
+        return s;
     }
 
     private static string RangeLabel(string? preset, long? from, long? to)

@@ -81,7 +81,7 @@ public class HeimdallHostOptionsTests
             ""Prometheus"": { ""Enabled"": true, ""Prefix"": ""/prom"" },
             ""Dashboard"": { ""Enabled"": false, ""Prefix"": ""/ui"" },
             ""DashboardsStore"": { ""Dir"": ""/data/dash"", ""SeedExample"": true },
-            ""Auth"": { ""Enabled"": true, ""ApiKey"": ""k-secret"", ""UiPassword"": ""pw"" },
+            ""Auth"": { ""Enabled"": true, ""ApiKey"": ""k-secret"", ""Username"": ""u"", ""Password"": ""pw"" },
             ""SeedDemoData"": true
           }
         }";
@@ -107,7 +107,8 @@ public class HeimdallHostOptionsTests
 
         Assert.True(o.Auth.Enabled);
         Assert.Equal("k-secret", o.Auth.ApiKey);
-        Assert.Equal("pw", o.Auth.UiPassword);
+        Assert.Equal("u", o.Auth.Username);
+        Assert.Equal("pw", o.Auth.Password);
         Assert.True(o.SeedDemoData);
     }
 

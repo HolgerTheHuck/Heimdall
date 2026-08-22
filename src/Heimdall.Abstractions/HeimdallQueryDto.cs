@@ -117,4 +117,11 @@ public interface IHeimdallQuery
     long CountSpans();
     long CountLogs();
     long CountMetrics();
+
+    /// <summary>Alle distinkten Metrik-Namen (OTel-native) im Zeitfenster.
+    /// Default-Implementierung leer (für Backends ohne Discovery); der SQLite-Backend
+    /// bedient dies über seine vorhandene <see cref="Heimdall.IHeimdallMetricSource"/>-Logik.
+    /// Additiv als Default-Interface-Method -> nicht-brechend für bestehende Implementierer.</summary>
+    IReadOnlyList<string> ListMetricNames(long? fromUnixNano = null, long? toUnixNano = null)
+        => System.Array.Empty<string>();
 }

@@ -48,13 +48,16 @@ Env-Vars überschreiben (Docker/CI): `Heimdall__Storage__Backend=walhalla`,
 
 ## Minimal-Auth
 
-`Auth:Enabled=true` schaltet zwei Mechanismen scharf (Bibliotheken bleiben auth-frei):
+`Auth:Enabled=true` schaltet zwei Mechanismen scharf (Auth-Middleware in
+`Heimdall.AspNetCore`, vom Host hier nur konfiguriert — dieselbe nutzt auch der
+Embedded-Pfad):
 
 - **OTLP/HTTP + Prom-API** (`{Prefix}/v1/*`, `{Prefix}/api/v1/*`): Shared API-Key via
   Header `x-heimdall-key` (**Header only — kein Query-Fallback**, da Query-Strings in
   Access-Logs/Proxies landen). OTel-SDKs: `OTEL_EXPORTER_OTLP_HEADERS="x-heimdall-key=…"`.
   Grafana-Prometheus-Datasource: Custom-Header `x-heimdall-key: …`.
-- **UI / Rest**: Basic-Auth gegen `Auth:UiPassword` (Username beliebig, Shared-Password).
+- **UI / Rest**: Basic-Auth gegen `Auth:Username` (optional; null = beliebiger Name,
+  Shared-Password) + `Auth:Password`.
 - **gRPC**: Inline-Check in den Service-Implementierungen (Header `x-heimdall-key`), bei
   Fehlen `RpcException(Unauthenticated)`.
 

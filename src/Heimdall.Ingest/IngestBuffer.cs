@@ -130,6 +130,7 @@ public sealed class IngestBuffer : IHeimdallSink, IDisposable
                 {
                     FlushSafe(flush, batch);
                     addFlushed(batch.Count);
+                    batch.Clear();
                 }
             }
         }

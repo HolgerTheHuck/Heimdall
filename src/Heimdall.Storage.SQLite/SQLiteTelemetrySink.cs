@@ -354,6 +354,12 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
 
     public IReadOnlyList<MetricRow> MetricSeries(string name, long? fromUnixNano, long? toUnixNano, int limit = 500)
     {
+        // Kein Name → keine Serie (z. B. Dashboard ohne Errors-Counter). Früher warf die
+        // SQLite-Bindung „Value must be set", weil Param("@n", null) den Parameter ohne
+        // Value ließ. Ein leerer Name matcht ohnehin keine Metrik → defensive Früh-Rückkehr.
+        if (string.IsNullOrWhiteSpace(name))
+            return Array.Empty<MetricRow>();
+
         var sb = SqlBuilder();
         sb.Append("SELECT name, unit, type, temporality, ts_unix_nano, value, count, sum, min, max, bucket_counts_json, explicit_bounds_json, attrs_json FROM heim_metrics WHERE name=@n");
         var ps = new List<SqliteParameter> { Param("@n", name) };

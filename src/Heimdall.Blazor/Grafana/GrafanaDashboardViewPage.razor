@@ -118,15 +118,16 @@
             _renderVars[v.Name] = selected;
         }
 
-        // Grafana-Built-in-Variablen ($__interval/$__rate_interval) aus dem Step
-        // ableiten — stehen in fast jedem rate()/max_over_time()-Target und würden
-        // ohne Interpolation vom PromQL-Parser abgewiesen („unexpected '$'").
-        // $__rate_interval = 4 × $__interval, ABER mindestens 1 m (Grafana floors
-        // $__rate_interval bei 1 m). Ohne diesen Floor würde bei 15-m-Preset
-        // $__rate_interval=30 s — kürzer als die typische 60-s-Export-Kadenz des
-        // SDK — und rate(…[30s]) träfe keine zwei Punkte → leere Dauer-Panels.
-        _renderVars["__interval"] = GrafanaTemplating.DurationLabel(stepMs);
-        _renderVars["__rate_interval"] = GrafanaTemplating.DurationLabel(Math.Max(stepMs * 4, 60_000L));
+        // Grafana-Built-in-Variablen ($__interval/$__rate_interval/$__range) aus
+        // Step und Zeitraum ableiten — stehen in fast jedem rate()/increase()/
+        // max_over_time()-Target und würden ohne Interpolation vom PromQL-Parser
+        // abgewiesen („unexpected '$'"). $__range = der GESAMTE Zeitraum (für
+        // increase(…[$__range]) in Stat-/Table-Panels); fehlte er, blieben die
+        // Stat-/Table-Panels des gnetId-19924-Dashboards auf dem Parser-Fehler
+        // „unexpected character '$'" stehen. Zentral in GrafanaTemplating.BuiltIns
+        // berechnet (und dort getestet).
+        foreach (var kv in GrafanaTemplating.BuiltIns(fromMs, toMs, stepMs))
+            _renderVars[kv.Key] = kv.Value;
 
         // Panels in Grafana-Lesenreihenfolge (Y, dann X) auswerten. Panels mit
         // `repeat`-Variable werden pro gewähltem Wert expandiert (eine Kachel je

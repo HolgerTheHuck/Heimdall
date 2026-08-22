@@ -99,6 +99,39 @@ public class GrafanaTemplatingTests
             GrafanaTemplating.Interpolate("max_over_time(x[${__interval}])", vars));
     }
 
+    [Fact]
+    public void Interpolate_BuiltInRange_WirdErsetzt()
+    {
+        // $__range (der gesamte gewählte Zeitraum) steht in increase()/count_over_time()
+        // — gnetId-19924-Pattern: increase(http_server_request_duration_seconds_count[$__range]).
+        var vars = new Dictionary<string, string> { ["__range"] = "5m" };
+        Assert.Equal("sum(ceil(increase(http_server_request_duration_seconds_count[5m])))",
+            GrafanaTemplating.Interpolate(
+                "sum(ceil(increase(http_server_request_duration_seconds_count[$__range])))", vars));
+        Assert.Equal("count_over_time(x[5m])",
+            GrafanaTemplating.Interpolate("count_over_time(x[${__range}])", vars));
+    }
+
+    [Fact]
+    public void BuiltIns_EnthaeltRangeIntervalRateInterval()
+    {
+        // Regression: der Host muss $__range ins vars-Dict mischen, sonst bleiben
+        // Stat-/Table-Panels mit increase(…[$__range]) auf „unexpected character '$'"
+        // stehen (gnetId-19924: 6 von 10 Panels). BuiltIns liefert alle drei Built-ins.
+        var b = GrafanaTemplating.BuiltIns(fromMs: 0, toMs: 300_000, stepMs: 15_000);
+        Assert.Equal("15s", b["__interval"]);
+        Assert.Equal("1m", b["__rate_interval"]);          // 4×15s=60s → Floor 1m
+        Assert.Equal("5m", b["__range"]);                  // toMs−fromMs = 300 s
+    }
+
+    [Fact]
+    public void BuiltIns_RangeFolgtDemZeitraum()
+    {
+        // $__range spiegelt den gewählten Zeitraum, nicht den Step — 1 h bzw. 24 h.
+        Assert.Equal("1h", GrafanaTemplating.BuiltIns(0, 3_600_000, 30_000)["__range"]);
+        Assert.Equal("24h", GrafanaTemplating.BuiltIns(0, 86_400_000, 60_000)["__range"]);
+    }
+
     // --- Operator-Beförderung (= → =~ bei Regex-Werten) --------------------
     // Grafana befördert =/!= automatisch zu =~/!~, sobald eine Variable All- oder
     // Multi-Werte liefert (also einen Regex-Wert). Ohne dies würde

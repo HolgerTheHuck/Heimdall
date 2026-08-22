@@ -21,5 +21,6 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       # - Heimdall__Auth__Enabled=true
       # - Heimdall__Auth__ApiKey=change-me
-      # - Heimdall__Auth__UiPassword=change-me
+      # - Heimdall__Auth__Username=admin
+      # - Heimdall__Auth__Password=change-me
     restart: unless-stopped

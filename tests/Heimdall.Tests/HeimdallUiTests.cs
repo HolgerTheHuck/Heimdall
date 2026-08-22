@@ -173,6 +173,66 @@ public class HeimdallUiTests : HostBootTestBase
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
     }
 
+    /// <summary>
+    /// Regression für das gleiche Bindungs-Problem bei <c>int?</c>-Query-Parametern:
+    /// das /logs-Filterformular schickt <c>sev=</c> (leer, „alle"-Option) und
+    /// <c>limit=</c> bei JEDEM Submit mit — auch beim Klick auf einen Zeit-Button.
+    /// Direkte <c>int?</c>-Bindung wirft bei leerem String → HTTP 400 (Crash).
+    /// Handler binden daher <c>string?</c> und parsen tolerant (<c>ParseInt</c>).
+    /// </summary>
+    [Theory]
+    [InlineData("/otel/logs?sev=&limit=&from=&to=&preset=1h")]      // User-Repro: Zeit-Button auf /logs
+    [InlineData("/otel/logs?sev=&limit=200&text=&q=")]
+    [InlineData("/otel/traces?limit=&offset=&from=&to=&preset=24h")]
+    [InlineData("/otel/metrics?limit=&from=&to=&name=orders")]
+    [InlineData("/otel/endpoints?limit=&from=&to=&preset=1h")]
+    [InlineData("/otel/alerts?limit=&from=&to=&preset=1h")]
+    public async Task LeereIntParameter_Liefert200StattBindungsfehler(string url)
+    {
+        var resp = await Client.GetAsync(url);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+    }
+
+    /// <summary>
+    /// Metriken-Seite ohne Namen: Discovery-Modus. Früher war „orders" als Default
+    /// hartkodiert (altes Beispiel), so dass die Seite stets „Keine Messpunkte für
+    /// orders" zeigte und ein gelöschter Name sofort wiederkehrte. Jetzt listet sie
+    /// die im Zeitraum verfügbaren Metrik-Namen als anklickbare Links.
+    /// </summary>
+    [Fact]
+    public async Task MetricsSeite_OhneName_ListetVerfuegbareMetrikNamen()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        // 60s in der Vergangenheit: NowUnixNano() trunkiert auf Sekunden, daher muss
+        // der Seed-Zeitstempel sicher innerhalb des 1h-Default-Fensters liegen.
+        var nowNs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000_000L - 60_000_000_000L;
+        sink.WriteMetrics(new[] { MetricPoint("orders", nowNs, 1) });
+
+        var body = await (await Client.GetAsync("/otel/metrics")).Content.ReadAsStringAsync();
+        Assert.Contains("Verfügbare Metriken", body);   // Discovery-Modus statt „orders"-Default
+        Assert.Contains("orders", body);                 // Name als anklickbarer Link gelistet
+    }
+
+    /// <summary>
+    /// Dashboard ohne Request-Counter: Discovery-Modus. Früher war „orders" als Default
+    /// hartkodiert (altes Demo), so dass das Request-Feld stets „orders" zeigte, der Wert
+    /// nach Löschen sofort wiederkehrte und die KPIs leer blieben („orders" existiert in
+    /// echten Apps nicht). Jetzt listet die Seite die verfügbaren Metrik-Namen als
+    /// anklickbare Links — analog zur Metriken-Seite.
+    /// </summary>
+    [Fact]
+    public async Task DashboardSeite_OhneRequests_ListetVerfuegbareMetrikNamen()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var nowNs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000_000L - 60_000_000_000L;
+        sink.WriteMetrics(new[] { MetricPoint("myapp.requests", nowNs, 1) });
+
+        var body = await (await Client.GetAsync("/otel/dashboard")).Content.ReadAsStringAsync();
+        Assert.Contains("Verfügbare Metriken", body);   // Discovery-Modus statt „orders"-Default
+        Assert.Contains("myapp.requests", body);         // Name als anklickbarer Link gelistet
+        Assert.DoesNotContain("orders", body);           // alter hartkodierter Default weg
+    }
+
     // === Helfer ==========================================================
 
     /// <summary>
