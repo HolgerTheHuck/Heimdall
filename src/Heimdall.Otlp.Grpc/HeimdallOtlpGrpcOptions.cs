@@ -18,4 +18,13 @@ public sealed class HeimdallOtlpGrpcOptions
 
     /// <summary>Erwarteter API-Key; nur relevant wenn <see cref="AuthEnabled"/> <c>true</c>.</summary>
     public string? ApiKey { get; set; }
+
+    /// <summary>
+    /// Maximal gleichzeitige OTLP/gRPC-Export-Aufrufe (Admission Control, Workstream C1).
+    /// Schützt den SQLite-Sink vor Last-Spitzen / fremden Exportern. Weitere Aufrufe
+    /// werden sofort mit <c>StatusCode.ResourceExhausted</c> abgewiesen
+    /// (Retry-freundlich). <c>0</c> = unbegrenzt. Default <c>0</c> (der Host besetzt
+    /// den Betriebs-Default, z. B. 32). Alle drei Services teilen sich das eine Cap.
+    /// </summary>
+    public int MaxConcurrentRequests { get; set; }
 }

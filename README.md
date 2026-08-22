@@ -245,9 +245,9 @@ builder.Services.AddOpenTelemetry()
 ```
 
 Die Host-Konfiguration liegt in `host/Heimdall.Host/appsettings.json` (Sektion
-`Heimdall`): Backend (1.0: `sqlite`), DataPath, Retention, OTLP-HTTP/gRPC,
-Prometheus, Dashboard, Alerting, Auth (`ApiKey`/`UiPassword`), SeedDemoData. Siehe
-auch `host/Heimdall.Host/README.md`.
+`Heimdall`): Backend (1.0: `sqlite`), DataPath, Retention, OTLP-HTTP/gRPC (je
+`MaxConcurrentRequests`-Cap, C1), Prometheus, Dashboard, Alerting, Auth
+(`ApiKey`/`UiPassword`), SeedDemoData. Siehe auch `host/Heimdall.Host/README.md`.
 
 ---
 
@@ -288,8 +288,22 @@ Alternativ nutzt ihr ein echtes Grafana mit Heimdall als Prometheus-Datenquelle
   + Text-Exposition. Range-Query-Prefetch (Dashboard-Render 108 s → 0,8 s).
 - **UI:** Responsive, Dark-Only, Crosshair/Brushing, moderner Zeitbereich +
   Auto-Refresh, server-gerendert (kein SignalR).
-- **Auth (Host):** minimal — API-Key (`x-heimdall-key`) für OTLP + Basic-Auth für
-  die UI, via Prefix-Middleware. Bibliotheken bleiben auth-frei.
+- **Auth (Host):** minimal — API-Key (`x-heimdall-key`, Header only) für OTLP +
+  Prom-API, Basic-Auth für die UI, via Prefix-Middleware. **Zeitkonstanter**
+  Vergleich (`SecretComparer`/`FixedTimeEquals`); kein Query-Fallback (Access-Log-
+  Hygiene). Bibliotheken bleiben auth-frei.
+- **Admission Control (Host, C1):** Concurrency-Cap auf den OTLP-Empfängern
+  (`Heimdall:Otlp:{Http,Grpc}:MaxConcurrentRequests`, Default 32, `0`=unbegrenzt);
+  Überlauf → HTTP 429 / gRPC `ResourceExhausted` (retrybar). Schützt den
+  Single-Connection-SQLite-Sink vor Last-Spitzen.
+- **Host-Self-Observability (C3):** synthetisierte `heimdall.host.*`-Metriken —
+  Ingest-Volume pro Signal (`heimdall.host.ingest{signal=…}`, Prom `*_total`) +
+  Sweep-Latenz (`heimdall.host.sweep.duration`, Prom `*_seconds`); in-memory, nicht
+  in `heim_metrics` gespeichert (kein Selbst-Feedback). Ergänzt A4
+  (`heimdall.retention.*`/`heimdall.storage.*`).
+- **Graceful Shutdown (C4):** Sink-Dispose nach Kestrel-Drain
+  (`ApplicationStopped`); in-flight OTLP-Writes committen vor dem Verbindungs-
+  Abbau; `IngestBuffer` draint beim Stopp vollständig.
 
 ---
 

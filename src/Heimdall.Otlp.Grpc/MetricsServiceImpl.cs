@@ -13,11 +13,13 @@ public sealed class MetricsServiceImpl : MetricsService.MetricsServiceBase
 {
     private readonly IHeimdallSink _sink;
     private readonly HeimdallOtlpGrpcOptions? _opts;
+    private readonly OtlpAdmissionLimiter _limiter;
 
-    /// <summary>Konstruiert den Service mit dem Ziel-Sink und optionalen Auth-Optionen.</summary>
-    public MetricsServiceImpl(IHeimdallSink sink, HeimdallOtlpGrpcOptions? opts = null)
+    /// <summary>Konstruiert den Service mit dem Ziel-Sink, Admission-Limiter und optionalen Auth-Optionen.</summary>
+    public MetricsServiceImpl(IHeimdallSink sink, OtlpAdmissionLimiter limiter, HeimdallOtlpGrpcOptions? opts = null)
     {
         _sink = sink;
+        _limiter = limiter;
         _opts = opts;
     }
 
@@ -26,8 +28,14 @@ public sealed class MetricsServiceImpl : MetricsService.MetricsServiceBase
         ExportMetricsServiceRequest request, ServerCallContext context)
     {
         OtlpGrpcAuth.EnsureAuthorized(context, _opts);
-        var metrics = OtlpConvert.ToMetrics(request);
-        if (metrics.Count > 0) _sink.WriteMetrics(metrics);
-        return Task.FromResult(new ExportMetricsServiceResponse());
+        if (!_limiter.TryEnter(out var lease))
+            throw new RpcException(new Status(StatusCode.ResourceExhausted, "otlp admission limit reached"));
+        try
+        {
+            var metrics = OtlpConvert.ToMetrics(request);
+            if (metrics.Count > 0) _sink.WriteMetrics(metrics);
+            return Task.FromResult(new ExportMetricsServiceResponse());
+        }
+        finally { lease?.Dispose(); }
     }
 }

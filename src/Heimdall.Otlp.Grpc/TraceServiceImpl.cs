@@ -15,11 +15,13 @@ public sealed class TraceServiceImpl : TraceService.TraceServiceBase
 {
     private readonly IHeimdallSink _sink;
     private readonly HeimdallOtlpGrpcOptions? _opts;
+    private readonly OtlpAdmissionLimiter _limiter;
 
-    /// <summary>Konstruiert den Service mit dem Ziel-Sink und optionalen Auth-Optionen.</summary>
-    public TraceServiceImpl(IHeimdallSink sink, HeimdallOtlpGrpcOptions? opts = null)
+    /// <summary>Konstruiert den Service mit dem Ziel-Sink, Admission-Limiter und optionalen Auth-Optionen.</summary>
+    public TraceServiceImpl(IHeimdallSink sink, OtlpAdmissionLimiter limiter, HeimdallOtlpGrpcOptions? opts = null)
     {
         _sink = sink;
+        _limiter = limiter;
         _opts = opts;
     }
 
@@ -28,8 +30,15 @@ public sealed class TraceServiceImpl : TraceService.TraceServiceBase
         ExportTraceServiceRequest request, ServerCallContext context)
     {
         OtlpGrpcAuth.EnsureAuthorized(context, _opts);
-        var spans = OtlpConvert.ToSpans(request);
-        if (spans.Count > 0) _sink.WriteSpans(spans);
-        return Task.FromResult(new ExportTraceServiceResponse());
+        // Admission-Control (C1): bei vollem Cap sofort ResourceExhausted (Retry-freundlich).
+        if (!_limiter.TryEnter(out var lease))
+            throw new RpcException(new Status(StatusCode.ResourceExhausted, "otlp admission limit reached"));
+        try
+        {
+            var spans = OtlpConvert.ToSpans(request);
+            if (spans.Count > 0) _sink.WriteSpans(spans);
+            return Task.FromResult(new ExportTraceServiceResponse());
+        }
+        finally { lease?.Dispose(); }
     }
 }

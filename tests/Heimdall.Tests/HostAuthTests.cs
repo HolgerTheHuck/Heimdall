@@ -1,0 +1,91 @@
+#if NET10_0
+using System.Net;
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Text;
+using System.Threading.Tasks;
+using Google.Protobuf;
+using Heimdall;
+using Xunit;
+
+namespace Heimdall.Tests;
+
+/// <summary>
+/// C2 — Auth-Review am Stand-alone-Host: API-Key (Header <c>x-heimdall-key</c>) für
+/// OTLP/HTTP- + Prom-Pfade, Basic-Auth für die UI. Header only — kein Query-Fallback
+/// ( <c>?key=</c> ohne Header → 401, da Query-Strings in Access-Logs landen). Vergleiche
+/// zeitkonstant (<see cref="SecretComparer"/>).
+/// </summary>
+public class HostAuthTests : HostBootTestBase
+{
+    private const string ApiKey = "test-api-key-123";
+    private const string UiPassword = "test-ui-pw-456";
+
+    public HostAuthTests()
+    {
+        // Basis setzt Auth.Enabled=false — hier überschreiben (vor lazily Host-Boot).
+        SetEnv("Heimdall__Auth__Enabled", "true");
+        SetEnv("Heimdall__Auth__ApiKey", ApiKey);
+        SetEnv("Heimdall__Auth__UiPassword", UiPassword);
+    }
+
+    private ByteArrayContent TraceContent()
+    {
+        var c = new ByteArrayContent(BuildTraceRequest("auth-test-span").ToByteArray());
+        c.Headers.ContentType = new MediaTypeHeaderValue("application/x-protobuf");
+        return c;
+    }
+
+    [Fact]
+    public async Task Otlp_Ohne_ApiKey_Header_Liefert_401()
+    {
+        var resp = await Client.PostAsync("/otel/v1/traces", TraceContent());
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Otlp_Mit_Korrektem_ApiKey_Header_Liefert_200()
+    {
+        using var msg = new HttpRequestMessage(HttpMethod.Post, "/otel/v1/traces") { Content = TraceContent() };
+        msg.Headers.Add("x-heimdall-key", ApiKey);
+        var resp = await Client.SendAsync(msg);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        Assert.Equal(1, Query.CountSpans());
+    }
+
+    [Fact]
+    public async Task Otlp_Query_Key_Ohne_Header_Liefert_401()
+    {
+        // Query-Fallback wurde entfernt (C2) — ?key= ohne Header darf nicht durchgehen.
+        var resp = await Client.PostAsync("/otel/v1/traces?key=" + WebUtility.UrlEncode(ApiKey), TraceContent());
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Otlp_Mit_Falschem_ApiKey_Liefert_401()
+    {
+        using var msg = new HttpRequestMessage(HttpMethod.Post, "/otel/v1/traces") { Content = TraceContent() };
+        msg.Headers.Add("x-heimdall-key", "wrong-key");
+        var resp = await Client.SendAsync(msg);
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+    }
+
+    [Fact]
+    public async Task Ui_Ohne_BasicAuth_Liefert_401_Mit_Challenge()
+    {
+        var resp = await Client.GetAsync("/otel");
+        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        Assert.Contains("Basic", resp.Headers.WwwAuthenticate.ToString());
+    }
+
+    [Fact]
+    public async Task Ui_Mit_Korrektem_BasicAuth_Liefert_200()
+    {
+        var basic = System.Convert.ToBase64String(Encoding.UTF8.GetBytes("anyuser:" + UiPassword));
+        using var msg = new HttpRequestMessage(HttpMethod.Get, "/otel");
+        msg.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
+        var resp = await Client.SendAsync(msg);
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+    }
+}
+#endif

@@ -38,14 +38,15 @@ var (sink, query, metricSource, sinkDisposable) = BuildSink(opts);
 
 // --- Bedingte DI-Registrierung ----------------------------------------------
 if (opts.Dashboard.Enabled) builder.Services.AddHeimdallDashboard(query);
-if (opts.Otlp.Http.Enabled) builder.Services.AddHeimdallOtlp(sink);
+if (opts.Otlp.Http.Enabled)
+    builder.Services.AddHeimdallOtlp(sink, new Heimdall.Otlp.HeimdallOtlpHttpOptions
+    { MaxConcurrentRequests = opts.Otlp.Http.MaxConcurrentRequests });
 if (opts.Otlp.Grpc.Enabled)
 {
-    // gRPC-Auth: Host mapt Auth → HeimdallOtlpGrpcOptions (inline-Check in den *ServiceImpl).
-    var grpcAuth = opts.Auth.Enabled
-        ? new HeimdallOtlpGrpcOptions { AuthEnabled = true, ApiKey = opts.Auth.ApiKey }
-        : null;
-    builder.Services.AddHeimdallOtlpGrpc(sink, grpcAuth);
+    // gRPC-Auth + Admission-Control: Host mapt Auth → HeimdallOtlpGrpcOptions (inline-Check in den *ServiceImpl).
+    var grpcOpts = new HeimdallOtlpGrpcOptions { MaxConcurrentRequests = opts.Otlp.Grpc.MaxConcurrentRequests };
+    if (opts.Auth.Enabled) { grpcOpts.AuthEnabled = true; grpcOpts.ApiKey = opts.Auth.ApiKey; }
+    builder.Services.AddHeimdallOtlpGrpc(sink, grpcOpts);
 }
 if (opts.Prometheus.Enabled) builder.Services.AddHeimdallPrometheus(metricSource, query);
 builder.Services.AddHeimdallDashboards(opts.DashboardsStore.Dir);
@@ -75,8 +76,9 @@ app.MapGet("/", () => Results.Redirect(opts.Dashboard.Enabled ? opts.Dashboard.P
 if (opts.SeedDemoData) HeimdallSeeder.SeedDemoData(sink);
 if (opts.SeedDemoData) HeimdallSeeder.SeedDemoAlerts(app.Services);
 
-// Sauberer Shutdown: Sink disposen.
-app.Lifetime.ApplicationStopping.Register(() => sinkDisposable.Dispose());
+// Sauberer Shutdown (C4): Sink disposen, NACH Kestrel-Drain (ApplicationStopped),
+// damit in-flight OTLP-Writes committen, bevor der SQLite-Sink/_conn weg ist.
+app.Lifetime.ApplicationStopped.Register(() => sinkDisposable.Dispose());
 
 app.Run();
 
@@ -115,6 +117,10 @@ static void ValidateOptions(HeimdallHostOptions o)
     }
     if (o.Auth.Enabled && string.IsNullOrEmpty(o.Auth.ApiKey))
         throw new InvalidOperationException("Heimdall:Auth:Enabled=true erfordert ApiKey (x-heimdall-key).");
+    if (o.Otlp.Http.MaxConcurrentRequests < 0)
+        throw new InvalidOperationException("Heimdall:Otlp:Http:MaxConcurrentRequests darf nicht negativ sein (0 = unbegrenzt).");
+    if (o.Otlp.Grpc.MaxConcurrentRequests < 0)
+        throw new InvalidOperationException("Heimdall:Otlp:Grpc:MaxConcurrentRequests darf nicht negativ sein (0 = unbegrenzt).");
     if (o.Auth.Enabled && string.IsNullOrEmpty(o.Auth.UiPassword))
         throw new InvalidOperationException("Heimdall:Auth:Enabled=true erfordert UiPassword (Basic-Auth).");
     if (o.Alerting.Enabled && o.Alerting.Smtp.Enabled &&

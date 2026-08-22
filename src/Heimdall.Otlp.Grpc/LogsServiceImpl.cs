@@ -13,11 +13,13 @@ public sealed class LogsServiceImpl : LogsService.LogsServiceBase
 {
     private readonly IHeimdallSink _sink;
     private readonly HeimdallOtlpGrpcOptions? _opts;
+    private readonly OtlpAdmissionLimiter _limiter;
 
-    /// <summary>Konstruiert den Service mit dem Ziel-Sink und optionalen Auth-Optionen.</summary>
-    public LogsServiceImpl(IHeimdallSink sink, HeimdallOtlpGrpcOptions? opts = null)
+    /// <summary>Konstruiert den Service mit dem Ziel-Sink, Admission-Limiter und optionalen Auth-Optionen.</summary>
+    public LogsServiceImpl(IHeimdallSink sink, OtlpAdmissionLimiter limiter, HeimdallOtlpGrpcOptions? opts = null)
     {
         _sink = sink;
+        _limiter = limiter;
         _opts = opts;
     }
 
@@ -26,8 +28,14 @@ public sealed class LogsServiceImpl : LogsService.LogsServiceBase
         ExportLogsServiceRequest request, ServerCallContext context)
     {
         OtlpGrpcAuth.EnsureAuthorized(context, _opts);
-        var logs = OtlpConvert.ToLogs(request);
-        if (logs.Count > 0) _sink.WriteLogs(logs);
-        return Task.FromResult(new ExportLogsServiceResponse());
+        if (!_limiter.TryEnter(out var lease))
+            throw new RpcException(new Status(StatusCode.ResourceExhausted, "otlp admission limit reached"));
+        try
+        {
+            var logs = OtlpConvert.ToLogs(request);
+            if (logs.Count > 0) _sink.WriteLogs(logs);
+            return Task.FromResult(new ExportLogsServiceResponse());
+        }
+        finally { lease?.Dispose(); }
     }
 }

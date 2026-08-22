@@ -143,23 +143,30 @@ public sealed class HeimdallRollupOptions
 public sealed class HeimdallOtlpOptions
 {
     /// <summary>OTLP/HTTP-Empfänger (Protobuf + JSON). Pfad C.</summary>
-    public HeimdallOtlpHttpOptions Http { get; set; } = new();
+    public HeimdallOtlpHttpSection Http { get; set; } = new();
 
     /// <summary>OTLP/gRPC-Empfänger (Service-Stubs aus Heimdall.Otlp.Grpc).</summary>
     public HeimdallOtlpGrpcSection Grpc { get; set; } = new();
 }
 
-/// <summary>OTLP/HTTP-Empfänger.</summary>
-public sealed class HeimdallOtlpHttpOptions
+/// <summary>OTLP/HTTP-Empfänger (Host-Config-Section; Lib-Options sind <c>Heimdall.Otlp.HeimdallOtlpHttpOptions</c>).</summary>
+public sealed class HeimdallOtlpHttpSection
 {
     /// <summary>Empfänger aktiviert. Default true.</summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>URL-Prefix (Wire-Pfad <c>{Prefix}/v1/{traces,metrics,logs}</c>). Default "/otel".</summary>
     public string Prefix { get; set; } = "/otel";
+
+    /// <summary>
+    /// Maximal gleichzeitige OTLP/HTTP-Export-Requests (Admission Control, C1).
+    /// Weitere Requests werden sofort mit HTTP 429 abgewiesen (Retry-freundlich).
+    /// <c>0</c> = unbegrenzt. Default 32 (Schutz vor Last-Spitzen / fremden Exportern).
+    /// </summary>
+    public int MaxConcurrentRequests { get; set; } = 32;
 }
 
-/// <summary>OTLP/gRPC-Empfänger.</summary>
+/// <summary>OTLP/gRPC-Empfänger (Host-Config-Section; Lib-Options sind <c>HeimdallOtlpGrpcOptions</c>).</summary>
 public sealed class HeimdallOtlpGrpcSection
 {
     /// <summary>gRPC-Empfänger aktiviert (benötigt HTTP/2-Endpunkt). Default true.</summary>
@@ -171,6 +178,14 @@ public sealed class HeimdallOtlpGrpcSection
     /// (Http2) einstellbar sind). Default "http://localhost:4317".
     /// </summary>
     public string Url { get; set; } = "http://localhost:4317";
+
+    /// <summary>
+    /// Maximal gleichzeitige OTLP/gRPC-Export-Aufrufe (Admission Control, C1); alle
+    /// drei Services teilen sich das eine Cap. Weitere Aufrufe werden sofort mit
+    /// <c>StatusCode.ResourceExhausted</c> abgewiesen (Retry-freundlich).
+    /// <c>0</c> = unbegrenzt. Default 32.
+    /// </summary>
+    public int MaxConcurrentRequests { get; set; } = 32;
 }
 
 /// <summary>Prometheus-HTTP-API.</summary>
@@ -210,9 +225,11 @@ public sealed class HeimdallAuthOptions
     public bool Enabled { get; set; }
 
     /// <summary>
-    /// Shared API-Key für OTLP/HTTP- und Prom-API-Pfade (Header <c>x-heimdall-key</c> oder
-    /// Query <c>?key=</c>). Erforderlich, wenn <see cref="Enabled"/> true. OTel-SDKs setzen ihn
-    /// via <c>OTEL_EXPORTER_OTLP_HEADERS="x-heimdall-key=…"</c>; Grafana als Custom-Header.
+    /// Shared API-Key für OTLP/HTTP- und Prom-API-Pfade (Header <c>x-heimdall-key</c> —
+    /// Header only, kein Query-Fallback, da Query-Strings in Access-Logs landen).
+    /// Vergleich zeitkonstant (<see cref="SecretComparer"/>). Erforderlich, wenn
+    /// <see cref="Enabled"/> true. OTel-SDKs setzen ihn via
+    /// <c>OTEL_EXPORTER_OTLP_HEADERS="x-heimdall-key=…"</c>; Grafana als Custom-Header.
     /// </summary>
     public string? ApiKey { get; set; }
 

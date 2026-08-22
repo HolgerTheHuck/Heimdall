@@ -82,6 +82,33 @@ public class IngestBufferTests
         finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
     }
 
+    [Fact]
+    public void Dispose_Flusht_Puffer_Ohne_Datenverlust()
+    {
+        // C4: Dispose (Shutdown-Pfad) muss alle noch gepufferten Items in den
+        // Downstream-Sink flushen — kein WaitUntil auf den Hintergrund-Worker,
+        // stattdessen sofortiges Dispose. Der Worker draint den Channel vollständig
+        // (Normal-Loop + finally-Tail), bevor Task.WaitAll zurückkehrt.
+        var path = NewDbPath();
+        try
+        {
+            using var sink = NewSink(path);
+            var buffer = new IngestBuffer(sink, new IngestOptions
+            { BatchSpans = 10_000, FlushIntervalMs = 50, MaxQueueItems = 10_000 });
+
+            for (int i = 0; i < 500; i++)
+                buffer.WriteSpans(new[] { MakeSpan(i) });
+
+            // Kein WaitUntil — Dispose muss den Rest flushen.
+            buffer.Dispose();
+
+            Assert.Equal(500L, sink.CountSpans());
+            Assert.Equal(500, buffer.FlushedSpans);
+            Assert.Equal(0, buffer.DroppedSpans);
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
     private static void WaitUntil(Func<bool> cond, int timeoutMs = 5000)
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();

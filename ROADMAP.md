@@ -130,20 +130,33 @@ kein Code-Signing (nuget.org verlangt keines).
 - **Offen (Release, Workstream E):** nuget.org-Push (API-Key) + GitHub-Release
   mit Paket-Artifacts; Reihenfolge/Trigger beim 1.0-Release festlegen.
 
-## Workstream C — Operative Härtung
+## Workstream C — Operative Härtung  *(umgesetzt)*
 
-- **Rate-Limiting** auf den OTLP-Empfängern (HTTP + gRPC) — heute ungedrosselt
-  (in `SESSION_STATUS` als offen notiert). Schutz gegen Last-Spitzen/fremde
- Exporter.
-- Auth-Review: API-Key (OTLP/Prom) + Basic-Auth (UI) existieren minimal —
-  Review auf 1.0-Anspruch (Timing-Safe-Vergleich, Header-Hygiene).
-- **Self-Observability des Hosts (Entscheidung #6):** schlanke `heimdall.host.*`-
-  Metriken **in 1.0** — minimaler Satz: Ingest-Counter pro Signal
-  (`heimdall.host.ingest{signal=spans|logs|metrics}`) + Sweep-Latenz
-  (`heimdall.host.sweep.duration`). Synthetisiert wie A4 (in-memory, nicht in
-  heim_metrics gespeichert).
-- Graceful Shutdown steht (Sink wird disposet); Flush der Ingest-Puffer beim
-  Stopping-Signal verifizieren.
+- **Admission Control (C1)** auf den OTLP-Empfängern (HTTP + gRPC) —
+  Concurrency-Cap via `SemaphoreSlim` (nicht-blockierend, `Wait(0)`); Überlauf
+  → sofort HTTP 429 (HTTP) bzw. `StatusCode.ResourceExhausted` (gRPC, retrybar).
+  Default ON, Cap 32 je Empfänger, `0` = unbegrenzt. Config:
+  `Heimdall:Otlp:{Http,Grpc}:MaxConcurrentRequests`. Schützt den Single-
+  Connection-SQLite-Sink vor Last-Spitzen / fremden Exportern (begrenzt paralleles
+  Body-Parsing + die Lock-Warteschlange am `_gate`). Token-Bucket-RPS post-1.0.
+- **Auth-Review (C2):** `SecretComparer` (in `Heimdall.Abstractions`) —
+  zeitkonstanter Vergleich via `CryptographicOperations.FixedTimeEquals` über
+  UTF-8-Bytes; drei Call-Sites (Host-Middleware API-Key + Basic-Auth, gRPC-Auth).
+  Query-Fallback `?key=` entfernt (Header `x-heimdall-key` only — Query-Strings
+  landen in Access-Logs/Proxies).
+- **Self-Observability des Hosts (C3, Entscheidung #6):** schlanke
+  `heimdall.host.*`-Metriken in 1.0 — Ingest-Counter pro Signal
+  (`heimdall.host.ingest{signal=spans|logs|metrics}`, Sum/Cumulative → Prom
+  `*_total`) + Sweep-Latenz (`heimdall.host.sweep.duration`, Gauge/s → Prom
+  `*_seconds`). Synthetisiert wie A4 (in-memory, nicht in `heim_metrics`
+  gespeichert — keine rekursive Selbst-Befüllung).
+- **Graceful Shutdown (C4):** Sink-Dispose vom `ApplicationStopping`- auf den
+  `ApplicationStopped`-Hook verschoben (NACH Kestrel-Drain → in-flight OTLP-
+  Writes committen vor dem `_conn`-Dispose). `SQLiteTelemetrySink.Dispose()`
+  nimmt `_gate` (serialisiert mit Writes); `Write*` mit `_disposed`-Double-Check
+  im Lock (kein `_conn`-Zugriff nach Dispose, Write nach Dispose = Noop).
+  `IngestBuffer.Dispose()` draint den Channel vollständig (Normal-Loop +
+  finally-Tail) — Flush-on-Shutdown verifiziert.
 
 ## Workstream D — Public-Readiness  *(umgesetzt)*
 
@@ -158,8 +171,8 @@ kein Code-Signing (nuget.org verlangt keines).
 - CI: `.github/workflows/build.yml` — `dotnet build` + `dotnet test` auf
   `net8/9/10` bei Push/PR, **Windows + ubuntu** (Entscheidung #7); SDKs 8/9/10.
 - **Testprojekt multi-targetet** `net8/9/10`; Host-Boot-Tests via `#if NET10_0`
-  auf net10 beschränkt, Mvc.Testing/Grpc/Host-Bezug bedingt (net8/9: ~302 Lib-
-  Tests, net10: 340 inkl. Host-Boot-Tests).
+  auf net10 beschränkt, Mvc.Testing/Grpc/Host-Bezug bedingt (net8/9: 314 Lib-
+  Tests, net10: 362 inkl. Host-Boot-Tests).
 - `CHANGELOG.md` (Keep-a-Changelog, [Unreleased] + [1.0.0]-Platzhalter).
 - `SECURITY.md` (vertraulicher Meldeweg via GitHub Private Security Advisories
   / E-Mail).

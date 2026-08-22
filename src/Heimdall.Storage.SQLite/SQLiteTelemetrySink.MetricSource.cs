@@ -41,12 +41,14 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         var names = new List<string>();
         lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
             while (r.Read()) names.Add(r.GetString(0));
-        // heimdall.*-Observability-Metriken (A4) — „now"-Metriken, immer gelistet
+        // heimdall.*-Observability-Metriken (A4/C3) — „now"-Metriken, immer gelistet
         // (unabhaengig vom Zeitfenster, da sie den Live-Zustand beschreiben).
         names.Add(MRetentionDeleted);
         names.Add(MRetentionEvicted);
         names.Add(MStorageBytes);
         names.Add(MStorageRows);
+        names.Add(MHostIngest);
+        names.Add(MHostSweepDuration);
         return names;
     }
 
@@ -325,12 +327,15 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
     private const string MRetentionEvicted = "heimdall.retention.evicted";
     private const string MStorageBytes = "heimdall.storage.bytes";
     private const string MStorageRows = "heimdall.storage.rows";
+    private const string MHostIngest = "heimdall.host.ingest";
+    private const string MHostSweepDuration = "heimdall.host.sweep.duration";
     private const string LSignal = "signal";
     private const string ScopeHeimdall = "heimdall";
 
     private static readonly HashSet<string> HeimdallMetricNames = new(StringComparer.Ordinal)
     {
-        MRetentionDeleted, MRetentionEvicted, MStorageBytes, MStorageRows
+        MRetentionDeleted, MRetentionEvicted, MStorageBytes, MStorageRows,
+        MHostIngest, MHostSweepDuration
     };
 
     private static bool IsHeimdallMetric(string name) => HeimdallMetricNames.Contains(name);
@@ -368,6 +373,25 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
                     AddSignalPoints(list, n, now, matchers, HMetricType.Gauge, HTemporality.Unspecified,
                         CountSpans(), CountLogs(), CountMetrics());
                     break;
+                case MHostIngest:
+                    // C3: ingested-Volume pro Signal (Sum/Cumulative; Prom → *_total).
+                    AddSignalPoints(list, n, now, matchers, HMetricType.Sum, HTemporality.Cumulative,
+                        Interlocked.Read(ref _hostIngestSpans),
+                        Interlocked.Read(ref _hostIngestLogs),
+                        Interlocked.Read(ref _hostIngestMetrics));
+                    break;
+                case MHostSweepDuration:
+                {
+                    // C3: Latenz des letzten realen Sweeps (Gauge, Sekunden; Prom → *_seconds).
+                    var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+                    if (Matches(labels, matchers))
+                    {
+                        double seconds = new TimeSpan(Interlocked.Read(ref _hostSweepDurationTicks)).TotalSeconds;
+                        list.Add(new HMetricPointView(n, "s", HMetricType.Gauge, HTemporality.Unspecified,
+                            now, seconds, null, null, null, null, null, null, labels, ScopeHeimdall));
+                    }
+                    break;
+                }
             }
         }
         return list;

@@ -34,49 +34,65 @@ public static class OtlpEndpointExtensions
     public static IEndpointConventionBuilder MapHeimdallOtlp(this IEndpointRouteBuilder endpoints, string prefix = "/otel")
     {
         var group = endpoints.MapGroup(prefix);
-        group.MapPost("/v1/traces", (HttpContext ctx, IHeimdallSink sink) => TraceHandler(ctx, sink));
-        group.MapPost("/v1/metrics", (HttpContext ctx, IHeimdallSink sink) => MetricsHandler(ctx, sink));
-        group.MapPost("/v1/logs", (HttpContext ctx, IHeimdallSink sink) => LogsHandler(ctx, sink));
+        group.MapPost("/v1/traces", (HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter) => TraceHandler(ctx, sink, limiter));
+        group.MapPost("/v1/metrics", (HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter) => MetricsHandler(ctx, sink, limiter));
+        group.MapPost("/v1/logs", (HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter) => LogsHandler(ctx, sink, limiter));
         return group;
     }
 
-    private static async Task<IResult> TraceHandler(HttpContext ctx, IHeimdallSink sink)
+    private static async Task<IResult> TraceHandler(HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter)
     {
-        var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Trace.V1.ExportTraceServiceRequest.Parser);
-        if (req is null) return Results.BadRequest();
+        // Admission-Control (C1): Parsing+Write hinter dem Cap, sofort 429 bei vollem Limiter.
+        if (!limiter.TryEnter(out var lease)) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
         try
         {
-            var spans = OtlpConvert.ToSpans(req);
-            if (spans.Count > 0) sink.WriteSpans(spans);
+            var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Trace.V1.ExportTraceServiceRequest.Parser);
+            if (req is null) return Results.BadRequest();
+            try
+            {
+                var spans = OtlpConvert.ToSpans(req);
+                if (spans.Count > 0) sink.WriteSpans(spans);
+            }
+            catch { return Results.BadRequest(); }
+            return Respond(ctx, new OpenTelemetry.Proto.Collector.Trace.V1.ExportTraceServiceResponse());
         }
-        catch { return Results.BadRequest(); }
-        return Respond(ctx, new OpenTelemetry.Proto.Collector.Trace.V1.ExportTraceServiceResponse());
+        finally { lease?.Dispose(); }
     }
 
-    private static async Task<IResult> LogsHandler(HttpContext ctx, IHeimdallSink sink)
+    private static async Task<IResult> LogsHandler(HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter)
     {
-        var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Logs.V1.ExportLogsServiceRequest.Parser);
-        if (req is null) return Results.BadRequest();
+        if (!limiter.TryEnter(out var lease)) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
         try
         {
-            var logs = OtlpConvert.ToLogs(req);
-            if (logs.Count > 0) sink.WriteLogs(logs);
+            var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Logs.V1.ExportLogsServiceRequest.Parser);
+            if (req is null) return Results.BadRequest();
+            try
+            {
+                var logs = OtlpConvert.ToLogs(req);
+                if (logs.Count > 0) sink.WriteLogs(logs);
+            }
+            catch { return Results.BadRequest(); }
+            return Respond(ctx, new OpenTelemetry.Proto.Collector.Logs.V1.ExportLogsServiceResponse());
         }
-        catch { return Results.BadRequest(); }
-        return Respond(ctx, new OpenTelemetry.Proto.Collector.Logs.V1.ExportLogsServiceResponse());
+        finally { lease?.Dispose(); }
     }
 
-    private static async Task<IResult> MetricsHandler(HttpContext ctx, IHeimdallSink sink)
+    private static async Task<IResult> MetricsHandler(HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter)
     {
-        var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceRequest.Parser);
-        if (req is null) return Results.BadRequest();
+        if (!limiter.TryEnter(out var lease)) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
         try
         {
-            var metrics = OtlpConvert.ToMetrics(req);
-            if (metrics.Count > 0) sink.WriteMetrics(metrics);
+            var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceRequest.Parser);
+            if (req is null) return Results.BadRequest();
+            try
+            {
+                var metrics = OtlpConvert.ToMetrics(req);
+                if (metrics.Count > 0) sink.WriteMetrics(metrics);
+            }
+            catch { return Results.BadRequest(); }
+            return Respond(ctx, new OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceResponse());
         }
-        catch { return Results.BadRequest(); }
-        return Respond(ctx, new OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceResponse());
+        finally { lease?.Dispose(); }
     }
 
     /// <summary>

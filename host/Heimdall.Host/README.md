@@ -30,7 +30,9 @@ erhält den Bestand.
 | `Storage:Durable` | `true` | Walhalla WAL-Sync (Fsync) |
 | `Storage:SelfObservability` | `false` | Walhalla: otel.db-Engine instrumentiert sich selbst |
 | `Otlp:Http:Enabled` / `:Prefix` | `true` / `/otel` | OTLP/HTTP-Empfänger |
+| `Otlp:Http:MaxConcurrentRequests` | `32` | Admission-Control-Cap (C1); 0 = unbegrenzt; Überlauf → 429 |
 | `Otlp:Grpc:Enabled` | `true` | OTLP/gRPC-Empfänger (HTTP/2-Endpunkt 4317) |
+| `Otlp:Grpc:MaxConcurrentRequests` | `32` | Admission-Control-Cap (C1), 3 Services teilen sich das Cap; 0 = unbegrenzt; Überlauf → `ResourceExhausted` |
 | `Prometheus:Enabled` / `:Prefix` | `true` / `/otel` | PromQL-Engine + Prom-HTTP-API |
 | `Dashboard:Enabled` / `:Prefix` | `true` / `/otel` | Blazor-Dashboard |
 | `DashboardsStore:Dir` / `:SeedExample` | `var/heimdall/dashboards` / `false` | dateibasierter Grafana-Store |
@@ -48,13 +50,17 @@ Env-Vars überschreiben (Docker/CI): `Heimdall__Storage__Backend=walhalla`,
 
 `Auth:Enabled=true` schaltet zwei Mechanismen scharf (Bibliotheken bleiben auth-frei):
 
-- **OTLP/HTTP + Prom-API** (`{Prefix}/v1/*`, `{Prefix}/api/v1/*`): Shared API-Key via Header
-  `x-heimdall-key` oder Query `?key=`. OTel-SDKs:
-  `OTEL_EXPORTER_OTLP_HEADERS="x-heimdall-key=…"`. Grafana-Prometheus-Datasource: Custom-Header
-  `x-heimdall-key: …`.
+- **OTLP/HTTP + Prom-API** (`{Prefix}/v1/*`, `{Prefix}/api/v1/*`): Shared API-Key via
+  Header `x-heimdall-key` (**Header only — kein Query-Fallback**, da Query-Strings in
+  Access-Logs/Proxies landen). OTel-SDKs: `OTEL_EXPORTER_OTLP_HEADERS="x-heimdall-key=…"`.
+  Grafana-Prometheus-Datasource: Custom-Header `x-heimdall-key: …`.
 - **UI / Rest**: Basic-Auth gegen `Auth:UiPassword` (Username beliebig, Shared-Password).
 - **gRPC**: Inline-Check in den Service-Implementierungen (Header `x-heimdall-key`), bei
   Fehlen `RpcException(Unauthenticated)`.
+
+Vergleiche sind **zeitkonstant** (`SecretComparer`/`CryptographicOperations.FixedTimeEquals`).
+Admission Control (C1) greift nach bestandenem Auth: über dem Cap liegende Requests
+werden sofort abgewiesen (HTTP 429 / gRPC `ResourceExhausted`, retrybar).
 
 `Auth:Enabled=false` (Default) = Zero-Overhead-Passthrough (Demo/Embedded unverändert).
 

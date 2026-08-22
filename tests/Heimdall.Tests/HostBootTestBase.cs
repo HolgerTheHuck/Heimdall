@@ -24,7 +24,7 @@ public abstract class HostBootTestBase : IDisposable
 {
     private readonly string _dir;
     private readonly WebApplicationFactory<Program> _factory;
-    private readonly string[] _envKeys;
+    private readonly List<string> _envKeys = new();
     private bool _disposed;
 
     protected HostBootTestBase()
@@ -33,7 +33,7 @@ public abstract class HostBootTestBase : IDisposable
         Directory.CreateDirectory(_dir);
 
         // Env-Vars (prozessglobal — Serialisierung via [assembly: CollectionBehavior]).
-        _envKeys = new[]
+        _envKeys.AddRange(new[]
         {
             "ASPNETCORE_ENVIRONMENT",
             "Heimdall__Storage__Backend",
@@ -42,7 +42,7 @@ public abstract class HostBootTestBase : IDisposable
             "Heimdall__DashboardsStore__SeedExample",
             "Heimdall__DashboardsStore__Dir",
             "Heimdall__Auth__Enabled",
-        };
+        });
         Environment.SetEnvironmentVariable("ASPNETCORE_ENVIRONMENT", "Production");
         Environment.SetEnvironmentVariable("Heimdall__Storage__Backend", "sqlite");
         Environment.SetEnvironmentVariable("Heimdall__Storage__DataPath", Path.Combine(_dir, "otel.db"));
@@ -52,6 +52,18 @@ public abstract class HostBootTestBase : IDisposable
         Environment.SetEnvironmentVariable("Heimdall__Auth__Enabled", "false");
 
         _factory = new WebApplicationFactory<Program>();
+    }
+
+    /// <summary>
+    /// Setzt eine Prozess-Umgebungsvariable (wird von <c>Program.cs</c> via Env-Provider
+    /// gelesen) und registriert sie fürs Dispose-Cleanup. Host bootet lazily beim ersten
+    /// <see cref="Client"/>-Zugriff — also im abgeleiteten Konstruktor VOR der ersten
+    /// Nutzung aufrufen, um die Basis-Defaults (z. B. Auth aus) zu überschreiben.
+    /// </summary>
+    protected void SetEnv(string key, string? value)
+    {
+        Environment.SetEnvironmentVariable(key, value);
+        if (!_envKeys.Contains(key)) _envKeys.Add(key);
     }
 
     /// <summary>HTTP-Client auf den TestServer-Host (löst den Host-Boot lazily aus).</summary>

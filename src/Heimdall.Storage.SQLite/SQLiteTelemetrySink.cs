@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Diagnostics;
 using System.Text.RegularExpressions;
 using System.Threading;
 using Heimdall;
@@ -38,6 +39,12 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     // Retention- & Eviction-Zähler (A4-Observability, siehe SQLiteTelemetrySink.MetricSource.cs).
     private long _retDeletedSpans, _retDeletedLogs, _retDeletedMetrics;
     private long _retEvictedSpans, _retEvictedLogs, _retEvictedMetrics;
+
+    // Host-Self-Observability (Workstream C, C3): Ingest-Volume pro Signal +
+    // Latenz des letzten Retention-Sweeps. Synthetisiert (in-memory, nicht in
+    // heim_metrics gespeichert) — siehe SQLiteTelemetrySink.MetricSource.cs.
+    private long _hostIngestSpans, _hostIngestLogs, _hostIngestMetrics;
+    private long _hostSweepDurationTicks;   // Ticks des letzten realen Sweeps (Gauge).
 
     public SQLiteTelemetrySink(SQLiteTelemetryOptions? options = null)
     {
@@ -104,6 +111,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         if (spans is null || spans.Count == 0) return;
         lock (_gate)
         {
+            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1) return;   // C4: kein _conn-Zugriff nach Dispose
             using var tx = _conn.BeginTransaction();
             _insSpan.Transaction = tx;
             for (int i = 0; i < spans.Count; i++)
@@ -128,6 +136,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 _insSpan.ExecuteNonQuery();
             }
             tx.Commit();
+            Interlocked.Add(ref _hostIngestSpans, spans.Count);   // C3: ingested-Volume
         }
     }
 
@@ -136,6 +145,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         if (logs is null || logs.Count == 0) return;
         lock (_gate)
         {
+            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1) return;   // C4: kein _conn-Zugriff nach Dispose
             using var tx = _conn.BeginTransaction();
             _insLog.Transaction = tx;
             for (int i = 0; i < logs.Count; i++)
@@ -154,6 +164,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 _insLog.ExecuteNonQuery();
             }
             tx.Commit();
+            Interlocked.Add(ref _hostIngestLogs, logs.Count);   // C3: ingested-Volume
         }
     }
 
@@ -162,6 +173,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         if (metrics is null || metrics.Count == 0) return;
         lock (_gate)
         {
+            if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1) return;   // C4: kein _conn-Zugriff nach Dispose
             using var tx = _conn.BeginTransaction();
             _insMetric.Transaction = tx;
             for (int i = 0; i < metrics.Count; i++)
@@ -186,6 +198,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 _insMetric.ExecuteNonQuery();
             }
             tx.Commit();
+            Interlocked.Add(ref _hostIngestMetrics, metrics.Count);   // C3: ingested-Volume
         }
     }
 
@@ -500,6 +513,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         // Guard by timer (SweepActive), aber doppelt-halten: auch ein manuell
         // angerufener Sweep (z. B. durch Tests) respektiert die Konfiguration.
         if (!_options.AnyTimeRetention && _options.MaxBytes <= 0) return;
+        var sw = Stopwatch.StartNew();   // C3: Sweep-Latenz (host.sweep.duration)
         lock (_gate)
         {
             try
@@ -546,6 +560,8 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             }
             catch { /* Sweeper darf nie den Host killen */ }
         }
+        sw.Stop();
+        Interlocked.Exchange(ref _hostSweepDurationTicks, sw.Elapsed.Ticks);   // C3: letzter Sweep-Wert
     }
 
     // FTS5-Indizes aus den aktuellen Base-Tabellen neu aufbauen (befreit die
@@ -698,9 +714,15 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     public void Dispose()
     {
         if (Interlocked.Exchange(ref _disposed, 1) == 1) return;
-        _retentionTimer?.Dispose();
-        _insSpan.Dispose(); _insLog.Dispose(); _insMetric.Dispose();
-        _conn.Dispose();
+        _retentionTimer?.Dispose();   // stoppt neue Callbacks (in-flight Sweep hält _gate)
+        // C4: Commands + Verbindung unter _gate disposen, damit kein in-flight
+        // Write (das _conn/Commands benutzt) halbfertig den Teppich weggezogen
+        // bekommt. Write* prüft nach Lock-Aquisition nochmals _disposed (Double-Check).
+        lock (_gate)
+        {
+            _insSpan.Dispose(); _insLog.Dispose(); _insMetric.Dispose();
+            _conn.Dispose();
+        }
     }
 
     // -----------------------------------------------------------------------

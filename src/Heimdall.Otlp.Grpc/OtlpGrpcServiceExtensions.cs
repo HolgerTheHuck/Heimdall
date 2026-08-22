@@ -19,6 +19,8 @@ public static class OtlpGrpcServiceExtensions
         if (sink is null) throw new ArgumentNullException(nameof(sink));
         services.AddSingleton(sink);
         if (options is not null) services.AddSingleton(options);
+        // Admission-Control (C1): ein gemeinsames Cap für alle drei Services.
+        services.AddSingleton(new OtlpAdmissionLimiter(options?.MaxConcurrentRequests ?? 0));
         services.AddGrpc();
         return services;
     }

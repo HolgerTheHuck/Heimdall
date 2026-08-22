@@ -11,9 +11,12 @@ namespace Heimdall.Host;
 /// <item><see cref="HeimdallAuthOptions.Enabled"/>=false → sofort <c>_next</c> (Zero-Overhead, Demo/Embedded unverändert).</item>
 /// <item>OTLP/HTTP-Pfade (<c>{Otlp.Http.Prefix}/v1/*</c>) und Prom-API-Pfade
 ///   (<c>{Prometheus.Prefix}/api/v1/*</c>): API-Key via Header <c>x-heimdall-key</c>
-///   oder Query <c>?key=</c> == <see cref="HeimdallAuthOptions.ApiKey"/> → sonst 401.</item>
+///   (Header only — kein Query-Fallback, da Query-Strings in Access-Logs landen);
+///   zeitkonstanter Vergleich (<see cref="SecretComparer"/>) gegen
+///   <see cref="HeimdallAuthOptions.ApiKey"/> → sonst 401.</item>
 /// <item>UI / Rest: Basic-Auth gegen <see cref="HeimdallAuthOptions.UiPassword"/>
-///   (Username ignoriert, Single-Shared-Password) → sonst 401 + <c>WWW-Authenticate: Basic</c>.</item>
+///   (Username ignoriert, Single-Shared-Password; zeitkonstanter Vergleich) →
+///   sonst 401 + <c>WWW-Authenticate: Basic</c>.</item>
 /// </list>
 /// gRPC-Auth läuft inline in den Service-Implementierungen (siehe
 /// <c>OtlpGrpcAuth</c>); der Host mapt <see cref="HeimdallAuthOptions"/> →
@@ -48,10 +51,10 @@ public sealed class HeimdallAuthMiddleware
         if (path.StartsWith(otlpApi, StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith(promApi, StringComparison.OrdinalIgnoreCase))
         {
-            // API-Key-Pfade (OTLP/HTTP + Prom-API): Header oder ?key=
-            var key = context.Request.Headers["x-heimdall-key"].FirstOrDefault()
-                      ?? context.Request.Query["key"].FirstOrDefault();
-            if (string.IsNullOrEmpty(auth.ApiKey) || key != auth.ApiKey)
+            // API-Key-Pfade (OTLP/HTTP + Prom-API): nur Header (kein Query-Fallback —
+            // sonst landet der Key in Access-Logs/Proxies). Zeitkonstanter Vergleich.
+            var key = context.Request.Headers["x-heimdall-key"].FirstOrDefault();
+            if (string.IsNullOrEmpty(auth.ApiKey) || !SecretComparer.Equals(key, auth.ApiKey))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 return;
@@ -91,7 +94,7 @@ public sealed class HeimdallAuthMiddleware
             password = idx < 0 ? decoded : decoded[(idx + 1)..];
         }
         catch { return false; }
-        return password == expectedPassword;
+        return SecretComparer.Equals(password, expectedPassword);
     }
 }
 

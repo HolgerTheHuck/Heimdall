@@ -28,6 +28,17 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
   `1.0.0`-Pakete (Lizenz-Expression, Root-README-Embed, Repository+Commit via
   SourceLink, Tags). **1.0 erscheint auf nuget.org UND als GitHub-Release**
   (Entscheidung #5 revidiert; kein Code-Signing).
+- Workstream C — Operative Härtung:
+  - **Admission Control (C1)** auf den OTLP-Empfängern (HTTP + gRPC):
+    Concurrency-Cap (`MaxConcurrentRequests`, Default 32, `0`=unbegrenzt);
+    Überlauf → HTTP 429 / `StatusCode.ResourceExhausted`. Config
+    `Heimdall:Otlp:{Http,Grpc}:MaxConcurrentRequests`.
+  - **`heimdall.host.*`-Self-Observability (C3):** Ingest-Counter pro Signal
+    (`heimdall.host.ingest`, Prom `*_total`) + Sweep-Latenz
+    (`heimdall.host.sweep.duration`, Prom `*_seconds`); synthetisiert, nicht
+    in `heim_metrics` gespeichert.
+  - **`SecretComparer` (C2)** — zeitkonstanter Secret-Vergleich
+    (`CryptographicOperations.FixedTimeEquals`) für API-Key + Basic-Auth.
 
 ### Geändert
 - **Zentrale Versionierung** in `Directory.Build.props` (`1.0.0`,
@@ -35,6 +46,14 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
   wurden entfernt. `Copyright`-Metadatum zentral gesetzt.
 - Roadmap-Status: Workstream A und F umgesetzt; Workstream D (Public-Readiness)
   vorbereitet.
+- Workstream C — **Auth-Hygiene (C2):** API-Key nur noch via Header
+  `x-heimdall-key` (Query-Fallback `?key=` entfernt — Query-Strings landen in
+  Access-Logs); Vergleiche zeitkonstant.
+- Workstream C — **Graceful Shutdown (C4):** Sink-Dispose auf den
+  `ApplicationStopped`-Hook verschoben (nach Kestrel-Drain); `SQLiteTelemetrySink.
+  Dispose()` serialisiert mit Writes via `_gate`, `Write*` mit `_disposed`-
+  Double-Check (Write nach Dispose = Noop). `IngestBuffer.Dispose()` draint
+  vollständig (Flush-on-Shutdown).
 
 ## [1.0.0] — TBD
 
