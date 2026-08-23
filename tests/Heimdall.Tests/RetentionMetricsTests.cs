@@ -1,6 +1,7 @@
 using System;
 using System.IO;
 using System.Linq;
+using System.Threading;
 using Heimdall;
 using Heimdall.Storage.SQLite;
 using Xunit;
@@ -31,11 +32,21 @@ public class RetentionMetricsTests
         new(new SQLiteTelemetryOptions
         { DataPath = path, RetentionDays = 0, WalMode = false, AutoVacuum = true, RetentionSweepMinutes = 0 });
 
-    private static HSpan Span(long startNs) =>
-        new(new byte[16], new byte[8], null, "s", HSpanKind.Server,
+    private static int _spanSeq;
+    private static HSpan Span(long startNs)
+    {
+        // Einzigartige span_id (neuer UNIQUE-Index auf (trace_id, span_id) —
+        // vorher nutzten alle Test-Spans Null-Byte-IDs, was jetzt beim Insert
+        // via INSERT OR IGNORE verworfen würde).
+        var sid = new byte[8];
+        int seq = Interlocked.Increment(ref _spanSeq);
+        sid[0] = (byte)(seq >> 8);
+        sid[7] = (byte)seq;
+        return new(new byte[16], sid, null, "s", HSpanKind.Server,
             startNs, startNs + 1_000_000, HStatusCode.Ok, null,
             Array.Empty<HAttribute>(), Array.Empty<HSpanEvent>(), Array.Empty<HSpanLink>(),
             new HResource(Array.Empty<HAttribute>()), null);
+    }
 
     private static HLogRecord Log(long tsNs) =>
         new(tsNs, HSeverity.Info, "INFO", "b", null, null, Array.Empty<HAttribute>(), null, null);

@@ -55,6 +55,13 @@ public class PromHttpTests
         return Encoding.UTF8.GetString(ms.ToArray());
     }
 
+    /// <summary>Überladung für async Handler (Query/QueryRange return Task&lt;IResult&gt;).</summary>
+    private static async Task<string> ExecuteAsync(Task<IResult> resultTask)
+    {
+        var result = await resultTask.ConfigureAwait(false);
+        return await ExecuteAsync(result);
+    }
+
     private static HttpRequest QueryRequest(params (string k, string v)[] kv)
     {
         var ctx = new DefaultHttpContext();

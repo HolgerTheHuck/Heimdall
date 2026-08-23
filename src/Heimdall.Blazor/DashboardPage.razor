@@ -189,8 +189,9 @@
         }
 
         // Load + Errors aus den kumulativen Countern (bestehende Logik), im Zeitfenster.
-        _reqPts = HeimdallSeries.PointsFromMetric(Query.MetricSeries(Requests, range.From, range.To, lim));
-        _errPts = HeimdallSeries.PointsFromMetric(Query.MetricSeries(Errors, range.From, range.To, lim));
+        // After the IsNullOrWhiteSpace check above, Requests/Errors are non-null.
+        _reqPts = HeimdallSeries.PointsFromMetric(Query.MetricSeries(Requests!, range.From, range.To, lim));
+        _errPts = HeimdallSeries.PointsFromMetric(Query.MetricSeries(Errors!, range.From, range.To, lim));
 
         _reqRate = HeimdallSeries.Rate(_reqPts);
         _errRate = HeimdallSeries.Rate(_errPts);

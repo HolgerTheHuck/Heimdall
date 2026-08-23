@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Threading;
 using Heimdall;
 using Heimdall.Storage.SQLite;
 using Xunit;
@@ -42,8 +43,9 @@ public class RetentionTests
 
     private static HResource Res(string svc) => new(new[] { new HAttribute("service.name", svc) });
 
+    private static int _spanSeq;
     private static HSpan MakeSpan(long startNs, string name = "s") =>
-        new(Tid(1), Sid(1), null, name, HSpanKind.Server,
+        new(Tid(1), Sid(Interlocked.Increment(ref _spanSeq)), null, name, HSpanKind.Server,
             startNs, startNs + 1_000_000, HStatusCode.Ok, null,
             new[] { new HAttribute("payload", new string('x', 200)) },
             Array.Empty<HSpanEvent>(), Array.Empty<HSpanLink>(),

@@ -60,10 +60,10 @@ public class AlertChannelTests
         };
         var ch = new SmtpAlertChannel(opts, NullLogger<SmtpAlertChannel>.Instance);
         var msg = ch.BuildMessage(Notify("5xx-Rate", AlertState.Firing, "abc"));
-        Assert.Equal("heimdall@ex.com", msg.From.Address);
+        Assert.Equal("heimdall@ex.com", msg.From!.Address);
         Assert.Equal(2, msg.To.Count);
-        Assert.Equal("ops@ex.com", msg.To[0].Address);
-        Assert.Equal("dev@ex.com", msg.To[1].Address);
+        Assert.Equal("ops@ex.com", msg.To[0]!.Address);
+        Assert.Equal("dev@ex.com", msg.To[1]!.Address);
         Assert.Contains("5xx-Rate", msg.Subject);
         Assert.Contains("Firing", msg.Subject);
         Assert.True(msg.IsBodyHtml);

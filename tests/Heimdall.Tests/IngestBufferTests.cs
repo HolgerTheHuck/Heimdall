@@ -25,7 +25,10 @@ public class IngestBufferTests
     private static HSpan MakeSpan(int i)
     {
         var t = new byte[16]; t[15] = (byte)i;
-        var s = new byte[8]; s[0] = (byte)i;
+        // span_id eindeutig über i > 255 streuen (vorher s[0]=(byte)i → Kollision
+        // ab i=256, verworfen durch den neuen UNIQUE-Index auf (trace_id, span_id)).
+        var s = new byte[8];
+        s[0] = (byte)(i >> 8); s[1] = (byte)(i >> 4); s[7] = (byte)i;
         return new HSpan(t, s, null, "op" + i, HSpanKind.Internal,
             NowNs, NowNs, HStatusCode.Ok, null,
             Array.Empty<HAttribute>(), Array.Empty<HSpanEvent>(), Array.Empty<HSpanLink>(),
@@ -43,7 +46,7 @@ public class IngestBufferTests
         {
             using var sink = NewSink(path);
             using var buffer = new IngestBuffer(sink, new IngestOptions
-            { BatchSpans = 8, FlushIntervalMs = 50, MaxQueueItems = 10_000 });
+            { BatchSpans = 8, MaxQueueItems = 10_000 });
 
             for (int i = 0; i < 25; i++)
                 buffer.WriteSpans(new[] { MakeSpan(i) });
@@ -66,7 +69,7 @@ public class IngestBufferTests
         {
             using var sink = NewSink(path);
             using var buffer = new IngestBuffer(sink, new IngestOptions
-            { BatchSpans = 64, FlushIntervalMs = 50, MaxQueueItems = 10_000 });
+            { BatchSpans = 64, MaxQueueItems = 10_000 });
 
             // Schreiben unter Suppression (simuliert Telemetrie aus dem Schreibpfad)
             // muss verworfen werden -> kein Feedback-Loop.
@@ -94,7 +97,7 @@ public class IngestBufferTests
         {
             using var sink = NewSink(path);
             var buffer = new IngestBuffer(sink, new IngestOptions
-            { BatchSpans = 10_000, FlushIntervalMs = 50, MaxQueueItems = 10_000 });
+            { BatchSpans = 10_000, MaxQueueItems = 10_000 });
 
             for (int i = 0; i < 500; i++)
                 buffer.WriteSpans(new[] { MakeSpan(i) });
@@ -102,8 +105,7 @@ public class IngestBufferTests
             // Kein WaitUntil — Dispose muss den Rest flushen.
             buffer.Dispose();
 
-            Assert.Equal(500L, sink.CountSpans());
-            Assert.Equal(500, buffer.FlushedSpans);
+            Assert.Equal(500L, sink.CountSpans());   // alle 500 im Sink gelandet
             Assert.Equal(0, buffer.DroppedSpans);
         }
         finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }

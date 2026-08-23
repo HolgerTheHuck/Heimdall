@@ -198,8 +198,10 @@ public class AlertEngineTests
     }
 
     [Fact]
-    public async Task ProcessRule_DeaktivierteRegel_WirdOkOhneNotify()
+    public async Task ProcessRule_DeaktivierteFiringRegel_SendetResolved()
     {
+        // Deaktivieren einer Firing-Regel muss Resolved notifyen — sonst hängen
+        // Empfänger im Alarm (Audit-Fix: vorher wurde Resolved verschluckt).
         var q = new FakeQuery { LogCount = 6 };
         var state = new InMemStateStore();
         state.Put(new AlertEvent("r1", AlertState.Firing, NowMs, NowMs, 6, "m", NowMs));
@@ -208,8 +210,25 @@ public class AlertEngineTests
         var rule = Rule(AlertSignal.Log, threshold: 5) with { Enabled = false };
 
         await ev.ProcessRule(rule, NowMs, NowNano);
-        Assert.Equal(AlertState.Ok, state.Get("r1")?.State);   // aufgeraeumt
-        Assert.Empty(ch.Sent);                                  // kein Notify
+        Assert.Equal(AlertState.Resolved, state.Get("r1")?.State);   // entwarnt
+        Assert.Single(ch.Sent);                                       // Resolved-Notify
+        Assert.Equal(AlertState.Resolved, ch.Sent[0].State);
+    }
+
+    [Fact]
+    public async Task ProcessRule_DeaktiviertePendingRegel_WirdOkOhneNotify()
+    {
+        // Pending (noch nicht Firing) → Ok ohne Notify (kein Alarm war gemeldet).
+        var q = new FakeQuery { LogCount = 6 };
+        var state = new InMemStateStore();
+        state.Put(new AlertEvent("r1", AlertState.Pending, NowMs, NowMs, 6, "m", NowMs));
+        var ch = new FakeChannel();
+        var ev = NewEvaluator(q, state, ch);
+        var rule = Rule(AlertSignal.Log, threshold: 5) with { Enabled = false };
+
+        await ev.ProcessRule(rule, NowMs, NowNano);
+        Assert.Equal(AlertState.Ok, state.Get("r1")?.State);
+        Assert.Empty(ch.Sent);
     }
 
     // === Fakes ============================================================

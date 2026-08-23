@@ -67,7 +67,7 @@ internal static class HeimdallEndpointAgg
             foreach (var s in spans)
             {
                 var attrs = HeimdallCharting.ParseAttrs(s.AttrsJson);
-                string route = AttrValue(attrs, routeAttr);
+                string? route = AttrValue(attrs, routeAttr);
                 string controller = ControllerOf(attrs, controllerAttr, route);
                 string action = ActionOf(attrs, actionAttr, route, s.Name);
 
@@ -101,7 +101,7 @@ internal static class HeimdallEndpointAgg
 
     /// <summary>Controller-Dimension (Auto): Plugin-Attr → Route-Parsen →
     /// <c>(unbekannt)</c>.</summary>
-    public static string ControllerOf(IReadOnlyList<HeimdallCharting.AttrKv> attrs, string controllerAttr, string route)
+    public static string ControllerOf(IReadOnlyList<HeimdallCharting.AttrKv> attrs, string controllerAttr, string? route)
     {
         string? c = AttrValue(attrs, controllerAttr);
         if (!string.IsNullOrWhiteSpace(c)) return c!;
@@ -110,7 +110,7 @@ internal static class HeimdallEndpointAgg
     }
 
     /// <summary>Action/Endpoint-Dimension (Auto): Plugin-Attr → Route → Span-Name.</summary>
-    public static string ActionOf(IReadOnlyList<HeimdallCharting.AttrKv> attrs, string actionAttr, string route, string spanName)
+    public static string ActionOf(IReadOnlyList<HeimdallCharting.AttrKv> attrs, string actionAttr, string? route, string spanName)
     {
         string? a = AttrValue(attrs, actionAttr);
         if (!string.IsNullOrWhiteSpace(a)) return a!;
@@ -201,7 +201,7 @@ internal static class HeimdallEndpointAgg
             return a;
         }
 
-        public static Acc ForEndpoint(Dictionary<string, Acc> map, string controller, string action, string route)
+        public static Acc ForEndpoint(Dictionary<string, Acc> map, string controller, string action, string? route)
         {
             string key = controller + "|" + action + "|" + route;
             if (!map.TryGetValue(key, out var a))

@@ -34,11 +34,17 @@ public class SinkShutdownTests
         new(new SQLiteTelemetryOptions
         { DataPath = path, RetentionDays = 0, WalMode = false, AutoVacuum = true, RetentionSweepMinutes = 0 });
 
-    private static HSpan Span() =>
-        new(new byte[16], new byte[8], null, "s", HSpanKind.Server,
+    private static int _spanSeq;
+    private static HSpan Span()
+    {
+        var sid = new byte[8];
+        int seq = Interlocked.Increment(ref _spanSeq);
+        sid[0] = (byte)(seq >> 8); sid[7] = (byte)seq;
+        return new(new byte[16], sid, null, "s", HSpanKind.Server,
             NowNs, NowNs + 1_000_000, HStatusCode.Ok, null,
             Array.Empty<HAttribute>(), Array.Empty<HSpanEvent>(), Array.Empty<HSpanLink>(),
             new HResource(Array.Empty<HAttribute>()), null);
+    }
 
     [Fact]
     public void Write_Nach_Dispose_Ist_Noop_Ohne_Throw()

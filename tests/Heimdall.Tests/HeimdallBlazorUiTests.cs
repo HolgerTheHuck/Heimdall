@@ -60,7 +60,7 @@ public class HeimdallBlazorUiTests
     public void ScaleChart_Empty_ReturnsNull()
     {
         Assert.Null(HeimdallCharting.ScaleChart(Array.Empty<ChartSeries>(), 800, 240));
-        Assert.Null(HeimdallCharting.ScaleChart(null, 800, 240));
+        Assert.Null(HeimdallCharting.ScaleChart(null!, 800, 240));
     }
 
     [Fact]
