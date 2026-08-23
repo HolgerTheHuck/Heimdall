@@ -8,12 +8,17 @@ internal static class HeimdallFmt
 {
     private static readonly long EpochTicks = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks;
 
-    /// <summary>Unix-Nanosekunden -> lokale Zeit "yyyy-MM-dd HH:mm:ss.fff".</summary>
+    /// <summary>
+    /// Unix-Nanosekunden -> lokale Zeit "yyyy-MM-dd HH:mm:ss.fffzzz". Der
+    /// Offset-Suffix (z. B. +02:00) ist explizit, damit Anwender in nicht-UTC-
+    /// Server-Zonen erkennen, dass die Anzeige Server-lokal ist — sonst wirken
+    /// alle Zeiten verschoben, wenn Server≠User-Zone.
+    /// </summary>
     public static string Ts(long ns)
     {
         if (ns <= 0) return "—";
         try { return new DateTime(EpochTicks + ns / 100, DateTimeKind.Utc).ToLocalTime()
-                          .ToString("yyyy-MM-dd HH:mm:ss.fff", CultureInfo.InvariantCulture); }
+                          .ToString("yyyy-MM-dd HH:mm:ss.fffzzz", CultureInfo.InvariantCulture); }
         catch { return ns.ToString(CultureInfo.InvariantCulture); }
     }
 

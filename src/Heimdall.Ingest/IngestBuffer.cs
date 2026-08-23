@@ -196,6 +196,11 @@ public sealed class IngestBuffer : IHeimdallSink, IDisposable
 
     public void Dispose()
     {
+        // Channel schließen (keine neuen Writes mehr). Der Worker-Loop (RunAsync)
+        // draint den Channel vollständig: WaitToReadAsync returnt false nach
+        // TryComplete, der finally-Tail liest alle verbleibenden Items via TryRead
+        // und flusht sie. Task.WaitAll wartet auf den Worker (mit 5s-Timeout als
+        // Notbremse). SingleReader=true bleibt gewahrt (nur der Worker liest).
         _spans.Writer.TryComplete();
         _logs.Writer.TryComplete();
         _metrics.Writer.TryComplete();

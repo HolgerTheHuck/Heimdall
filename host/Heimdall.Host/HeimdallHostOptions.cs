@@ -80,6 +80,19 @@ public sealed class HeimdallStorageOptions
     public bool WalMode { get; set; } = true;
 
     /// <summary>
+    /// Ingest-Buffer (Bounded-Channel + Hintergrund-Batching) zwischen OTLP/SDK
+    /// und dem SQLite-Sink entkoppelt Producer vom Sync-Write-Latency-Pfad. Off
+    /// by default — der SQLite-Sink hat bereits Admission-Control (OTLP-Limiter)
+    /// und synchrone Batch-Inserts. On = Spans/Logs/Metriken werden in einen
+    /// bounded Channel geschrieben und asynchron geflushed (Drop-Policy:
+    /// <see cref="Heimdall.Ingest.IngestDropPolicy.DropOldest"/> bei Overflow).
+    /// Default false (1.0: synchroner Pfad ist der bewährte Default; Buffer ist
+    /// Optional für High-Throughput-Szenarien, in denen der SQLite-Sink zum
+    /// Bottleneck würde).
+    /// </summary>
+    public bool UseIngestBuffer { get; set; }
+
+    /// <summary>
     /// auto_vacuum=INCREMENTAL beim Bootstrap + incremental_vacuum nach Sweeps
     /// (Datei schrumpft nach DELETE/Eviction). Default true.
     /// </summary>
