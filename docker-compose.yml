@@ -5,6 +5,7 @@
 # UI/HTTP-OTLP:  http://localhost:5099/otel
 # OTLP/gRPC:     localhost:4317
 # Persistenz:    ./var/heimdall (Host-Volume) — überlebt Neustart/Rebuild.
+# Health:        GET http://localhost:5099/healthz
 #
 # Auth aktivieren: die drei Heimdall__Auth__*-Env-Vars einkommentieren und setzen.
 services:
@@ -19,8 +20,26 @@ services:
       - ./var/heimdall:/app/var/heimdall
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
-      # - Heimdall__Auth__Enabled=true
-      # - Heimdall__Auth__ApiKey=change-me
-      # - Heimdall__Auth__Username=admin
-      # - Heimdall__Auth__Password=change-me
+      # Secure-by-Default für Produktion: Auth aktivieren (Stand-alone-Host
+      # exponiert sonst OTLP/Prom/UI zustandsändernd auf 0.0.0.0). Vor dem
+      # ersten `docker compose up` echte Werte setzen (Password/ApiKey ändern!).
+      # Development/Demo ohne Auth: die vier Zeilen auskommentieren.
+      - Heimdall__Auth__Enabled=true
+      - Heimdall__Auth__Username=admin
+      - Heimdall__Auth__Password=change-me
+      - Heimdall__Auth__ApiKey=change-me
+    # Ressourcen-Limits + Healthcheck (vorher Container als root, kein Health).
+    mem_limit: 512m
+    cpus: 1.0
+    user: "1000:1000"   # Non-root-User (UID/GID des Host-Users; Volume muss beschreibbar sein)
+    healthcheck:
+      # aspnet:10.0 (Debian) hat kein curl/wget im Base-Image — nutze dotnet
+      # als HTTP-Client via System.Net.Http.HttpClient (inline-Polyfill).
+      # Simpler: der Prozess lebt + /healthz antwortet. Für 1.0 ein
+      # Shell-Check via /dev/tcp (bash im aspnet-Image vorhanden).
+      test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/5099 && printf 'GET /healthz HTTP/1.0\\r\\n\\r\\n' >&3 && head -1 <&3 | grep -q '200' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
     restart: unless-stopped

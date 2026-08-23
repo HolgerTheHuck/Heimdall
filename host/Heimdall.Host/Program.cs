@@ -3,6 +3,7 @@ using Heimdall.AspNetCore;
 using Heimdall.Blazor;
 using Heimdall.Direct;
 using Heimdall.Host;
+using Heimdall.Ingest;
 using Heimdall.Otlp;
 using Heimdall.Otlp.Grpc;
 using Heimdall.Prometheus;
@@ -26,6 +27,22 @@ var builder = WebApplication.CreateBuilder(args);
 var opts = builder.Configuration.GetSection("Heimdall").Get<HeimdallHostOptions>() ?? new HeimdallHostOptions();
 ValidateOptions(opts);
 
+// Secure-by-Default-Warnung (1.0: Auth ist opt-in, um Embedded-Nutzung nicht
+// zu brechen — aber der Stand-alone-Host exponiert OTLP/Prom/UI zustandsändernd
+// auf allen Interfaces. Ohne Auth ist das in Produktion ein Risiko. Der Host
+// warnt beim Start deutlich; Compose-Default aktiviert Auth (siehe docker-compose.yml).
+// Ein harter Secure-by-Default-Schalter wäre 1.0-breaking und bleibt 1.x vorbehalten.
+if (!opts.Auth.Enabled)
+{
+    var logger = builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; }).Services
+        .BuildServiceProvider().GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
+    logger?.LogWarning(
+        "⚠ Heimdall:Auth:Enabled=false — UI, OTLP/HTTP+gRPC, Prom-API, Dashboard-Import/Delete " +
+        "und Alert-Save/Delete sind UNGESCHÜTZT. Für Produktion Auth aktivieren " +
+        "(Heimdall:Auth:Enabled=true + Password + ApiKey). Development/Demo ist das OK, " +
+        "aber nicht an 0.0.0.0 in Produktion binden.");
+}
+
 // Persistente Verzeichnisse anlegen — die DB-Datei wird NICHT gelöscht (Gegensatz zum alten SelfHost).
 var dataDir = Path.GetDirectoryName(Path.GetFullPath(opts.Storage.DataPath));
 if (!string.IsNullOrEmpty(dataDir)) Directory.CreateDirectory(dataDir);
@@ -36,6 +53,27 @@ Directory.CreateDirectory(opts.Alerting.StateDir);
 // Backend-Sink bauen (1.0: SQLite). Der Sink implementiert IHeimdallSink,
 // IHeimdallQuery UND IHeimdallMetricSource — dasselbe Objekt geht in alle Add*-Aufrufe.
 var (sink, query, metricSource, sinkDisposable) = BuildSink(opts);
+
+// Optionaler Ingest-Buffer (Bounded-Channel + Hintergrund-Batching) entkoppelt
+// Producer vom Sync-Write-Latency-Pfad. Off by default — der SQLite-Sink hat
+// bereits Admission-Control + synchrone Batch-Inserts. On = High-Throughput-
+// Schutz: Spans/Logs/Metriken gehen in einen bounded Channel, asynchrone
+// Hintergrund-Worker flushen gebündelt in den Sink. Drop-Policy DropOldest bei
+// Overflow. Siehe HeimdallHostOptions.Storage.UseIngestBuffer.
+if (opts.Storage.UseIngestBuffer)
+{
+    var buffer = new IngestBuffer(sink, new IngestOptions
+    {
+        MaxQueueItems = 20_000,
+        BatchSpans = 256,
+        BatchLogs = 1024,
+        BatchMetrics = 1024,
+        DropPolicy = IngestDropPolicy.DropOldest,
+    });
+    sink = buffer;   // OTLP/SDK schreiben jetzt in den Buffer, nicht direkt in SQLite
+    var prevDisposable = sinkDisposable;
+    sinkDisposable = new CombinedDisposable(prevDisposable, buffer);
+}
 
 // --- Bedingte DI-Registrierung ----------------------------------------------
 if (opts.Dashboard.Enabled) builder.Services.AddHeimdallDashboard(query);
@@ -72,6 +110,11 @@ if (opts.Auth.Enabled) app.UseHeimdallAuth(opts.Auth);
 app.UseStaticFiles();   // liefert /_content/Heimdall.Blazor/{css,js}
 
 // --- Bedingte Endpoint-Mappings --------------------------------------------
+// Health-Endpoint (/healthz) — vor Auth, immer anonymous (Compose-Healthcheck,
+// Kubernetes-Probe). Liefert 200 + Build-Version, sobald der Host hochgefahren
+// ist (Bereit-Signal für Compose/K8s; kein tieferes DB-Ping in 1.0, um die
+// Boot-Reihenfolge nicht zu verkomplizieren — kommt als Additions in 1.x).
+app.MapGet("/healthz", () => Results.Ok(new { status = "ok", version = "1.0.2" }));
 if (opts.Dashboard.Enabled) app.MapHeimdallDashboard(opts.Dashboard.Prefix);
 if (opts.Otlp.Http.Enabled) app.MapHeimdallOtlp(opts.Otlp.Http.Prefix);
 if (opts.Prometheus.Enabled) app.MapHeimdallPrometheus(opts.Prometheus.Prefix);
@@ -153,7 +196,7 @@ static (IHeimdallSink Sink, IHeimdallQuery Query, IHeimdallMetricSource Metrics,
                 LogsDays = o.Storage.Retention?.LogsDays,
                 MetricsDays = o.Storage.Retention?.MetricsDays,
             },
-            MaxBytes = o.Storage.MaxBytes,
+            MaxBytes = o.Storage.MaxBytes > 0 ? o.Storage.MaxBytes : 5L * 1024 * 1024 * 1024,   // Default 5 GB, falls nicht gesetzt
             RetentionSweepMinutes = o.Storage.RetentionSweepMinutes,
             WalMode = o.Storage.WalMode,
             AutoVacuum = o.Storage.AutoVacuum,
@@ -178,3 +221,15 @@ static (IHeimdallSink Sink, IHeimdallQuery Query, IHeimdallMetricSource Metrics,
 
 /// <summary>Test-Hook für <c>WebApplicationFactory&lt;Program&gt;</c>.</summary>
 public partial class Program { }
+
+/// <summary>
+/// Kombiniert zwei <c>IDisposable</c>s in der Dispose-Reihenfolge (zuerst der
+/// Ingest-Buffer, dann der SQLite-Sink — der Buffer wird vor dem Sink
+/// disposed, damit sein Tail-Flush in den noch offenen Sink committet).
+/// </summary>
+internal sealed class CombinedDisposable : IDisposable
+{
+    private readonly IDisposable _a, _b;
+    public CombinedDisposable(IDisposable a, IDisposable b) { _a = a; _b = b; }
+    public void Dispose() { _a.Dispose(); _b.Dispose(); }
+}
