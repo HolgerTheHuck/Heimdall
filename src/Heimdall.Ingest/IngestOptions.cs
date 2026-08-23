@@ -19,14 +19,8 @@ public sealed class IngestOptions
     /// <summary>Max. Metrik-Punkte pro Batch-Flush. Default 1024.</summary>
     public int BatchMetrics { get; set; } = 1024;
 
-    /// <summary>Max. Zeit zwischen zwei Flushes (ms). Default 1000.</summary>
-    public int FlushIntervalMs { get; set; } = 1000;
-
     /// <summary>Verhalten bei vollem Puffer. Default: aelteste Items verwerfen.</summary>
     public IngestDropPolicy DropPolicy { get; set; } = IngestDropPolicy.DropOldest;
-
-    /// <summary>Die im Hintergrund belegten Worker-Threads (pro Signal). Default 1.</summary>
-    public int FlushWorkers { get; set; } = 1;
 }
 
 /// <summary>Verhalten bei vollem Ingest-Puffer.</summary>

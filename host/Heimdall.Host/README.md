@@ -23,12 +23,11 @@ erhält den Bestand.
 
 | Pfad | Default | Bedeutung |
 |------|---------|-----------|
-| `Storage:Backend` | `sqlite` | `sqlite` oder `walhalla` |
-| `Storage:DataPath` | `var/heimdall/otel.db` | SQLite-Datei / Walhalla-Verzeichnis |
+| `Storage:Backend` | `sqlite` | `sqlite` (1.0: SQLite-only) |
+| `Storage:DataPath` | `var/heimdall/otel.db` | SQLite-Datei |
 | `Storage:RetentionDays` | `7` | 0 = unbegrenzt |
 | `Storage:WalMode` | `true` | SQLite WAL + foreign_keys |
-| `Storage:Durable` | `true` | Walhalla WAL-Sync (Fsync) |
-| `Storage:SelfObservability` | `false` | Walhalla: otel.db-Engine instrumentiert sich selbst |
+| `Storage:MaxBytes` | `0` (→ Host-Default 5 GB) | Harter Plafond über die DB-Datei; 0 = Host setzt 5 GB-Default (Plattenfüller-Schutz bei offenem Ingest), explizit 0 = unbegrenzt |
 | `Otlp:Http:Enabled` / `:Prefix` | `true` / `/otel` | OTLP/HTTP-Empfänger |
 | `Otlp:Http:MaxConcurrentRequests` | `32` | Admission-Control-Cap (C1); 0 = unbegrenzt; Überlauf → 429 |
 | `Otlp:Grpc:Enabled` | `true` | OTLP/gRPC-Empfänger (HTTP/2-Endpunkt 4317) |
@@ -43,7 +42,7 @@ Kestrel-Endpunkte (`Kestrel:Endpoints`): `http-ui` (5099, `Http1AndHttp2`) und `
 (4317, `Http2`). Die pro-Endpunkt-Protokoll-Trennung ist nur via `Kestrel:Endpoints`
 möglich (nicht via `ASPNETCORE_URLS`).
 
-Env-Vars überschreiben (Docker/CI): `Heimdall__Storage__Backend=walhalla`,
+Env-Vars überschreiben (Docker/CI): `Heimdall__Storage__DataPath=/data/otel.db`,
 `Heimdall__Auth__ApiKey=…` usw. (`__` → `:`).
 
 ## Minimal-Auth

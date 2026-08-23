@@ -15,8 +15,15 @@
   <PropertyGroup>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+    <!-- WarningsAsErrors=nullable: billiges Quality-Gate —nullable-Warns werden
+         zu Build-Fehlern, ohne alle anderen Warnungen zu harzen (die teils aus
+         Vendor-Abhängigkeiten kommen). TreatWarningsAsErrors bleibt false,
+         nullable aber wird konsequent durchgesetzt. -->
     <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
-    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+    <WarningsAsErrors>$(WarningsAsErrors);nullable</WarningsAsErrors>
+    <!-- XML-Doku generieren (nuget.org-IntelliSense +消费者vertrag; Abstractions
+         am wichtigsten). Zentral statt pro-csproj, um Drift zu vermeiden. -->
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
     <!-- Zentrale Versionierung (1.0.2). Ersetzt die per-csproj 0.1.0-Saetze. -->
     <Version>1.0.2</Version>
@@ -34,7 +41,11 @@
 
     <!-- Paket-Metadaten (gelten nur fuer packbare Projekte, harmlos fuer den Rest). -->
     <PackageLicenseExpression>Apache-2.0</PackageLicenseExpression>
+    <Authors>H. Huckfeldt</Authors>
     <Copyright>Copyright (c) 2026 H. Huckfeldt</Copyright>
+    <!-- Release-Notes verweisen auf das CHANGELOG (Release-Pipeline extrahiert
+         den Abschnitt der jeweiligen Version — siehe Release-Workflow). -->
+    <PackageReleaseNotes>https://github.com/HolgerTheHuck/Heimdall/blob/main/CHANGELOG.md</PackageReleaseNotes>
     <!-- Root-README als Paket-README einbetten (NuGet "Readme"-Tab / nuget.org-Ansicht). -->
     <PackageReadmeFile>README.md</PackageReadmeFile>
   </PropertyGroup>

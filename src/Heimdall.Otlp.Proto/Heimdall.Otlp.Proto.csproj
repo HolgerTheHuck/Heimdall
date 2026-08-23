@@ -8,7 +8,7 @@
     <AssemblyName>Heimdall.Otlp.Proto</AssemblyName>
     <IsPackable>true</IsPackable>
     <PackageId>Heimdall.Otlp.Proto</PackageId>
-    <Description>Heimdall OTLP-Proto-Typen + OtlpConvert: generiert die OTLP-Messages (opentelemetry-proto v1.7.0, GrpcServices="None") und den OTLP→Heimdall-Konverter. Transport-agnostisch —消费 von Heimdall.Otlp (HTTP) und Heimdall.Otlp.Grpc (gRPC) gleichermaßen. Die 3 Collector-Service-protos liegen hier als Dateien, werden aber nur von Heimdall.Otlp.Grpc (Server) kompiliert.</Description>
+    <Description>Heimdall OTLP-Proto-Typen + OtlpConvert: generiert die OTLP-Messages (opentelemetry-proto v1.7.0, GrpcServices="None") und den OTLP→Heimdall-Konverter. Transport-agnostisch — Konsum von Heimdall.Otlp (HTTP) und Heimdall.Otlp.Grpc (gRPC) gleichermaßen. Die 3 Collector-Service-protos liegen hier als Dateien, werden aber nur von Heimdall.Otlp.Grpc (Server) kompiliert.</Description>
     <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;otlp;proto;grpc</PackageTags>
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
   </PropertyGroup>

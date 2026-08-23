@@ -23,7 +23,7 @@ SignalR — alles läuft im .NET-Prozess.
 - **Prometheus:** PromQL-Engine + `/api/v1/*` — Grafana kann Heimdall direkt als
   Datenquelle nutzen.
 
-> Status: **1.0.0** — alle Tests grün, live verifiziert (CI: Windows + Linux, .NET 8/9/10).
+> Status: **1.0.2** — alle Tests grün, live verifiziert (CI: Windows + Linux, .NET 8/9/10).
 > 1.0-Vorbereitung: SQLite-only, keine Cross-Repo-Abhängigkeiten mehr.
 > Walhalla-Historie (1.0: SQLite-only, Walhalla-Backend vorausliegend) siehe
 > [DESIGN.md](DESIGN.md) und [Walhalla-Backend](#walhalla-backend).
@@ -47,7 +47,7 @@ SignalR — alles läuft im .NET-Prozess.
 ## Pakete
 
 Alle Pakete sind **additiv** und greifen nicht in bestehende `Add*`/`Map*`-
-Signaturen ein. Version `1.0.0`, Target-Frameworks `net8.0;net9.0;net10.0`.
+Signaturen ein. Version `1.0.2`, Target-Frameworks `net8.0;net9.0;net10.0`.
 
 | Paket | Zweck |
 |---|---|
@@ -70,7 +70,7 @@ Signaturen ein. Version `1.0.0`, Target-Frameworks `net8.0;net9.0;net10.0`.
 ### 1. Pakete beziehen
 
 Ab der 1.0 liegen die Heimdall-Pakete auf **nuget.org** — dann reicht ein schlichtes
-`dotnet add package Heimdall.Sdk` (bzw. `--version 1.0.0`). Für Pre-Release- oder
+`dotnet add package Heimdall.Sdk` (bzw. `--version 1.0.2`). Für Pre-Release- oder
 Integrationsbuilds liegt ein lokaler Feed unter `artifacts/nupkg/`; diesen als
 NuGet-Source hinzufügen (z. B. in der `nuget.config` eures API-Projekts):
 
@@ -98,7 +98,7 @@ Falls sich der Code geändert hat, Pakete neu erzeugen:
 ```bash
 cd Heimdall
 # packt alle Heimdall-Src-Projekte (IsPackable=true) nach artifacts/nupkg
-# (Version 1.0.0 zentral in Directory.Build.props):
+# (Version 1.0.2 zentral in Directory.Build.props):
 dotnet pack Heimdall.slnx -c Release -o artifacts/nupkg
 ```
 
@@ -107,11 +107,11 @@ dotnet pack Heimdall.slnx -c Release -o artifacts/nupkg
 Für die **in-Process-Einbettung** (Pfad A) in eurer realen API:
 
 ```bash
-dotnet add package Heimdall.Sdk          --version 1.0.0
-dotnet add package Heimdall.Storage.SQLite --version 1.0.0
-dotnet add package Heimdall.Blazor         --version 1.0.0
-dotnet add package Heimdall.Prometheus     --version 1.0.0
-dotnet add package Heimdall.AspNetCore.Enrichment --version 1.0.0
+dotnet add package Heimdall.Sdk          --version 1.0.2
+dotnet add package Heimdall.Storage.SQLite --version 1.0.2
+dotnet add package Heimdall.Blazor         --version 1.0.2
+dotnet add package Heimdall.Prometheus     --version 1.0.2
+dotnet add package Heimdall.AspNetCore.Enrichment --version 1.0.2
 ```
 
 Heimdall-Pakete ziehen einander (jedes hängt an `Heimdall.Abstractions`); die
@@ -358,7 +358,7 @@ samples/
   Heimdall.OtelSample/        WebAPI + in-process Exporter + Live-Dashboard
   Heimdall.MvcSample/         WebAPI + Controller/Endpoint-Drilldown
 tests/Heimdall.Tests/         xUnit, net8/9/10 (siehe CI-Badge)
-artifacts/nupkg/              lokale NuGet-Pakete (1.0.0)
+artifacts/nupkg/              lokale NuGet-Pakete (1.0.2)
 ```
 
 ---

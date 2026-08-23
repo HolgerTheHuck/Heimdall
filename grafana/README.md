@@ -6,7 +6,7 @@ separaten Prometheus-Server.
 
 ## Datenquelle einrichten
 
-1. Heimdall-Host starten (z. B. `dotnet run --project samples/Heimdall.SelfHost`).
+1. Heimdall-Host starten (z. B. `dotnet run --project host/Heimdall.Host`).
    Die Prom-API liegt unter `http://localhost:5099/otel`.
 2. In Grafana: **Connections → Data sources → Add data source → Prometheus**.
 3. **URL**: `http://localhost:5099/otel` (das Präfix, unter dem
