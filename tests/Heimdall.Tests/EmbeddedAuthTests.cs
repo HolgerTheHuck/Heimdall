@@ -59,6 +59,9 @@ public class EmbeddedAuthTests : IAsyncDisposable
         });
         await app.StartAsync();
         _app = app;
+        // Client OHNE Auto-Redirect, damit 302-Assertions (Login-Redirect) greifen.
+        // TestServer-Client folgt default keinem Redirect — GetTestClient liefert
+        // bereits einen rohen Client ohne Redirect-Handler.
         return app.GetTestClient();
     }
 
@@ -74,12 +77,13 @@ public class EmbeddedAuthTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Otel_OhneCreds_Liefert401_MitBasicChallenge()
+    public async Task Otel_OhneCreds_LiefertRedirectAufLogin()
     {
+        // Login-Seite: UI ohne Creds redirectet auf /login (statt 401+Basic-Challenge).
         var client = await BuildClientAsync(Enabled());
-        var resp = await client.GetAsync("/otel");
-        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
-        Assert.Contains("Basic", resp.Headers.WwwAuthenticate.ToString());
+        var resp = await client.GetAsync("/otel", HttpCompletionOption.ResponseHeadersRead);
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
+        Assert.Contains("/login", resp.Headers.Location?.ToString() ?? "");
     }
 
     [Fact]
@@ -93,13 +97,15 @@ public class EmbeddedAuthTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Otel_MitFalschemUsername_Liefert401()
+    public async Task Otel_MitFalschemUsername_LiefertRedirectAufLogin()
     {
+        // Falsche Basic-Auth-Creds → Redirect auf Login (statt 401), da die UI
+        // jetzt die Login-Seite anzeigt. Basic-Auth ist nur Fallback für Scripting.
         var client = await BuildClientAsync(Enabled());
         using var msg = new HttpRequestMessage(HttpMethod.Get, "/otel");
         msg.Headers.Authorization = new AuthenticationHeaderValue("Basic", Base64($"wrong:{Pw}"));
         var resp = await client.SendAsync(msg);
-        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
     }
 
     [Theory]
@@ -119,14 +125,15 @@ public class EmbeddedAuthTests : IAsyncDisposable
     }
 
     [Fact]
-    public async Task Otel_PasswortCaseSensitiv_FalscheCase_Liefert401()
+    public async Task Otel_PasswortCaseSensitiv_FalscheCase_LiefertRedirectAufLogin()
     {
-        // Passwort bleibt case-sensitiv (Secret ist ein Secret) — „Secret" ≠ „secret".
+        // Passwort bleibt case-sensitiv (Secret ist ein Secret) — „Secret“ ≠ „secret“.
+        // Falsche Creds → Redirect auf Login (Basic-Auth nur Fallback für Scripting).
         var client = await BuildClientAsync(Enabled());
         using var msg = new HttpRequestMessage(HttpMethod.Get, "/otel");
         msg.Headers.Authorization = new AuthenticationHeaderValue("Basic", Base64($"{User}:Secret"));
         var resp = await client.SendAsync(msg);
-        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
     }
 
     [Fact]

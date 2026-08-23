@@ -1,0 +1,50 @@
+@namespace Heimdall.Blazor
+@* Login-Seite (server-gerendert, statisches SSR). Eigenes HTML-Formular statt
+   Browser-Basic-Auth-Dialog — ermöglicht Branding, Logout, Session-Cookie mit
+   Timeout. POST geht an /login (Handler in HeimdallEndpointExtensions), der
+   Credentials validiert (zeitkonstant via SecretComparer), den Session-Cookie
+   setzt (signed mit HMAC über das Passwort) und auf returnUrl redirectet.
+   Fehlversuche werden als Fehlerhinweis angezeigt (kein Brute-Force-Schutz in
+   1.1.0 — Rate-Limiting mittelfristig). Kein JS. *@
+@using Heimdall.AspNetCore
+
+<!DOCTYPE html>
+<html lang="de">
+<head><HeimdallHead Title="Login" /></head>
+<body class="hmd-login-body">
+<main class="hmd-login">
+    <div class="hmd-login-card">
+        <div class="hmd-login-brand">⌖ Heimdall</div>
+        <h1>Anmelden</h1>
+        @if (!string.IsNullOrEmpty(Error))
+        {
+            <p class="hmd-login-err">@Error</p>
+        }
+        <form method="post" action="@LoginUrl">
+            <input type="hidden" name="returnUrl" value="@ReturnUrl" />
+            <label class="hmd-login-field">
+                <span>Benutzername</span>
+                <input type="text" name="username" autocomplete="username"
+                       value="@LastUser" required autofocus />
+            </label>
+            <label class="hmd-login-field">
+                <span>Passwort</span>
+                <input type="password" name="password" autocomplete="current-password"
+                       required />
+            </label>
+            <button type="submit" class="hmd-login-btn">Anmelden</button>
+        </form>
+        <p class="hmd-login-hint">Heimdall-Observability · Session-Cookie mit Timeout</p>
+    </div>
+</main>
+</body>
+</html>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string? ReturnUrl { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public string? LastUser { get; set; }
+
+    private string LoginUrl => BasePath.TrimEnd('/') + "/login";
+}

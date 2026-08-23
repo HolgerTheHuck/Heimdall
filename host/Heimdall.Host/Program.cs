@@ -92,6 +92,15 @@ builder.Services.AddHeimdallDashboards(opts.DashboardsStore.Dir);
 // Alarm-Subsystem: Store/UI immer (Route /otel/alerts funktioniert ohne aktiven Evaluator);
 // Evaluator + Kanäle nur wenn Alerting.Enabled.
 builder.Services.AddHeimdallAlerting(query, opts.Alerting);
+// Auth-Options in DI registrieren (für Login/Logout-Handler in der Blazor-Schicht).
+// Vor Build() — die Options müssen im Container sein, bevor der Login-Handler sie auslöst.
+opts.Auth.OtlpHttpPrefix = opts.Otlp.Http.Prefix;
+opts.Auth.PrometheusPrefix = opts.Prometheus.Prefix;
+// Login/Logout-Pfade unter dem Dashboard-Prefix (die Blazor-Routen sind
+// /otel/login und /otel/logout, nicht /login). ProtectedPrefix=null (Host=global).
+opts.Auth.LoginPath = opts.Dashboard.Prefix.TrimEnd('/') + "/login";
+opts.Auth.LogoutPath = opts.Dashboard.Prefix.TrimEnd('/') + "/logout";
+if (opts.Auth.Enabled) builder.Services.AddHeimdallAuth(opts.Auth);
 builder.Services.AddSingleton(opts);   // HostShutdownTest + ggf. weitere DI-Konsumenten
 
 var app = builder.Build();
@@ -101,10 +110,9 @@ if (opts.DashboardsStore.SeedExample) HeimdallSeeder.SeedExampleDashboard(app.Se
 
 // Auth vor den Map*-Aufrufen einhängen (Passthrough bei Enabled=false). Die
 // gehobene Lib-Middleware liest die API-Prefixe aus den Auth-Optionen (früher
-// direkt aus HeimdallHostOptions) → hier syncen. ProtectedPrefix bleibt null
-// (Host = global, dessen Routes sämtlich Heimdalls sind).
-opts.Auth.OtlpHttpPrefix = opts.Otlp.Http.Prefix;
-opts.Auth.PrometheusPrefix = opts.Prometheus.Prefix;
+// direkt aus HeimdallHostOptions). ProtectedPrefix bleibt null
+// (Host = global, dessen Routes sämtlich Heimdalls sind). Options wurden vor
+// Build() via AddHeimdallAuth in DI registriert (für Login/Logout-Handler).
 if (opts.Auth.Enabled) app.UseHeimdallAuth(opts.Auth);
 
 app.UseStaticFiles();   // liefert /_content/Heimdall.Blazor/{css,js}

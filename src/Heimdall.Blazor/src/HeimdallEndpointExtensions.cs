@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Components;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
 using System;
 using System.Globalization;
 using System.Linq;
@@ -28,6 +29,59 @@ public static class HeimdallEndpointExtensions
     public static IEndpointConventionBuilder MapHeimdallDashboard(this IEndpointRouteBuilder endpoints, string prefix = "/otel")
     {
         var group = endpoints.MapGroup(prefix);
+
+        // Login-Seite + Login/Logout-Handler. Auth-Options aus DI (wenn
+        // UseHeimdallAuth/AddHeimdallAuth registriert hat); fehlen sie, ist
+        // Auth deaktiviert und die Login-Seite ist nicht erreichbar (die
+        // Middleware redirectet nicht). ReturnUrl wird nach Login wieder
+        // aufgenommen. CSRF via CheckSameOrigin (wie die anderen POST-Endpoints).
+        group.MapGet("/login", (HttpContext ctx, string? returnUrl) =>
+        {
+            var auth = ctx.RequestServices.GetService<Heimdall.AspNetCore.HeimdallAuthOptions>();
+            var err = ctx.Request.Query["err"].ToString();
+            var lastUser = ctx.Request.Query["user"].ToString();
+            return new RazorComponentResult<LoginPage>(new
+            {
+                BasePath = prefix,
+                ReturnUrl = string.IsNullOrEmpty(returnUrl) ? prefix : returnUrl,
+                Error = string.IsNullOrEmpty(err) ? null : err,
+                LastUser = string.IsNullOrEmpty(lastUser) ? null : lastUser,
+            });
+        });
+
+        group.MapPost("/login", async (HttpContext ctx) =>
+        {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            var auth = ctx.RequestServices.GetService<Heimdall.AspNetCore.HeimdallAuthOptions>();
+            if (auth is null || !auth.Enabled)
+                return Results.Redirect($"{prefix}/login?err=Auth+nicht+aktiv");
+
+            var form = await ctx.Request.ReadFormAsync();
+            var username = form["username"].ToString();
+            var password = form["password"].ToString();
+            var returnUrl = form["returnUrl"].ToString();
+            if (string.IsNullOrEmpty(returnUrl) || !returnUrl.StartsWith(prefix, StringComparison.Ordinal))
+                returnUrl = prefix;
+
+            if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password) ||
+                !Heimdall.AspNetCore.HeimdallSessionCookie.CheckCredentials(username, password, auth))
+            {
+                var err = Uri.EscapeDataString("Benutzername oder Passwort falsch");
+                var user = Uri.EscapeDataString(username ?? string.Empty);
+                return Results.Redirect($"{prefix}/login?err={err}&user={user}");
+            }
+
+            Heimdall.AspNetCore.HeimdallSessionCookie.Issue(ctx.Response, auth, username);
+            return Results.Redirect(returnUrl);
+        });
+
+        group.MapPost("/logout", (HttpContext ctx) =>
+        {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            var auth = ctx.RequestServices.GetService<Heimdall.AspNetCore.HeimdallAuthOptions>();
+            if (auth is not null) Heimdall.AspNetCore.HeimdallSessionCookie.Clear(ctx.Response, auth);
+            return Results.Redirect($"{prefix}/login");
+        });
 
         // Landing / Übersicht (Health-KPIs, neueste Fehler-Traces/Logs, Quick-Nav).
         group.MapGet("/", () =>

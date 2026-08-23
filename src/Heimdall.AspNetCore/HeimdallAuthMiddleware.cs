@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Heimdall;                       // SecretComparer (Heimdall.Abstractions)
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Heimdall.AspNetCore;
 
@@ -51,6 +52,14 @@ public sealed class HeimdallAuthMiddleware
         }
 
         var path = context.Request.Path.Value ?? string.Empty;
+        var req = context.Request;
+
+        // Login/Logout-Endpoints selbst nie auth-gate (sonst Endlosschleife).
+        if (path == _auth.LoginPath || path == _auth.LogoutPath)
+        {
+            await _next(context);
+            return;
+        }
 
         // ProtectedPrefix gesetzt → nur dieser Subtree wird geschützt (Embedded).
         // null = global (Host). Vergleich wie die API-Pfad-Prüfung unten (OID).
@@ -65,12 +74,13 @@ public sealed class HeimdallAuthMiddleware
         var otlpApi = EnsureSlash(_auth.OtlpHttpPrefix) + "v1/";
         var promApi = EnsureSlash(_auth.PrometheusPrefix) + "api/v1/";
 
+        // API-Pfade (OTLP/HTTP + Prom-API): API-Key via Header (kein Cookie,
+        // kein Redirect — API-Clients folgen keinen Redirects). 401 bei fehlendem/
+        // ungültigem Key.
         if (path.StartsWith(otlpApi, StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith(promApi, StringComparison.OrdinalIgnoreCase))
         {
-            // API-Key-Pfade (OTLP/HTTP + Prom-API): nur Header (kein Query-Fallback —
-            // sonst landet der Key in Access-Logs/Proxies). Zeitkonstanter Vergleich.
-            var key = context.Request.Headers["x-heimdall-key"].FirstOrDefault();
+            var key = req.Headers["x-heimdall-key"].FirstOrDefault();
             if (string.IsNullOrEmpty(_auth.ApiKey) || !SecretComparer.Equals(key, _auth.ApiKey))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -80,14 +90,34 @@ public sealed class HeimdallAuthMiddleware
             return;
         }
 
-        // UI / Rest: Basic-Auth (Username nur geprüft, wenn konfiguriert).
-        if (!TryBasicAuth(context.Request.Headers["Authorization"], _auth))
+        // UI / Rest: Session-Cookie prüfen. Fehlt/ungültig → Redirect auf
+        // Login-Seite (mit returnUrl für Rückkehr nach erfolgreichem Login).
+        // Basic-Auth-Header als Fallback (für API-Automatisierung/Scripting).
+        if (HeimdallSessionCookie.Validate(req, _auth) is not null)
         {
-            context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-            context.Response.Headers.WWWAuthenticate = "Basic realm=\"heimdall\"";
+            await _next(context);
             return;
         }
-        await _next(context);
+        // Basic-Auth-Fallback (für Scripting/Curl, nicht Browser).
+        if (TryBasicAuth(req.Headers["Authorization"], _auth))
+        {
+            await _next(context);
+            return;
+        }
+
+        // Browser-Nutzer: Redirect auf Login-Seite.
+        if (req.Method.Equals("GET", StringComparison.OrdinalIgnoreCase) ||
+            req.Method.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
+        {
+            var returnUrl = path + req.QueryString.Value;
+            var loginUrl = _auth.LoginPath + "?returnUrl=" + Uri.EscapeDataString(returnUrl);
+            context.Response.Redirect(loginUrl);
+            return;
+        }
+        // Non-GET ohne Auth (z. B. POST ohne Cookie): 401 statt Redirect
+        // (POST-Clients folgen keinen Redirects sinnvoll).
+        context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+        return;
     }
 
     private static string EnsureSlash(string prefix)
@@ -138,12 +168,41 @@ public static class HeimdallAuthExtensions
     /// <summary>
     /// Hängt die Minimal-Auth-Middleware ein. Vor den <c>Map*</c>-Aufrufen
     /// registrieren. Bei <see cref="HeimdallAuthOptions.Enabled"/>=false Passthrough
+    /// (Zero-Overhead). Registriert die Options zusätzlich als Singleton in DI
+    /// (falls noch nicht registriert), sodass der Login/Logout-Handler (in der
+    /// Blazor-Schicht) sie auslösen kann.
+    /// </summary>
+    /// <summary>
+    /// Hängt die Minimal-Auth-Middleware ein. Vor den <c>Map*</c>-Aufrufen
+    /// registrieren. Bei <see cref="HeimdallAuthOptions.Enabled"/>=false Passthrough
     /// (Zero-Overhead).
+    ///
+    /// <b>Hinweis:</b> Damit der Login/Logout-Handler (in der Blazor-Schicht)
+    /// die Options aus DI auslösen kann, vorher
+    /// <see cref="AddHeimdallAuth"/> auf der Service-Collection aufrufen:
+    /// <code>
+    /// builder.Services.AddHeimdallAuth(opts);
+    /// app.UseHeimdallAuth(opts);
+    /// </code>
     /// </summary>
     public static IApplicationBuilder UseHeimdallAuth(this IApplicationBuilder app, HeimdallAuthOptions auth)
     {
         if (app is null) throw new ArgumentNullException(nameof(app));
         if (auth is null) throw new ArgumentNullException(nameof(auth));
         return app.UseMiddleware<HeimdallAuthMiddleware>(auth);
+    }
+
+    /// <summary>
+    /// Registriert die <see cref="HeimdallAuthOptions"/> als Singleton in der DI,
+    /// sodass der Login/Logout-Handler (in der Blazor-Schicht) sie auslösen kann.
+    /// Alternativ zu UseHeimdallAuth — oder ergänzend, wenn die Options bereits
+    /// via UseHeimdallAuth übergeben wurden (dann redundant, aber idempotent).
+    /// </summary>
+    public static IServiceCollection AddHeimdallAuth(this IServiceCollection services, HeimdallAuthOptions auth)
+    {
+        if (services is null) throw new ArgumentNullException(nameof(services));
+        if (auth is null) throw new ArgumentNullException(nameof(auth));
+        services.AddSingleton(auth);
+        return services;
     }
 }

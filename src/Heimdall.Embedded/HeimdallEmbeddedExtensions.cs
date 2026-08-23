@@ -138,9 +138,14 @@ public static class HeimdallEmbeddedExtensions
         services.AddHeimdallDashboards(opts.DashboardsDir);
         if (opts.EnableAlerting) services.AddHeimdallAlerting(sink, opts.Alerting);
 
-        // Auth-Optionen syncen (Prefixe) + registrieren, damit MapHeimdall sie liest.
+        // Auth-Optionen syncen (Prefixe) + registrieren, damit MapHeimdall/Login-Handler sie liest.
         opts.Auth.OtlpHttpPrefix = opts.Prefix;
         opts.Auth.PrometheusPrefix = opts.Prefix;
+        // Login/Logout-Pfade unter dem Prefix (die Blazor-Routen sind /otel/login
+        // und /otel/logout, nicht /login). ProtectedPrefix=null (Embedded=global).
+        opts.Auth.LoginPath = opts.Prefix.TrimEnd('/') + "/login";
+        opts.Auth.LogoutPath = opts.Prefix.TrimEnd('/') + "/logout";
+        if (opts.Auth.Enabled) services.AddHeimdallAuth(opts.Auth);
         services.AddSingleton(opts);
 
         return new HeimdallRegistration(sink, sink, sink, writeSink, bufferDisposable, opts);

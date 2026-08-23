@@ -27,6 +27,9 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Heimdall.Tests" />
+    <!-- Heimdall.Blazor nutzt HeimdallSessionCookie (internal) für den
+         Login/Logout-Handler in HeimdallEndpointExtensions. -->
+    <InternalsVisibleTo Include="Heimdall.Blazor" />
   </ItemGroup>
 
 </Project>

@@ -71,11 +71,13 @@ public class HostAuthTests : HostBootTestBase
     }
 
     [Fact]
-    public async Task Ui_Ohne_BasicAuth_Liefert_401_Mit_Challenge()
+    public async Task Ui_Ohne_BasicAuth_Liefert_Redirect_Auf_Login()
     {
-        var resp = await Client.GetAsync("/otel");
-        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
-        Assert.Contains("Basic", resp.Headers.WwwAuthenticate.ToString());
+        // Login-Seite: UI ohne Creds redirectet auf /login (statt 401+Basic-Challenge).
+        // ClientNoRedirect, sonst folgt der Client dem 302 zur Login-Seite (200).
+        var resp = await ClientNoRedirect.GetAsync("/otel");
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
+        Assert.Contains("/login", resp.Headers.Location?.ToString() ?? "");
     }
 
     [Fact]
@@ -101,15 +103,15 @@ public class HostAuthTests : HostBootTestBase
     }
 
     [Fact]
-    public async Task Ui_Mit_Falschem_Username_Liefert_401()
+    public async Task Ui_Mit_Falschem_Username_Liefert_Redirect_Auf_Login()
     {
-        // Username konfiguriert, aber Request schickt einen anderen → 401.
+        // Username konfiguriert, aber Request schickt einen anderen → Redirect auf Login.
         SetEnv("Heimdall__Auth__Username", "admin");
         var basic = System.Convert.ToBase64String(Encoding.UTF8.GetBytes("wrong:" + Password));
         using var msg = new HttpRequestMessage(HttpMethod.Get, "/otel");
         msg.Headers.Authorization = new AuthenticationHeaderValue("Basic", basic);
-        var resp = await Client.SendAsync(msg);
-        Assert.Equal(HttpStatusCode.Unauthorized, resp.StatusCode);
+        var resp = await ClientNoRedirect.SendAsync(msg);
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
     }
 }
 #endif

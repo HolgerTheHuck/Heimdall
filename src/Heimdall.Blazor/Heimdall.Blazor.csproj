@@ -18,6 +18,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Heimdall.Abstractions\Heimdall.Abstractions.csproj" />
+    <ProjectReference Include="..\Heimdall.AspNetCore\Heimdall.AspNetCore.csproj" />
     <ProjectReference Include="..\Heimdall.Prometheus\Heimdall.Prometheus.csproj" />
   </ItemGroup>
 
