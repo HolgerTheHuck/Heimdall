@@ -163,8 +163,18 @@ internal static class OtlpConvert
     {
         try
         {
+            // ObservedTime-Fallback: OTel-Spec verlangt, dass Logs ohne TimeUnixNano
+            // auf ObservedTime fallen (manche SDKs setzen TimeUnixNano nicht bei
+            // LogRecord-Builder-Lücken). Ohne diesen Fallback landen sie bei ts=0
+            // und sind im Default-Zeitfenster unsichtbar.
+            long ts = ToLong(r.TimeUnixNano);
+            if (ts == 0)
+            {
+                ts = ToLong(r.ObservedTimeUnixNano);
+                if (ts == 0) ts = DateTimeOffset.UtcNow.ToUnixTimeSeconds() * 1_000_000_000L;
+            }
             return new HLogRecord(
-                ToLong(r.TimeUnixNano),
+                ts,
                 MapSeverity(r.SeverityNumber),
                 string.IsNullOrEmpty(r.SeverityText) ? null : r.SeverityText,
                 AnyToString(r.Body),
@@ -196,8 +206,21 @@ internal static class OtlpConvert
     // ---------------------------------------------------------------------
 
     public static IReadOnlyList<HMetricPoint> ToMetrics(OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceRequest req)
+        => ToMetrics(req, out _);
+
+    /// <summary>
+    /// Konvertiert wie <see cref="ToMetrics(OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceRequest)"/>,
+    /// zählt aber verworfene Metrik-Datenpunkte (ExponentialHistogram/Summary) für
+    /// OTLP <c>partial_success</c>-Reporting. <c>rejected</c> ist die Anzahl
+    /// verworfener Punkte (nicht Metrics — Prom/OTel partial_success zählt Datenpunkte
+    /// je Signal; Heimdall verwirft ganze Metrics, also 1:1 je Metric ein Punkt-Minimum).
+    /// </summary>
+    public static IReadOnlyList<HMetricPoint> ToMetrics(
+        OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceRequest req,
+        out int rejected)
     {
         var result = new List<HMetricPoint>();
+        rejected = 0;
         if (req is null) return result;
         foreach (var rm in req.ResourceMetrics)
         {
@@ -210,7 +233,16 @@ internal static class OtlpConvert
                 foreach (var m in sm.Metrics)
                 {
                     if (m is null) continue;
+                    int before = result.Count;
                     ConvertMetric(m, resource, scope, result);
+                    // Wenn ein Metric verworfen wurde (ExponentialHistogram/Summary),
+                    // mindestens ein Punkt rejected markieren (Heimdall-Granularität
+                    // = ganze Metric, nicht einzelne DPs — wir melden ≥1 je Metric,
+                    // damit Legacy-Clients via partial_success erfahren, dass etwas
+                    // fehlt; rejected_data_points >=1 signalisiert Nicht-200-OK im
+                    // Collector, auch wenn die exakte Zahl nicht verfügbar ist).
+                    if (result.Count == before && (m.ExponentialHistogram is not null || m.Summary is not null))
+                        rejected += 1;
                 }
             }
         }

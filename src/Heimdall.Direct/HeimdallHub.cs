@@ -21,6 +21,16 @@ public sealed class HeimdallHub : IHeimdallHub, IDisposable
     private readonly IHeimdallSink _sink;
     private readonly HResource? _resource;
     private readonly AsyncLocal<HeimdallSpan?> _currentSpan = new();
+    // Drop-Counter: stille Sink-Fehler waren vorher unsichtbar (leeres catch).
+    // Interlocked-tauglich für potenzielle Multi-Thread-Producer.
+    private long _droppedSpans, _droppedLogs, _droppedMetrics;
+
+    /// <summary>Anzahl verworfener Spans durch Sink-Fehler (Self-Observability).</summary>
+    public long DroppedSpans => Interlocked.Read(ref _droppedSpans);
+    /// <summary>Anzahl verworfener Logs durch Sink-Fehler (Self-Observability).</summary>
+    public long DroppedLogs => Interlocked.Read(ref _droppedLogs);
+    /// <summary>Anzahl verworfener Metriken durch Sink-Fehler (Self-Observability).</summary>
+    public long DroppedMetrics => Interlocked.Read(ref _droppedMetrics);
 
     public HeimdallHub(IHeimdallSink sink, HResource? resource = null)
     {
@@ -65,19 +75,19 @@ public sealed class HeimdallHub : IHeimdallHub, IDisposable
         set => _currentSpan.Value = value;
     }
 
-    internal void WriteSpan(HSpan span) => SafeWrite(s => s.WriteSpans(new[] { span }));
-    internal void WriteLog(HLogRecord log) => SafeWrite(s => s.WriteLogs(new[] { log }));
-    internal void WriteMetric(HMetricPoint m) => SafeWrite(s => s.WriteMetrics(new[] { m }));
+    internal void WriteSpan(HSpan span) => SafeWrite(s => s.WriteSpans(new[] { span }), ref _droppedSpans);
+    internal void WriteLog(HLogRecord log) => SafeWrite(s => s.WriteLogs(new[] { log }), ref _droppedLogs);
+    internal void WriteMetric(HMetricPoint m) => SafeWrite(s => s.WriteMetrics(new[] { m }), ref _droppedMetrics);
 
-    private void SafeWrite(Action<IHeimdallSink> write)
+    private void SafeWrite(Action<IHeimdallSink> write, ref long dropped)
     {
         if (HeimdallRecording.IsSuppressed) return;   // Rekursionsschutz
-        try { write(_sink); } catch { /* Sink-Fehler darf Producer nicht killen */ }
+        try { write(_sink); } catch { Interlocked.Increment(ref dropped); /* Sink-Fehler darf Producer nicht killen */ }
     }
 
     public void Dispose()
     {
         // Aktiver Span wird beim Verwerfen der Hub nicht automatisch beendet;
-        // der Aufrufer负责 Span.End/Dispose (F# `use`).
+        // der Aufrufer ist für Span.End/Dispose verantwortlich (F# `use`).
     }
 }
