@@ -9,7 +9,7 @@
 <main class="hmd-main">
     <h1>Traces</h1>
 
-    <form class="hmd-filters" method="get" action="@BasePath">
+    <form class="hmd-filters" method="get" action="@(BasePath + "/traces")">
         <label>Name enthält <input type="search" name="name" value="@NameContains" placeholder="checkout" /></label>
         <label>Service <input type="search" name="svc" value="@ServiceName" placeholder="shop" /></label>
         <label>Status

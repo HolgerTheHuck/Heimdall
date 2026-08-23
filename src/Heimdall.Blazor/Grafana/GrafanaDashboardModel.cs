@@ -141,7 +141,7 @@ public enum GrafanaPanelKind
 public static class GrafanaDashboardModel
 {
     /// <summary>Parst ein Dashboard-JSON; null bei kaputtem JSON oder leerem Modell.</summary>
-    public static GrafanaDashboard? Parse(string json)
+    public static GrafanaDashboard? Parse(string? json)
     {
         if (string.IsNullOrWhiteSpace(json)) return null;
         try
@@ -159,12 +159,15 @@ public static class GrafanaDashboardModel
         string uid = Str(root, "uid");
         string title = Str(root, "title");
         var panels = new List<GrafanaPanel>();
+        // Grafana speichert Panels entweder flach in "panels" oder verschachtelt in
+        // "rows"[].panels (Rows sind Layout-Section-Header mit kollabierten Panels).
+        // Typische Community-Dashboards nutzen "rows" → flach zu ladende Panels gehen
+        // sonst verloren. Rekursiver Extract vereinigt beide Pfade + verschachtelte
+        // Rows (Rows-in-Rows, obwohl unüblich, werden toleriert).
         if (root.TryGetProperty("panels", out var ps) && ps.ValueKind == JsonValueKind.Array)
-            foreach (var p in ps.EnumerateArray())
-            {
-                var panel = ParsePanel(p);
-                if (panel is not null) panels.Add(panel);
-            }
+            CollectPanels(ps, panels);
+        if (root.TryGetProperty("rows", out var rs) && rs.ValueKind == JsonValueKind.Array)
+            CollectPanelsFromRows(rs, panels);
 
         var templating = new List<GrafanaTemplatingVar>();
         if (root.TryGetProperty("templating", out var tpl) &&
@@ -209,6 +212,41 @@ public static class GrafanaDashboardModel
             && opts.TryGetProperty("graphMode", out var gm) && gm.ValueKind == JsonValueKind.String)
             graphMode = gm.GetString();
         return new GrafanaPanel(id, title, type, grid, targets, field, transforms, repeat, dsType, graphMode);
+    }
+
+    /// <summary>
+    /// Sammelt Panels aus einem flachen <c>"panels"</c>-Array. Panels vom Typ
+    /// <c>"row"</c> werden übersprungen (Row-Header sind Layout, keine Panels).
+    /// </summary>
+    private static void CollectPanels(JsonElement array, List<GrafanaPanel> sink)
+    {
+        foreach (var p in array.EnumerateArray())
+        {
+            var panel = ParsePanel(p);
+            if (panel is not null && panel.Kind != GrafanaPanelKind.Row) sink.Add(panel);
+        }
+    }
+
+    /// <summary>
+    /// Sammelt Panels aus einem <c>"rows"</c>-Array. Jede Row kann neben
+    /// eigenen Feldern (Titel, Layout) ein <c>"panels"</c>-Array enthalten
+    /// (typische Community-Dashboards: kollabierte Sektionen). Verschachtelte
+    /// Rows-in-Rows werden toleriert (rekursiver Abstieg, max. Tiefe als
+    /// Schutz gegen zyklische Quellen).
+    /// </summary>
+    private static void CollectPanelsFromRows(JsonElement rows, List<GrafanaPanel> sink, int depth = 0)
+    {
+        if (depth > 8) return;   // Zyklen-/Bombenschutz
+        foreach (var r in rows.EnumerateArray())
+        {
+            if (r.ValueKind != JsonValueKind.Object) continue;
+            // Row kann selbst ein panel-ähnliches Objekt sein (gridPos/title).
+            if (r.TryGetProperty("panels", out var ps) && ps.ValueKind == JsonValueKind.Array)
+                CollectPanels(ps, sink);
+            // Toleranz: Row-in-Row.
+            if (r.TryGetProperty("rows", out var nested) && nested.ValueKind == JsonValueKind.Array)
+                CollectPanelsFromRows(nested, sink, depth + 1);
+        }
     }
 
     /// <summary>

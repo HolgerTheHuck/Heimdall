@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
 
 namespace Heimdall.Prometheus;
@@ -17,11 +18,15 @@ namespace Heimdall.Prometheus;
 internal static class PromHttpHandlers
 {
     // === /api/v1/query =====================================================
-    public static IResult Query(PromEngine engine, HttpRequest req)
+    public static async Task<IResult> Query(PromEngine engine, HttpRequest req)
     {
-        var query = req.Query["query"].ToString();
+        // Prom-konform: query kann als Query-String ODER (POST) als Form-Body
+        // kommen. Grafana POST-Clients senden query/time als application/x-www-
+        // form-urlencoded — nur req.Query zu lesen ergibt 400 "query is required".
+        var form = await ReadFormSafe(req);
+        var query = PickParam(req, form, "query");
         if (string.IsNullOrWhiteSpace(query)) return ErrorResult("bad_data", "query is required", 400);
-        long timeMs = ParseTimeMs(req.Query["time"].ToString(), null) ?? NowMs();
+        long timeMs = ParseTimeMs(PickParam(req, form, "time"), null) ?? NowMs();
         try
         {
             var result = engine.EvalInstant(query, timeMs);
@@ -33,16 +38,22 @@ internal static class PromHttpHandlers
     }
 
     // === /api/v1/query_range ===============================================
-    public static IResult QueryRange(PromEngine engine, HttpRequest req)
+    public static async Task<IResult> QueryRange(PromEngine engine, HttpRequest req)
     {
-        var query = req.Query["query"].ToString();
+        var form = await ReadFormSafe(req);
+        var query = PickParam(req, form, "query");
         if (string.IsNullOrWhiteSpace(query)) return ErrorResult("bad_data", "query is required", 400);
-        long? start = ParseTimeMs(req.Query["start"].ToString(), null);
-        long? end = ParseTimeMs(req.Query["end"].ToString(), null);
-        long? stepMs = ParseDurationMs(req.Query["step"].ToString());
+        long? start = ParseTimeMs(PickParam(req, form, "start"), null);
+        long? end = ParseTimeMs(PickParam(req, form, "end"), null);
+        long? stepMs = ParseDurationMs(PickParam(req, form, "step"));
         if (!start.HasValue || !end.HasValue || !stepMs.HasValue)
             return ErrorResult("bad_data", "start, end and step are required", 400);
         if (stepMs.Value <= 0) return ErrorResult("bad_data", "step must be positive", 400);
+        // Punktelimit wie Prometheus (~11k) — schützt vor CPU-DoS durch winzige
+        // Steps über weite Fenster (z. B. step=1s über 30 d).
+        long steps = (end.Value - start.Value) / stepMs.Value;
+        if (steps > MaxRangePoints) return ErrorResult("bad_data",
+            $"exceeded maximum resolution of {MaxRangePoints} points per timeseries. Try decreasing the step size.", 400);
         try
         {
             var result = engine.EvalRange(query, start.Value, end.Value, stepMs.Value);
@@ -51,6 +62,35 @@ internal static class PromHttpHandlers
         catch (PromQLParseException ex) { return ErrorResult("bad_data", ex.Message, 400); }
         catch (PromQLExecException ex) { return ErrorResult("execution", ex.Message, 200); }
         catch (Exception ex) { return ErrorResult("internal", ex.Message, 500); }
+    }
+
+    /// <summary>Maximal erlaubte Punkte pro Range-Query (Prom-Default 11000).</summary>
+    private const long MaxRangePoints = 11_000;
+
+    /// <summary>
+    /// Liest den Form-Body, falls vorhanden (POST). GET oder nicht-form-Body
+    /// liefern null. Fehlerhafte/megabyte-große Bodies werden ignoriert — der
+    /// nachfolgende Query-String-Fallback ergibt dann ggf. 400 "query is required".
+    /// </summary>
+    private static async Task<IFormCollection?> ReadFormSafe(HttpRequest req)
+    {
+        if (!HttpMethods.IsPost(req.Method)) return null;
+        if (string.IsNullOrEmpty(req.ContentType)) return null;
+        if (!req.ContentType.Contains("application/x-www-form-urlencoded", StringComparison.OrdinalIgnoreCase))
+            return null;
+        try { return await req.ReadFormAsync().ConfigureAwait(false); }
+        catch { return null; }
+    }
+
+    /// <summary>
+    /// Holt einen Parameter: Query-String zuerst (GET-Konvention), dann
+    /// Form-Body (POST-Fallback). Beide leer → null.
+    /// </summary>
+    private static string? PickParam(HttpRequest req, IFormCollection? form, string key)
+    {
+        var q = req.Query[key].ToString();
+        if (!string.IsNullOrEmpty(q)) return q;
+        return form is not null && form.TryGetValue(key, out var v) ? v.ToString() : null;
     }
 
     // === /api/v1/labels ====================================================

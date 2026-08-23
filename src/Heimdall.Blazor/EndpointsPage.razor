@@ -102,7 +102,7 @@
                             <td>@HeimdallFmt.Dur((long)e.P95)</td>
                             <td>@HeimdallFmt.Dur((long)e.P99)</td>
                             <td>@ErrPct(e)</td>
-                            <td><a href="@(BasePath + "?nameContains=" + Uri.EscapeDataString(string.IsNullOrEmpty(e.Route) ? e.Action : e.Route))">trace →</a></td>
+                            <td><a href="@(BasePath + "/traces?name=" + Uri.EscapeDataString(string.IsNullOrEmpty(e.Route) ? e.Action : e.Route))">trace →</a></td>
                         </tr>
                     }
                     </tbody>
