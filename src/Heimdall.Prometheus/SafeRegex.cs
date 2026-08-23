@@ -13,6 +13,10 @@ namespace Heimdall.Prometheus;
 
 internal static class SafeRegex
 {
+    // Cache-Cap schützt vor Memory-DoS über viele einzigartige Nutzer-Patterns
+    // (z. B. label_replace mit nutzergesteuerten Templates). Bei Überschreitung
+    // wird der Cache geleert und neu aufgebaut (Simple-Startgegy).
+    private const int MaxCacheEntries = 256;
     private static readonly Dictionary<string, Regex> _cache = new(StringComparer.Ordinal);
 
     public static bool IsMatch(string input, string pattern)
@@ -35,6 +39,7 @@ internal static class SafeRegex
                 // ist gut genug. Anchoring: Prom matcht, wenn irgendwo ein Treffer
                 // existiert (ungespiegelt) — also keine expliziten Anker.
                 r = new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+                if (_cache.Count >= MaxCacheEntries) _cache.Clear();
                 _cache[pattern] = r;
             }
         }

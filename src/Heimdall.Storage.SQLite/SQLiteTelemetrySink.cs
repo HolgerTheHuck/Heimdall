@@ -34,6 +34,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     private readonly Timer? _retentionTimer;
     private readonly object _gate = new();
     private readonly Dictionary<string, Regex> _regexCache = new(StringComparer.Ordinal);
+    private const int MaxRegexCacheEntries = 256;
     private int _disposed;
 
     // Retention- & Eviction-Zähler (A4-Observability, siehe SQLiteTelemetrySink.MetricSource.cs).
@@ -46,20 +47,36 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     private long _hostIngestSpans, _hostIngestLogs, _hostIngestMetrics;
     private long _hostSweepDurationTicks;   // Ticks des letzten realen Sweeps (Gauge).
 
+    // Read-Connection-String mit Pooling=True: Reads nutzen gepoolte Verbindungen,
+    // die WAL-konkurrent neben dem Writer laufen (vorher: eine Verbindung + globaler
+    // _gate-Lock serialisierte alles — WAL wirkte nicht). Writes bleiben hinter
+    // _gate + _conn (Serialisierung der Schreiber, wie SQLite es verlangt).
+    // Pooling=True erlaubt Microsoft.Data.Sqlite, Verbindungen wiederzuverwenden
+    // (ohne pro Query Open/Close-Overhead). Mode=ReadOnly wäre ideal, ist aber
+    // nicht mit der REGEXP-Funktion kompatibel (Custom-Functions brauchen RW).
+    private readonly string _readConnString;
+
     public SQLiteTelemetrySink(SQLiteTelemetryOptions? options = null)
     {
         _options = options ?? new SQLiteTelemetryOptions();
         _options.Validate();
-        // Pooling=False: Dispose gibt den Datei-Handle frei (wichtig fuer Tests/Cleanup
-        // und fuer den eingebetteten Betrieb, in dem die Datei bei Bedarf verschoben
-        // werden koennen soll).
+        // Write-Verbindung: Pooling=False (Dispose gibt den Datei-Handle frei, wichtig
+        // fuer Tests/Cleanup und eingebetteten Betrieb, in dem die Datei verschoben
+        // werden soll).
         _conn = new SqliteConnection($"Data Source={_options.DataPath};Pooling=False");
         _conn.Open();
+        // Read-Verbindungen: Pooling=True, WAL-konkurrent neben dem Writer.
+        // Microsoft.Data.Sqlite unterstützt kein "Max Pool Size" — das Pool wächst
+        // nach Bedarf und wird über ClearPool/Dispose bereinigt.
+        _readConnString = $"Data Source={_options.DataPath};Pooling=True";
         // Eigene REGEXP-Funktion fuer index-gestuetzte Attribut-Regex-Suche
         // (=~ / !~); Konvention wie SafeRegex (CultureInvariant, 200 ms Timeout,
         // gecacht). SQLite ruft REGEXP(value, pattern) auf — `value REGEXP pat`.
         // SQLite ruft den REGEXP-Operator als REGEXP(pattern, value) auf, d. h. der
         // 1. Funktionsparameter ist das Regex-Pattern, der 2. der zu testende Wert.
+        // Registriert auf der Write-Verbindung; Read-Verbindungen registrieren sie
+        // beim ersten Öffnen via EnsureReadFunctions (Custom-Functions sind pro
+        // Verbindung, nicht pro DB).
         _conn.CreateFunction("REGEXP", (string? pattern, string? value) =>
         {
             if (value is null || string.IsNullOrEmpty(pattern)) return false;
@@ -67,6 +84,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             {
                 try { r = new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200)); }
                 catch { return false; }   // ungueltiges Pattern -> kein Treffer
+                if (_regexCache.Count >= MaxRegexCacheEntries) _regexCache.Clear();
                 _regexCache[pattern] = r;
             }
             return r.IsMatch(value);
@@ -217,13 +235,15 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         AddRange(sb, ps, filter);
         if (filter.ServiceName is not null)
         {
-            sb.Append(" AND trace_id IN (SELECT trace_id FROM heim_spans WHERE resource_json LIKE @svc)");
+            // ESCAPE '\' aktiviert das EscJson-Escaping (vorher wirkungslos, da
+            // SQLite ohne ESCAPE-Klausel Backslash als normales Zeichen behandelt).
+            sb.Append(" AND trace_id IN (SELECT trace_id FROM heim_spans WHERE resource_json LIKE @svc ESCAPE '\\')");
             ps.Add(Param("@svc", "%" + EscJson(filter.ServiceName) + "%"));
         }
         if (filter.NameContains is not null)
         {
             sb.Append(" AND trace_id IN (SELECT s2.trace_id FROM heim_spans s2 WHERE s2.rowid IN (SELECT rowid FROM heim_spans_fts WHERE heim_spans_fts MATCH @nm))");
-            ps.Add(Param("@nm", filter.NameContains));
+            ps.Add(Param("@nm", SanitizeFts5(filter.NameContains)));
         }
         sb.Append(" GROUP BY trace_id");
         if (filter.HasError is not null)
@@ -233,7 +253,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         ps.Add(Param("@off", filter.Offset));
 
         var list = new List<TraceSummary>();
-        lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
+        using (var rc = OpenReadConnection())
+        using (var cmd = BuildRead(rc, sb.ToString(), ps))
+        using (var r = cmd.ExecuteReader())
         {
             while (r.Read())
             {
@@ -253,9 +275,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             "duration_ns, status_code, status_msg, attrs_json, events_json, resource_json, scope_name " +
             "FROM heim_spans WHERE trace_id=@t ORDER BY start_unix_nano";
         var list = new List<SpanRow>();
-        lock (_gate)
+        using (var rc = OpenReadConnection())
         {
-            using var cmd = new SqliteCommand(sql, _conn);
+            using var cmd = new SqliteCommand(sql, rc);
             cmd.Parameters.AddWithValue("@t", traceId);
             using var r = cmd.ExecuteReader();
             while (r.Read()) list.Add(ReadSpan(r));
@@ -280,7 +302,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         ps.Add(Param("@off", filter.Offset < 0 ? 0 : filter.Offset));
 
         var list = new List<SpanRow>();
-        lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
+        using (var rc = OpenReadConnection())
+        using (var cmd = BuildRead(rc, sb.ToString(), ps))
+        using (var r = cmd.ExecuteReader())
         {
             while (r.Read()) list.Add(ReadSpan(r));
         }
@@ -296,7 +320,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         if (!string.IsNullOrWhiteSpace(search.Text))
         {
             sb.Append(" AND rowid IN (SELECT rowid FROM heim_logs_fts WHERE heim_logs_fts MATCH @q)");
-            ps.Add(Param("@q", search.Text));
+            ps.Add(Param("@q", SanitizeFts5(search.Text)));
         }
         if (search.MinSeverity is not null) { sb.Append(" AND severity >= @sev"); ps.Add(Param("@sev", search.MinSeverity.Value)); }
         if (search.FromUnixNano is not null) { sb.Append(" AND ts_unix_nano >= @from"); ps.Add(Param("@from", search.FromUnixNano.Value)); }
@@ -345,7 +369,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         ps.Add(Param("@off", search.Offset));
 
         var list = new List<LogRow>();
-        lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
+        using (var rc = OpenReadConnection())
+        using (var cmd = BuildRead(rc, sb.ToString(), ps))
+        using (var r = cmd.ExecuteReader())
         {
             while (r.Read()) list.Add(ReadLog(r));
         }
@@ -369,7 +395,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         ps.Add(Param("@lim", limit));
 
         var list = new List<MetricRow>();
-        lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
+        using (var rc = OpenReadConnection())
+        using (var cmd = BuildRead(rc, sb.ToString(), ps))
+        using (var r = cmd.ExecuteReader())
         {
             while (r.Read())
             {
@@ -390,8 +418,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
 
     private long Count(string table)
     {
-        lock (_gate) using (var cmd = new SqliteCommand($"SELECT COUNT(*) FROM {table}", _conn))
-            return (long)cmd.ExecuteScalar()!;
+        using var rc = OpenReadConnection();
+        using var cmd = new SqliteCommand($"SELECT COUNT(*) FROM {table}", rc);
+        return (long)cmd.ExecuteScalar()!;
     }
 
     // -----------------------------------------------------------------------
@@ -426,10 +455,69 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         return cmd;
     }
 
+    /// <summary>
+    /// Öffnet eine gepoolte Read-Verbindung (WAL-konkurrent neben dem Writer)
+    /// und registriert die REGEXP-Funktion (Custom-Functions sind pro Verbindung).
+    /// Der Aufrufer nutzt die Verbindung in <paramref name="action"/> und disposet
+    /// sie implizit (using). Entkoppelt Reads vom globalen _gate-Lock — Dashboard-
+    /// Queries blocken den Ingest nicht mehr und umgekehrt.
+    /// </summary>
+    private SqliteConnection OpenReadConnection()
+    {
+        var c = new SqliteConnection(_readConnString);
+        c.Open();
+        // REGEXP pro Verbindung registrieren (gleiche Logik wie Write-Verbindung).
+        c.CreateFunction("REGEXP", (string? pattern, string? value) =>
+        {
+            if (value is null || string.IsNullOrEmpty(pattern)) return false;
+            if (!_regexCache.TryGetValue(pattern, out var r))
+            {
+                try { r = new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200)); }
+                catch { return false; }
+                if (_regexCache.Count >= MaxRegexCacheEntries) _regexCache.Clear();
+                _regexCache[pattern] = r;
+            }
+            return r.IsMatch(value);
+        });
+        return c;
+    }
+
+    /// <summary>Build für Read-Verbindungen (eigene Conn, nicht _conn).</summary>
+    private SqliteCommand BuildRead(SqliteConnection conn, string sql, List<SqliteParameter> ps)
+    {
+        var cmd = new SqliteCommand(sql, conn);
+        foreach (var p in ps) cmd.Parameters.Add(p);
+        return cmd;
+    }
+
     private static SqliteParameter Param(string name, object value) => new SqliteParameter(name, value);
 
     // Escapen fuer LIKE-basierte JSON-Suche (Backslash/Percent/Underscore; JSON-Quotes bleiben unveraendert).
     private static string EscJson(string s) => s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
+
+    /// <summary>
+    /// Sanitisiert FTS5-MATCH-User-Input. FTS5 wirft bei unbalancierten
+    /// doppelten Quotes, ungeschlossenen Phrasen oder ungültigen Token-Syntax
+    /// einen Syntax-Fehler → 500. Sanitizing-Strategie: Doppelquotes escapen
+    /// (`"` → `""`), Phrasen-Breaker (`*`, `:`) entfernen, Rest als Phrase
+    /// wickeln (`"input"`) — das ergibt FTS5-Phrase-Query statt Token-Query,
+    /// robuster gegen Sonderzeichen. Leer/whitespace → `" "` (no-op-match).
+    /// </summary>
+    private static string SanitizeFts5(string? input)
+    {
+        if (string.IsNullOrWhiteSpace(input)) return "\"\"";
+        // Doppelquotes escapen + Steuerzeichen entfernen (FTS5-Operator-Syntax
+        // wie AND/OR/NOT/NEAR/*/:). Phrasen-Wrap schützt vor unbalancierten
+        // Token-Syntax-Fehlern; inner ist bereits escaped.
+        string s = input!;
+        s = s.Replace("\"", "\"\"");
+        // Steuerzeichen entfernen, die FTS5 als Operator/Syntax interpretiert.
+        foreach (char c in new[] { '*', ':', '(', ')', '^' }) s = s.Replace(c.ToString(), " ");
+        // Kollabieren angrenzender Leerstellen (beim Replace von '*' etc. entstanden).
+        s = System.Text.RegularExpressions.Regex.Replace(s, @"\s+", " ").Trim();
+        if (string.IsNullOrEmpty(s)) return "\"\"";
+        return "\"" + s + "\"";
+    }
 
     private static SpanRow ReadSpan(SqliteDataReader r) => new SpanRow(
         r.GetString(0), r.GetString(1), NStr(r, 2) ?? string.Empty, r.GetString(3), r.GetInt32(4),
@@ -456,7 +544,16 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_spans_trace ON heim_spans(trace_id)");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_spans_start ON heim_spans(start_unix_nano)");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_logs_ts ON heim_logs(ts_unix_nano)");
+        // TraceId-Filter auf Logs (Join über Trace-Detail) — vorher Full Scan auf
+        // der größten Tabelle. Kostenfrei via IF NOT EXISTS (alte DBs migrieren).
+        Exec("CREATE INDEX IF NOT EXISTS idx_heim_logs_trace ON heim_logs(trace_id)");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_metrics_name_ts ON heim_metrics(name, ts_unix_nano)");
+        // Unique auf (trace_id, span_id): Retries/Re-Exports erzeugen sonst
+        // Duplikatzeilen. Tolerante Migration: vorhandene Duplikate dedup vor
+        // Index-Anlage (älteste rowid behalten, jüngere verwerfen — Retry-Semantik:
+        // der erste Write gewinnt, spätere Re-Exports sind Replays).
+        DeduplicateSpans();
+        Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_heim_spans_trace_span_unique ON heim_spans(trace_id, span_id)");
         // Rollup-Tabelle + Index (Workstream F) — additive, kein user_version-Bump.
         Exec(SqlCreateMetricsRollup);
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_metrics_rollup_name_ts ON heim_metrics_rollup(name, bucket_start)");
@@ -506,6 +603,30 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
              "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.attrs_json) e " +
              "UNION ALL " +
              "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.resource_json) e; END");
+    }
+
+    /// <summary>
+    /// Entfernt vorhandene Duplikat-Zeilen in heim_spans vor Anlage des
+    /// UNIQUE-Index auf (trace_id, span_id). Retry-Re-Exports können sonst
+    /// den UNIQUE-Index-Anlage-Schritt fehlschlagen lassen. Behält die älteste
+    /// rowid je (trace_id, span_id), verwirft jüngere (Replay-Semantik:
+    /// der erste Write gewinnt, spätere Re-Exports sind idempotent).
+    /// Auf einer frischen DB ist das ein Noop (keine Duplikate).
+    /// </summary>
+    private void DeduplicateSpans()
+    {
+        try
+        {
+            Exec("DELETE FROM heim_spans WHERE rowid NOT IN (SELECT MIN(rowid) FROM heim_spans GROUP BY trace_id, span_id)");
+        }
+        catch
+        {
+            // Tolerant: wenn Dedup fehlschlägt (z. B. leere Tabelle/Edge-Case),
+            // wird der UNIQUE-Index angelegt und schlägt erst beim Insert fehl —
+            // dann fangen wir den Insert-Fehler im Write-Pfad ab (OR REPLACE unten).
+            // Schlimmstenfalls bleiben Duplikate aus Alt-Beständen, aber die DB
+            // bleibt benutzbar (kein Bootstrap-Fehler).
+        }
     }
 
     private void Exec(string sql)
@@ -771,7 +892,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         "attrs_json TEXT, resource_json TEXT, scope_name TEXT, scope_version TEXT)";
 
     private const string SqlInsertSpan =
-        "INSERT INTO heim_spans (trace_id, span_id, parent_id, name, kind, " +
+        "INSERT OR IGNORE INTO heim_spans (trace_id, span_id, parent_id, name, kind, " +
         "start_unix_nano, end_unix_nano, duration_ns, status_code, status_msg, " +
         "attrs_json, events_json, links_json, resource_json, scope_name, scope_version) " +
         "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15)";

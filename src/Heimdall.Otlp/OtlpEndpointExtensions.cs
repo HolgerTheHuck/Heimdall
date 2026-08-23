@@ -34,10 +34,28 @@ public static class OtlpEndpointExtensions
     public static IEndpointConventionBuilder MapHeimdallOtlp(this IEndpointRouteBuilder endpoints, string prefix = "/otel")
     {
         var group = endpoints.MapGroup(prefix);
+        // Request-Size-Limit: schützt vor Memory-DoS über große Bodies (Kestrel-
+        // Default 30 MB × Admission-Cap 32 ≈ GB-Peak). 10 MB pro Request deckt
+        // typische OTLP-Batches; größere Exporter müssen chunken. Implementiert
+        // via IRequestSizeLimitMetadata (direkt auf dem Endpoint, ohne MVC-Abhängigkeit —
+        // Kestrel erkennt das Interface und setzt den Body-Limit).
+        group.WithMetadata(new OtlpRequestSizeLimit(10 * 1024 * 1024));
         group.MapPost("/v1/traces", (HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter) => TraceHandler(ctx, sink, limiter));
         group.MapPost("/v1/metrics", (HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter) => MetricsHandler(ctx, sink, limiter));
         group.MapPost("/v1/logs", (HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter) => LogsHandler(ctx, sink, limiter));
         return group;
+    }
+
+    /// <summary>
+    /// Setzt das maximale Request-Body-Limit via <c>IRequestSizeLimitMetadata</c>
+    /// (Kestrel/Minimal-API erkennen das Interface und limitieren entsprechend —
+    /// ohne <c>Microsoft.AspNetCore.Mvc</c>-Abhängigkeit).
+    /// </summary>
+    private sealed class OtlpRequestSizeLimit : Attribute, Microsoft.AspNetCore.Http.Metadata.IRequestSizeLimitMetadata
+    {
+        private readonly long _maxBytes;
+        public OtlpRequestSizeLimit(long maxBytes) { _maxBytes = maxBytes; }
+        public long? MaxRequestBodySize => _maxBytes;
     }
 
     private static async Task<IResult> TraceHandler(HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter)
@@ -86,11 +104,26 @@ public static class OtlpEndpointExtensions
             if (req is null) return Results.BadRequest();
             try
             {
-                var metrics = OtlpConvert.ToMetrics(req);
+                var metrics = OtlpConvert.ToMetrics(req, out var rejected);
                 if (metrics.Count > 0) sink.WriteMetrics(metrics);
+                var resp = new OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceResponse();
+                if (rejected > 0)
+                {
+                    // partial_success statt 200 OK mit still verworfenen Daten —
+                    // OTLP-Spec verlangt, dass der Server rejected_data_points >= 1
+                    // meldet. ExponentialHistogram/Summary werden nicht unterstützt
+                    // (DESIGN §2); Legacy-Clients verlieren sonst alle Metriken ohne
+                    // Signal. Granularität: Heimdall verwirft ganze Metrics, wir melden
+                    // ≥ 1 je Metric (exakte DP-Zahl nicht verfügbar).
+                    resp.PartialSuccess = new OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsPartialSuccess
+                    {
+                        RejectedDataPoints = Math.Max(1, rejected),
+                        ErrorMessage = "ExponentialHistogram and Summary metrics are not supported; only Counter/Sum/Gauge/Histogram are stored.",
+                    };
+                }
+                return Respond(ctx, resp);
             }
             catch { return Results.BadRequest(); }
-            return Respond(ctx, new OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceResponse());
         }
         finally { lease?.Dispose(); }
     }

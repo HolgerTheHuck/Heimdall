@@ -138,6 +138,7 @@ public static class HeimdallEndpointExtensions
 
         group.MapPost("/dashboards/import", async (HttpContext ctx, IGrafanaDashboardStore store) =>
         {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
             var form = await ctx.Request.ReadFormAsync();
             string? content = null;
             var file = form.Files.Count > 0 ? form.Files[0] : null;
@@ -164,8 +165,9 @@ public static class HeimdallEndpointExtensions
             });
         });
 
-        group.MapPost("/dashboards/{uid}/delete", (string uid, IGrafanaDashboardStore store) =>
+        group.MapPost("/dashboards/{uid}/delete", (HttpContext ctx, string uid, IGrafanaDashboardStore store) =>
         {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
             store.Delete(uid);
             return Results.Redirect($"{prefix}/dashboards");
         });
@@ -195,6 +197,7 @@ public static class HeimdallEndpointExtensions
 
         group.MapPost("/alerts/save", async (HttpContext ctx, IAlertRuleStore store) =>
         {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
             var form = await ctx.Request.ReadFormAsync();
             var id = form["id"].ToString();
             var name = form["name"].ToString();
@@ -202,7 +205,7 @@ public static class HeimdallEndpointExtensions
                 return Results.Redirect($"{prefix}/alerts/new?err=Regelname+fehlt");
             if (!Enum.TryParse<AlertSignal>(form["signal"].ToString(), true, out var signal))
                 signal = AlertSignal.Metric;
-            var channels = form["channels"].ToArray().Select(v => v.ToString()).Where(s => !string.IsNullOrEmpty(s)).ToList();
+            var channels = form["channels"].Select(v => v?.ToString() ?? string.Empty).Where(s => !string.IsNullOrEmpty(s)).ToList<string>();
             var rule = new AlertRule(
                 Id: id,
                 Name: name,
@@ -232,8 +235,9 @@ public static class HeimdallEndpointExtensions
             }
         });
 
-        group.MapPost("/alerts/{id}/delete", (string id, IAlertRuleStore store, IAlertStateStore stateStore) =>
+        group.MapPost("/alerts/{id}/delete", (HttpContext ctx, string id, IAlertRuleStore store, IAlertStateStore stateStore) =>
         {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
             store.Delete(id);
             stateStore.Remove(id);
             return Results.Redirect($"{prefix}/alerts");
@@ -274,5 +278,32 @@ public static class HeimdallEndpointExtensions
         if (s == "1" || string.Equals(s, "true", StringComparison.OrdinalIgnoreCase)) return true;
         if (s == "0" || string.Equals(s, "false", StringComparison.OrdinalIgnoreCase)) return false;
         return null;
+    }
+
+    /// <summary>
+    /// CSRF-Schutz für die zustandsändernden POST-Endpoints (Dashboard-Import/Delete,
+    /// Alert-Save/Delete). Bei Basic-Auth werden Credentials cross-site automatisch
+    /// mitgesendet — der Angreifer kann die Response zwar nicht lesen (SOP), aber
+    /// zustandsändernde POSTs wären ohne diesen Check möglich. Origin/Referer-Check
+    /// ist der OWASP-empfohlene, JavaScript-freie Schutz für nicht-Cookie-Auth-UIs:
+    /// ein Cross-Site-Form-POST setzt einen anderen Origin-Header (oder keinen),
+    /// den der Browser nicht fälschen kann. Same-Site-Requests (leerer Origin bei
+    /// GET-Form-Navigation, gleicher Host bei POST) werden akzeptiert.
+    /// </summary>
+    private static bool CheckSameOrigin(HttpContext ctx, string prefix)
+    {
+        var origin = ctx.Request.Headers["Origin"].ToString();
+        if (string.IsNullOrEmpty(origin))
+        {
+            // Manche Browser unterdrücken Origin bei same-origin POST; dann Referer.
+            var referer = ctx.Request.Headers["Referer"].ToString();
+            if (string.IsNullOrEmpty(referer)) return true;   // kein Header → SameSite
+            if (!Uri.TryCreate(referer, UriKind.Absolute, out var refUri)) return true;
+            return StringComparer.OrdinalIgnoreCase.Equals(refUri.Host, ctx.Request.Host.Host) &&
+                   refUri.Port == ctx.Request.Host.Port;
+        }
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
+        return StringComparer.OrdinalIgnoreCase.Equals(uri.Host, ctx.Request.Host.Host) &&
+               uri.Port == ctx.Request.Host.Port;
     }
 }

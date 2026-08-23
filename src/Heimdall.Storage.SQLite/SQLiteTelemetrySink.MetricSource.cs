@@ -39,7 +39,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         sb.Append(" ORDER BY name");
 
         var names = new List<string>();
-        lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
+        using (var rc = OpenReadConnection())
+        using (var cmd = BuildRead(rc, sb.ToString(), ps))
+        using (var r = cmd.ExecuteReader())
             while (r.Read()) names.Add(r.GetString(0));
         // heimdall.*-Observability-Metriken (A4/C3) — „now"-Metriken, immer gelistet
         // (unabhaengig vom Zeitfenster, da sie den Live-Zustand beschreiben).
@@ -146,7 +148,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         ps.Add(Param("@lim", Math.Max(1, query.Limit)));
 
         var list = new List<HMetricPointView>();
-        lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
+        using (var rc = OpenReadConnection())
+        using (var cmd = BuildRead(rc, sb.ToString(), ps))
+        using (var r = cmd.ExecuteReader())
         {
             while (r.Read())
             {
@@ -181,7 +185,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         ps.Add(Param("@cap", SourceScanCap));
 
         var rows = new List<(string?, string?)>();
-        lock (_gate) using (var cmd = Build(sb.ToString(), ps)) using (var r = cmd.ExecuteReader())
+        using (var rc = OpenReadConnection())
+        using (var cmd = BuildRead(rc, sb.ToString(), ps))
+        using (var r = cmd.ExecuteReader())
             while (r.Read()) rows.Add((NStr(r, 0), NStr(r, 1)));
         return rows;
     }
@@ -298,6 +304,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
 
     private static class RegexCache
     {
+        private const int MaxEntries = 256;
         private static readonly Dictionary<string, Regex> _cache = new(StringComparer.Ordinal);
         public static bool IsMatch(string input, string pattern)
         {
@@ -307,6 +314,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
                 if (!_cache.TryGetValue(pattern, out r!))
                 {
                     r = new Regex(pattern, RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(200));
+                    if (_cache.Count >= MaxEntries) _cache.Clear();
                     _cache[pattern] = r;
                 }
             }
