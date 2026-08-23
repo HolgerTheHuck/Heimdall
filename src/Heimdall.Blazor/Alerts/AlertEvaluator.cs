@@ -41,6 +41,13 @@ internal sealed class AlertEvaluator : IHostedService, IDisposable
     private readonly HeimdallAlertingOptions _opts;
     private readonly Timer _timer;
     private int _busy;
+    // Backpressure-Limit für fire-and-forget-Notify: verhindert, dass bei
+    // vielen feuernden Regeln mit langsamen Channels (SMTP/Webhook) beliebig
+    // viele Requests im Flight sind (Resourcen-Exhaustion, SMTP-Verbindungs-
+    // Limits). SemaphoreSlim mit konfigurierbarem Cap; bei Overflow wird
+    // der Channel im aktuellen Tick übersprungen + geloggt (nicht blockiert,
+    // da der Eval-Loop sonst auf Channel-Latenz hängen würde).
+    private readonly SemaphoreSlim _notifyGate = new(Math.Max(1, 16), Math.Max(1, 16));
 
     public AlertEvaluator(
         IHeimdallQuery query,
@@ -76,16 +83,28 @@ internal sealed class AlertEvaluator : IHostedService, IDisposable
         return Task.CompletedTask;
     }
 
-    public Task StopAsync(CancellationToken cancellationToken)
+    public async Task StopAsync(CancellationToken cancellationToken)
     {
         _timer.Change(Timeout.Infinite, Timeout.Infinite);
+        // Lauenden Tick abwarten (Reentrancy-Guard im EvalTick setzt _busy zurück).
+        // Verhindert, dass ein Tick im Flight nach Host-Shutdown noch Channel-
+        // Notifications feuert (z. B. SMTP-Timeout nach Dispose). Mit Timeout,
+        // damit ein hängender Tick nicht den Shutdown blockt.
+        using var stopCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        stopCts.CancelAfter(TimeSpan.FromSeconds(5));
+        try
+        {
+            while (Interlocked.CompareExchange(ref _busy, 0, 0) != 0)
+                await Task.Delay(50, stopCts.Token).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) { /* Shutdown-Timeout: Tick hart abbrechen */ }
         _logger.LogInformation("AlertEvaluator gestoppt.");
-        return Task.CompletedTask;
     }
 
     public void Dispose()
     {
         _timer.Dispose();
+        _notifyGate.Dispose();
     }
 
     // === Tick-Schleife ======================================================
@@ -120,11 +139,27 @@ internal sealed class AlertEvaluator : IHostedService, IDisposable
     internal async Task ProcessRule(AlertRule rule, long nowMs, long nowNano)
     {
         var current = _stateStore.Get(rule.Id);
+        // Per-Regel-Takt: EvalIntervalSeconds>0 überspringt Tick, bis das
+        // pro-Regel-Intervall seit LastEval verstrichen ist (0 = globaler Takt,
+        // immer evaluieren — Abwärtskompatibilität).
+        if (rule.EvalIntervalSeconds > 0 && current is { LastEvalUnixMs: var last } && (nowMs - last) < rule.EvalIntervalSeconds * 1000L)
+            return;
         if (!rule.Enabled)
         {
             // Deaktivierte Regel → Zustand Ok (aufraeumen falls vorher aktiv).
-            if (current is { State: not AlertState.Ok })
+            // Wenn die Regel vorher Firing war, notifyResolve, damit Empfänger
+            // nicht im Alarm hängen bleiben (vorher wurde Resolved bei Disable
+            // verschluckt — Alarm-Receiver hatten kein Entwarnungs-Event).
+            if (current is { State: AlertState.Firing } firingCurrent)
+            {
+                var resolved = current! with { State = AlertState.Resolved, SinceUnixMs = nowMs, LastEvalUnixMs = nowMs };
+                _stateStore.Put(resolved);
+                await NotifyAsync(rule, resolved, AlertState.Resolved, firingCurrent.LastValue ?? 0, "Regel deaktiviert", nowMs).ConfigureAwait(false);
+            }
+            else if (current is { State: not AlertState.Ok })
+            {
                 _stateStore.Put(current with { State = AlertState.Ok, SinceUnixMs = nowMs, LastEvalUnixMs = nowMs });
+            }
             return;
         }
 
@@ -173,8 +208,22 @@ internal sealed class AlertEvaluator : IHostedService, IDisposable
             var result = _engine.EvalInstant(rule.Promql, nowMs);
             if (result.Kind == PromResultKind.Vector && result.Vector is { Samples: { Count: > 0 } samples })
             {
-                var first = samples[0].Value;
-                return (true, first, $"{samples.Count} Treffer-Serie(n)");
+                // Vorher wurde nur samples[0] ausgewertet — bei Multi-Serie-PromQL
+                // (z. B. `rate(...)[5m] by (job)`) entschied die Reihenfolge, nicht
+                // die Semantik. Jetzt feuert, wenn IRGENDEINE Serie einen Wert
+                // ungleich 0+NaN hat (PromQL-Vergleiche feuern per Serie mit 1/0);
+                // als Value nehmen wir das Maximum (konservativ: der alarmierende
+                // Peak ist diagnostisch relevanter als der erste Zufallstreffer).
+                double max = double.NaN;
+                int firing = 0;
+                foreach (var s in samples)
+                {
+                    var v = s.Value;
+                    if (!double.IsNaN(v) && v != 0) { firing++; if (double.IsNaN(max) || v > max) max = v; }
+                }
+                if (firing > 0)
+                    return (true, double.IsNaN(max) ? samples[0].Value : max, $"{firing}/{samples.Count} Treffer-Serie(n)");
+                return (false, 0, $"{samples.Count} Serie(n), keine feuert");
             }
             if (result.Kind == PromResultKind.Scalar && result.Scalar is { } sc && !double.IsNaN(sc.Value) && sc.Value != 0)
                 return (true, sc.Value, "Skalar-Treffer");
@@ -285,10 +334,20 @@ internal sealed class AlertEvaluator : IHostedService, IDisposable
                 _logger.LogWarning("Kanal {Channel} fuer Regel {Rule} nicht gefunden — uebersprungen.", name, rule.Name);
                 continue;
             }
-            // Fire-and-forget: SMTP/Webhook-Latenz haelt den Eval-Loop nicht auf.
+            // Backpressure: begrenzt gleichzeitige in-flight Notify-Tasks über
+            // _notifyGate. Bei vollem Gate (z. B. viele feuernde Regeln + langsamer
+            // SMTP) wird der Channel im aktuellen Tick übersprungen + geloggt,
+            // statt den Eval-Loop zu blocken oder beliebig viele Requests zu
+            // stapeln. Der nächste Tick retry automatisch (Zustandsautomat).
+            if (!_notifyGate.Wait(0))
+            {
+                _logger.LogWarning("Notify-Gate voll — Kanal {Channel} fuer {Rule} uebersprungen (Backpressure).", name, rule.Name);
+                continue;
+            }
             _ = channel.SendAsync(notification, CancellationToken.None)
                 .ContinueWith(t =>
                 {
+                    _notifyGate.Release();
                     if (t.IsFaulted) _logger.LogError(t.Exception, "Kanal {Channel} fuer {Rule} fehlgeschlagen.", name, rule.Name);
                 }, TaskScheduler.Default);
         }
