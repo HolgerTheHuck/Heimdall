@@ -114,7 +114,7 @@ app.UseStaticFiles();   // liefert /_content/Heimdall.Blazor/{css,js}
 // Kubernetes-Probe). Liefert 200 + Build-Version, sobald der Host hochgefahren
 // ist (Bereit-Signal für Compose/K8s; kein tieferes DB-Ping in 1.0, um die
 // Boot-Reihenfolge nicht zu verkomplizieren — kommt als Additions in 1.x).
-app.MapGet("/healthz", () => Results.Ok(new { status = "ok", version = "1.0.2" }));
+app.MapGet("/healthz", () => Results.Ok(new { status = "ok", version = "1.1.0" }));
 if (opts.Dashboard.Enabled) app.MapHeimdallDashboard(opts.Dashboard.Prefix);
 if (opts.Otlp.Http.Enabled) app.MapHeimdallOtlp(opts.Otlp.Http.Prefix);
 if (opts.Prometheus.Enabled) app.MapHeimdallPrometheus(opts.Prometheus.Prefix);

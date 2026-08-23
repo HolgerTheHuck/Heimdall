@@ -7,7 +7,126 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
-_(keine Änderungen seit 1.0.2)_
+_(keine Änderungen seit 1.1.0)_
+
+## [1.1.0] — 2026-08-23
+
+Audit-Release: alle 🔴/🟠/🟡-Befunde aus `AUDIT.md` (Komplett-Audit Stand
+2026-08-23). Funktions-Bugs, Security-Baseline, stille Datenverluste,
+AlertEvaluator-Härtung, DX-Fassade, Betrieb/UX, Doku/Paketierung. Build sauber,
+alle Tests grün (321/321/389 auf net8/9/10).
+
+### Hinzugefügt
+- **`Heimdall.Embedded`-Paket (DX-Fassade):** `AddHeimdall(o => …)` registriert
+  alle Schichten (Storage + OTLP + Prometheus + Blazor + Alerting + Ingest) in
+  einem Aufruf; `MapHeimdall("/otel")` mappt alle Endpunkte; `UseHeimdall()`
+  kapselt Auth-Middleware + StaticFiles + Endpoints in korrekter Reihenfolge.
+  Entspricht dem `DESIGN.md`-Versprechen (ein Aufruf statt 3–4 über zwei Pakete).
+  `HeimdallRegistration` gibt Sink/Query/MetricSource für direkte Nutzung zurück.
+- **Health-Endpoint `/healthz`:** immer anonymous (vor Auth), liefert 200 +
+  Build-Version. Compose-Healthcheck + Non-root-User + Ressourcen-Limits
+  (mem 512m, cpus 1.0, user 1000:1000).
+- **SQLite-Read-Entkopplung:** Read-Pfade nutzen jetzt gepoolte Verbindungen
+  (`Pooling=True`) statt des globalen `_gate`-Locks — WAL wirkt jetzt tatsächlich:
+  Dashboard-Queries blocken den Ingest nicht mehr und umgekehrt. Write-Pfade
+  bleiben hinter `_gate` (Serialisierung der Schreiber).
+- **OTLP `partial_success`-Reporting:** ExponentialHistogram/Summary werden
+  verworfen, aber via `ExportMetricsPartialSuccess` gemeldet (vorher: stille
+  200 OK, Legacy-Clients verloren alle Metriken ohne Signal).
+- **`HeimdallHub`-Drop-Counter:** `DroppedSpans`/`DroppedLogs`/`DroppedMetrics`
+  für stille Sink-Fehler (vorher: leeres catch, unsichtbar).
+- **AlertEvaluator-Backpressure:** SemaphoreSlim (16) für fire-and-forget-Notify
+  — begrenzt gleichzeitige in-flight Channel-Requests (SMTP/Webhook), verhindert
+  Resourcen-Exhaustion bei vielen feuernden Regeln. Bei vollem Gate wird der
+  Channel im Tick übersprungen + geloggt (nicht blockiert).
+- **`query_range`-Punktelimit (11k):** wie Prometheus — schützt vor CPU-DoS durch
+  winzige Steps über weite Fenster (z. B. step=1s über 30 d).
+- **CSRF-Schutz (`CheckSameOrigin`):** Origin/Referer-Check auf den 4
+  zustandsändernden POST-Endpoints (Dashboard-Import/Delete, Alert-Save/Delete).
+  OWASP-konformer, JavaScript-freier Schutz für Basic-Auth-UIs.
+- **OTLP/HTTP Request-Size-Limit (10 MB):** via `IRequestSizeLimitMetadata` —
+  schützt vor Memory-DoS (vorher: Kestrel-Default 30 MB × Admission-Cap 32 ≈ GB-Peak).
+- **Regex-Cache-Cap (256):** in `SafeRegex`, `SQLiteTelemetrySink`,
+  `SQLiteTelemetrySink.MetricSource` — schützt vor Memory-DoS über viele
+  einzigartige Nutzer-Patterns.
+- **FTS5-Input-Sanitisierung (`SanitizeFts5`):** Sonderzeichen (`*`, `:`, `(`,
+  `)`, `^`) entfernt, Doppelquotes escaped, Phrasen-Wrap — keine 500er mehr
+  bei unbalancierten FTS5-Queries.
+- **`heim_logs(trace_id)`-Index:** TraceId-Filter auf Logs (vorher: Full Scan
+  auf der größten Tabelle).
+- **Secure-by-Default-Warnung:** Host loggt beim Start eine deutliche Warnung,
+  wenn `Auth:Enabled=false` (ungeschützt, nicht an 0.0.0.0 in Produktion binden).
+- **`IngestBuffer` im Host verdrahtbar:** `Storage:UseIngestBuffer=true`
+  aktiviert Bounded-Channel + Hintergrund-Batching (Default false — synchroner
+  Pfad bleibt der bewährte Default; Buffer für High-Throughput-Szenarien).
+- **Zeitzone-Offset (`zzz`):** `HeimdallFmt.Ts` zeigt jetzt den UTC-Offset
+  (z. B. `+02:00`), damit Anwender in nicht-UTC-Server-Zonen erkennen, dass die
+  Anzeige Server-lokal ist.
+
+### Geändert
+- **`MaxBytes`-Default 5 GB im Host:** Plattenfüller-Schutz bei offenem Ingest
+  (vorher: 0 = unbegrenzt). Explizit `0` gesetzt = unbegrenzt. Lib-Default
+  bleibt 0 (Vertragskompatibilität).
+- **`docker-compose.yml` Auth-Default on:** `Heimdall__Auth__Enabled=true` +
+  `change-me`-Defaults (vorher: Auth auskommentiert). Vor erstem `up` echte
+  Werte setzen; Development/Demo: vier Zeilen auskommentieren.
+- **AlertEvaluator: Disable einer Firing-Regel sendet `Resolved`:** vorher
+  wurde Resolved verschluckt — Empfänger hingen im Alarm. Jetzt notifyen
+  Firing-Regeln beim Deaktivieren (Pending-Regeln bleiben Ok ohne Notify).
+- **AlertEvaluator: `EvalIntervalSeconds` pro Regel wird ausgewertet:**
+  Skip-Logik im Tick (vorher: dokumentiert, aber implementierungslos — tote
+  Editor-Konfiguration).
+- **AlertEvaluator: Multi-Serie-Metric feuert wenn irgendeine Serie feuert:**
+  Value = Maximum (vorher: nur `samples[0]` ausgewertet — Reihenfolge entschied).
+- **AlertEvaluator: `StopAsync` wartet auf laufenden Tick:** mit 5s-Timeout
+  (vorher: Timer gestoppt, Tick konnte noch im Flight laufen).
+- **`ObservedTime`-Fallback für Logs:** `OtlpConvert.ToLog` fällt auf
+  `ObservedTimeUnixNano` bzw. `now` zurück, wenn `TimeUnixNano=0` (OTel-Spec;
+  vorher: Logs bei ts=0, im Default-Zeitfenster unsichtbar).
+- **`Paketierung`:** `GenerateDocumentationFile` zentral aktiviert (vorher: 6
+  von 11 Paketen ohne XML-Docs, inkl. `Abstractions`). `Authors` +
+  `PackageReleaseNotes` zentral gesetzt. `WarningsAsErrors=nullable` als
+  Quality-Gate.
+- **`global.json`:** auf installiertes SDK 10.0.400 + `allowPrerelease=false`
+  (vorher: 10.0.302 nicht installiert, `allowPrerelease=true` inkonsistent).
+- **Versionsdrift 1.0.0 → 1.0.2:** im `README.md` behoben (Build 1.0.2,
+  README/Badges 1.0.0).
+
+### Entfernt
+- **`IngestOptions.FlushIntervalMs` / `FlushWorkers`:** Phantom-Optionen, die
+  nie implementiert waren (der Buffer ist drain-basiert, kein Timer/Worker-
+  Pool). `BREAKING` für Code, der die Properties gesetzt hat — kein Verhalten
+  ändert sich, da die Optionen keine Wirkung hatten. `IngestOptions` behält
+  `MaxQueueItems`/`BatchSpans`/`BatchLogs`/`BatchMetrics`/`DropPolicy`.
+
+### Behoben
+- **Traces-Filterformular submitet zur falschen Route:** `action="@BasePath"`
+  statt `/traces` — Filter-Ergebnis ging verloren.
+- **Grafana-Import verliert Panels in kollabierten Rows:** `rows[].panels`
+  wird jetzt rekursiv gelesen (`CollectPanelsFromRows`) — typische Community-
+  Dashboards verlieren nicht mehr den Großteil der Inhalte.
+- **POST `/api/v1/query` ignoriert Form-Body:** Prom-konforme POST-Clients
+  (Grafana POST-Setting) bekamen 400 „query is required" — jetzt wird
+  Query-String + Form-Body gelesen.
+- **Endpoints→Traces-Drilldown-Link:** nutzt falschen Param (`nameContains`
+  statt `name`) + falsche Route — jetzt korrekt `/traces?name=…`.
+- **`(trace_id, span_id)`-Unique:** Retries/Re-Exports erzeugten Duplikatzeilen
+  — UNIQUE-Index + tolerante `DeduplicateSpans`-Migration + `INSERT OR IGNORE`.
+- **`LIKE` ohne `ESCAPE '\'`:** Escaping wirkungslos (nur breiterer Match) —
+  jetzt mit `ESCAPE`-Klausel.
+- **Chinesische Fragmente:** in `Otlp.Proto.csproj`-Description („消费") und
+  `HeimdallHub.cs`-Kommentar bereinigt (landeten auf nuget.org).
+
+### Dokumentation
+- **`DESIGN.md`:** Alerting-Split-Dokumentation (verschoben, UI-Extraktion
+  nötig — Alert-Pages nutzen `HeimdallNav`/`Head`/`Footer` aus `Heimdall.Blazor`,
+  Zirkel ohne vorheriges `Heimdall.Ui`-Paket).
+- **`host/README.md`:** Walhalla-Referenzen entfernt (`Storage:Durable`,
+  `Storage:SelfObservability`, `Backend: walhalla`), `MaxBytes`-Default
+  dokumentiert.
+- **`grafana/README.md`:** SelfHost-Pfad → `host/Heimdall.Host`.
+- **`NOTICE`:** Third-Party-Liste ergänzt (Google.Protobuf BSD-3-Clause,
+  Microsoft.Data.Sqlite MIT, SQLite Public Domain).
 
 ## [1.0.2] — 2026-08-22
 
