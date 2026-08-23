@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk.Razor">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Heimdall.Embedded</RootNamespace>
+    <AssemblyName>Heimdall.Embedded</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Heimdall.Embedded</PackageId>
+    <Description>Heimdall embedded observability — Convenience-Fassade: ein AddHeimdall()/MapHeimdall() bündelt Storage + OTLP + Prometheus + Blazor-Dashboard + Alerting. Das einfachste Paket für die in-process-Einbettung (DESIGN.md Variante 1).</Description>
+    <PackageTags>otel;opentelemetry;telemetry;embedded;heimdall;facade</PackageTags>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Heimdall.AspNetCore\Heimdall.AspNetCore.csproj" />
+    <ProjectReference Include="..\Heimdall.Blazor\Heimdall.Blazor.csproj" />
+    <ProjectReference Include="..\Heimdall.Otlp\Heimdall.Otlp.csproj" />
+    <ProjectReference Include="..\Heimdall.Otlp.Grpc\Heimdall.Otlp.Grpc.csproj" />
+    <ProjectReference Include="..\Heimdall.Prometheus\Heimdall.Prometheus.csproj" />
+    <ProjectReference Include="..\Heimdall.Storage.SQLite\Heimdall.Storage.SQLite.csproj" />
+    <ProjectReference Include="..\Heimdall.Ingest\Heimdall.Ingest.csproj" />
+  </ItemGroup>
+
+</Project>

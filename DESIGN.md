@@ -205,6 +205,17 @@ Safer-Query-API fürs UI (kein rohes SQL nach außen):
 - Seiten: Traces (Liste + Filter), Trace-Detail (Gantt/Baum), Logs (Volltextsuche),
   Metriken (Serien + Histogram), ggf. Service-Map.
 - Eingebunden über `MapHeimdall("/otel")` → UI unter `/otel`, OTLP unter `/otel/v1/*`.
+- **Alerting-Subsystem** (AlertEvaluator, AlertRuleStore, Channels, Alert-Pages)
+  lebt aktuell im selben Projekt. Wer nur das Dashboard will, zieht Alerting
+  transitiv. Ein Split in `Heimdall.Alerting` wäre sauber, erfordert aber
+  vorherige Extraktion der UI-Komponenten (HeimdallNav/Head/Footer/TimeRange)
+  in ein `Heimdall.Ui`-Paket (sonst Zirkel: Alerting-Pages nutzen Blazor-UI).
+  **Entscheidung 1.0:** Split verschoben — Alerting bleibt in `Heimdall.Blazor`,
+  als klar abgegrenzte Sektion unter `Alerts/`. Ein späterer Split ist low-risk,
+  da die Alerting-Dateien in sich geschlossen sind (nur UI-Komponenten-Abhängigkeit).
+  Vor nuget.org-Publikation von `Heimdall.Blazor` dokumentieren, dass Alerting
+  enthalten ist; Konsumenten, die nur UI wollen, können den AlertEvaluator via
+  `EnableAlerting=false` deaktivieren (AddHeimdall-Option).
 
 ### 3.7 Heimdall.Svelte (optional, später)
 - Svelte 5 + Vite, spricht `Heimdall.Api` an. Nur bauen, wenn die API öffentlich wird.

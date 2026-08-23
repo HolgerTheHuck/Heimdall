@@ -11,6 +11,7 @@
     <Project Path="src/Heimdall.AspNetCore/Heimdall.AspNetCore.csproj" />
     <Project Path="src/Heimdall.Blazor/Heimdall.Blazor.csproj" />
     <Project Path="src/Heimdall.Direct/Heimdall.Direct.csproj" />
+    <Project Path="src/Heimdall.Embedded/Heimdall.Embedded.csproj" />
     <Project Path="src/Heimdall.Ingest/Heimdall.Ingest.csproj" />
     <Project Path="src/Heimdall.Otlp/Heimdall.Otlp.csproj" />
     <Project Path="src/Heimdall.Otlp.Proto/Heimdall.Otlp.Proto.csproj" />
