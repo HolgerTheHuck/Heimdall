@@ -7,38 +7,33 @@
    Fehlversuche werden als Fehlerhinweis angezeigt (kein Brute-Force-Schutz in
    1.1.0 — Rate-Limiting mittelfristig). Kein JS. *@
 @using Heimdall.AspNetCore
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Login" /></head>
-<body class="hmd-login-body">
-<main class="hmd-login">
+<HeimdallDocument Title="@I18n.T("page.title.login")" BasePath="@BasePath" HideNav="true" HideFooter="true" BodyClass="hmd-login-body" MainClass="hmd-login">
     <div class="hmd-login-card">
-        <div class="hmd-login-brand">⌖ Heimdall</div>
-        <h1>Anmelden</h1>
+        <div class="hmd-login-brand"><span aria-hidden="true">⌖</span> Heimdall</div>
+        <h1>@I18n.T("login.heading")</h1>
         @if (!string.IsNullOrEmpty(Error))
         {
-            <p class="hmd-login-err">@Error</p>
+            <p class="hmd-login-err" role="alert">@Error</p>
         }
         <form method="post" action="@LoginUrl">
             <input type="hidden" name="returnUrl" value="@ReturnUrl" />
             <label class="hmd-login-field">
-                <span>Benutzername</span>
+                <span>@I18n.T("login.field.user")</span>
                 <input type="text" name="username" autocomplete="username"
                        value="@LastUser" required autofocus />
             </label>
             <label class="hmd-login-field">
-                <span>Passwort</span>
+                <span>@I18n.T("login.field.password")</span>
                 <input type="password" name="password" autocomplete="current-password"
                        required />
             </label>
-            <button type="submit" class="hmd-login-btn">Anmelden</button>
+            <button type="submit" class="hmd-login-btn">@I18n.T("login.submit")</button>
         </form>
-        <p class="hmd-login-hint">Heimdall-Observability · Session-Cookie mit Timeout</p>
+        <p class="hmd-login-hint">@I18n.T("login.hint")</p>
     </div>
-</main>
-</body>
-</html>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";

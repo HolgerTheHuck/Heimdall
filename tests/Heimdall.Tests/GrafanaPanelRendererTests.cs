@@ -219,6 +219,76 @@ public class GrafanaPanelRendererTests
         Assert.Equal("46", first[1]);   // FmtValue(46) = "46"
     }
 
+    // === Table mit Daten-Links (Cross-Dashboard) ============================
+    [Fact]
+    public void Table_OhneLinks_LiefertLinkUrlsNull()
+    {
+        var eng = new PromEngine(TwoRegionSource());
+        var p = Panel("table", "sum by (region) (orders_total)", instant: true);
+        var rp = GrafanaPanelRenderer.Render(p, eng, 0, ToMs, 1_000, null!, null, "/otel");
+        var tb = Assert.IsType<TableResult>(rp.Result);
+        Assert.Null(tb.LinkUrls);
+    }
+
+    [Fact]
+    public void Table_MitLinks_LiefertProZelleAufgeloesteHref()
+    {
+        // Table-Panel mit byName-Links auf den Spalten „region" und „Value".
+        // Der Renderer löst pro Zeile die href auf (Feld + Zeit + /d/-Rewrite)
+        // und interpoliert den Titel.
+        var eng = new PromEngine(TwoRegionSource());
+        var links = new Dictionary<string, IReadOnlyList<GrafanaDataLink>>
+        {
+            ["region"] = new List<GrafanaDataLink> { new("Summary: ${__data.fields.region}", "/d/abc/s?var-route=${__data.fields.region}") },
+            ["Value"] = new List<GrafanaDataLink> { new("", "/d/xyz/v?${__url_time_range}") },
+        };
+        var p = new GrafanaPanel(1, "Top", "table", GrafanaGridPos.Zero,
+            new[] { new GrafanaTarget("sum by (region) (orders_total)", null, "A", true, "table") },
+            new GrafanaFieldConfig("reqps", null, links), null);
+
+        var rp = GrafanaPanelRenderer.Render(p, eng, fromMs: 1_000, toMs: 3_000, stepMs: 1_000,
+            vars: null!, query: null, lang: null, basePath: "/otel");
+        var tb = Assert.IsType<TableResult>(rp.Result);
+        Assert.NotNull(tb.LinkUrls);
+        Assert.Equal(new[] { "region", "Value" }, tb.Columns.ToArray());
+        // Zeilen ↔ LinkUrls sind index-gleich (im selben Loop gebaut); für stabile
+        // Assertions paarweise ordnen.
+        var pairs = tb.Rows.Select((r, i) => (Row: r, Links: tb.LinkUrls![i])).ToList();
+        var eu = pairs.Single(x => x.Row[0] == "eu");
+        Assert.Equal("/otel/dashboards/abc?var-route=eu", eu.Links[0]!.Href);
+        Assert.Equal("Summary: eu", eu.Links[0]!.Title);
+        // Value-Spalte: nur Zeitbereich, kein Feld → kein Titel (null).
+        Assert.Equal("/otel/dashboards/xyz?from=1000000000&to=3000000000", eu.Links[1]!.Href);
+        Assert.Null(eu.Links[1]!.Title);
+
+        var us = pairs.Single(x => x.Row[0] == "us");
+        Assert.Equal("/otel/dashboards/abc?var-route=us", us.Links[0]!.Href);
+        Assert.Equal("Summary: us", us.Links[0]!.Title);
+    }
+
+    [Fact]
+    public void Table_LinkNurAufEineSpalte_AndereZellenNull()
+    {
+        // Nur die „region"-Spalte trägt einen Link; die Value-Zelle bleibt null
+        // (UI rendert dort reinen Text).
+        var eng = new PromEngine(TwoRegionSource());
+        var links = new Dictionary<string, IReadOnlyList<GrafanaDataLink>>
+        {
+            ["region"] = new List<GrafanaDataLink> { new("", "/d/r/s") },
+        };
+        var p = new GrafanaPanel(1, "T", "table", GrafanaGridPos.Zero,
+            new[] { new GrafanaTarget("sum by (region) (orders_total)", null, "A", true, "table") },
+            new GrafanaFieldConfig(null, null, links), null);
+        var rp = GrafanaPanelRenderer.Render(p, eng, 0, ToMs, 1_000, null!, null, "/otel");
+        var tb = Assert.IsType<TableResult>(rp.Result);
+        foreach (var rowLinks in tb.LinkUrls!)
+        {
+            Assert.NotNull(rowLinks[0]);              // region → Link
+            Assert.Null(rowLinks[1]);                  // Value → kein Link
+            Assert.Equal("/otel/dashboards/r", rowLinks[0]!.Href);
+        }
+    }
+
     // === Gauge =============================================================
     [Fact]
     public void Gauge_LiefertWertMinMaxUndFarbe()

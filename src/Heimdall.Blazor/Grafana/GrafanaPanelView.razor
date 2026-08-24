@@ -3,6 +3,7 @@
    Gauge/BarGauge/Pie entstehen server-seitig in HeimdallCharting und werden
    als MarkupString ausgegeben. Grid-Spannung aus gridPos.w (24-Spalten). Kein JS. *@
 @using Heimdall.Blazor.Grafana
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
 @if (Panel.Result is RowResult)
 {
@@ -21,7 +22,7 @@ else
             }
             else if (Panel.Result is StatResult stat)
             {
-                <HeimdallKpi Value="@stat.DisplayText" Label="@Panel.Panel.Title" Tone="@stat.Tone" />
+                <HeimdallKpi Value="@stat.DisplayText" Label="@Panel.Panel.Title" Tone="@stat.Tone" ToneLabel="@ToneText(stat.Tone)" />
             }
             else if (Panel.Result is StatGridResult grid)
             {
@@ -31,6 +32,7 @@ else
                     @foreach (var t in grid.Tiles)
                     {
                         <div class="hmd-stat-tile hmd-stat-tile--@t.Tone">
+                            <span class="hmd-vh">@ToneText(t.Tone)</span>
                             <div class="hmd-stat-tile-val">@t.DisplayText</div>
                             <div class="hmd-stat-tile-label">@t.Label</div>
                             @((MarkupString)HeimdallCharting.RenderStatSparklineSvg(t.Points, t.Tone, 120, 30))
@@ -46,11 +48,11 @@ else
             }
             else if (Panel.Result is BarGaugeResult bg)
             {
-                @((MarkupString)HeimdallCharting.RenderBarGaugeSvg(bg.Rows, 760, BarHeight(bg.Rows.Count)))
+                @((MarkupString)HeimdallCharting.RenderBarGaugeSvg(bg.Rows, 760, BarHeight(bg.Rows.Count), Panel.Panel.Title))
             }
             else if (Panel.Result is PieResult pie)
             {
-                @((MarkupString)HeimdallCharting.RenderPieSvg(pie.Slices, 360, 220))
+                @((MarkupString)HeimdallCharting.RenderPieSvg(pie.Slices, 360, 220, Panel.Panel.Title))
             }
             else if (Panel.Result is HeatmapResult heat)
             {
@@ -58,17 +60,33 @@ else
                 // Höhe aus Bucketzahl (wie BarGauge aus Zeilenzahl), damit viele
                 // Buckets nicht gequetscht werden.
                 <div class="hmd-heatmap-wrap">
-                    @((MarkupString)HeimdallCharting.RenderHeatmapSvg(heat.Buckets, heat.ColumnTimesMs, heat.MaxValue, 760, HeatmapHeight(heat.Buckets.Count)))
+                    @((MarkupString)HeimdallCharting.RenderHeatmapSvg(heat.Buckets, heat.ColumnTimesMs, heat.MaxValue, 760, HeatmapHeight(heat.Buckets.Count), Panel.Panel.Title))
                 </div>
             }
             else if (Panel.Result is TableResult tbl)
             {
+                var hasLinks = tbl.LinkUrls is { Count: > 0 };
                 <table class="hmd-table">
                     <thead><tr>@foreach (var c in tbl.Columns) { <th>@c</th> }</tr></thead>
                     <tbody>
-                        @foreach (var row in tbl.Rows)
+                        @for (int r = 0; r < tbl.Rows.Count; r++)
                         {
-                            <tr>@foreach (var cell in row) { <td>@cell</td> }</tr>
+                            var row = tbl.Rows[r];
+                            var rowLinks = hasLinks ? tbl.LinkUrls![r] : null;
+                            <tr>
+                                @for (int c = 0; c < row.Count; c++)
+                                {
+                                    var link = (rowLinks is not null && c < rowLinks.Count) ? rowLinks[c] : null;
+                                    if (link is not null && !string.IsNullOrEmpty(link.Href))
+                                    {
+                                        <td><a href="@link.Href" title="@link.Title">@row[c]</a></td>
+                                    }
+                                    else
+                                    {
+                                        <td>@row[c]</td>
+                                    }
+                                }
+                            </tr>
                         }
                     </tbody>
                 </table>
@@ -78,7 +96,7 @@ else
                 // Loki-Logs-Panel ausgewertet gegen Heimdalls eigenen Log-Store.
                 // Zeilen-Rendering via HeimdallLogRow (gleiches Layout wie Logs-Seite).
                 <table class="hmd-table hmd-logs hmd-logs-panel">
-                    <thead><tr><th class="hmd-col-ts">Zeit</th><th class="hmd-col-sev">Sev</th><th>Body</th><th class="hmd-col-trace">Trace</th></tr></thead>
+                    <thead><tr><th class="hmd-col-ts">@I18n.T("table.time")</th><th class="hmd-col-sev">@I18n.T("table.sev")</th><th>@I18n.T("table.body")</th><th class="hmd-col-trace">@I18n.T("table.trace")</th></tr></thead>
                     <tbody>
                         @foreach (var l in logs.Rows)
                         {
@@ -88,7 +106,7 @@ else
                 </table>
                 @if (logs.TruncatedCount > 0)
                 {
-                    <p class="hmd-dim hmd-logs-more">… @logs.TruncatedCount weitere im Zeitraum</p>
+                    <p class="hmd-dim hmd-logs-more">@I18n.T("grafana.logs.more", logs.TruncatedCount)</p>
                 }
             }
             else if (Panel.Result is ErrorResult err)
@@ -97,7 +115,7 @@ else
             }
             else if (Panel.Result is EmptyResult empty)
             {
-                <p class="hmd-empty">@empty.Message</p>
+                <p class="hmd-empty" role="status">@empty.Message</p>
             }
         </div>
     </section>
@@ -130,6 +148,12 @@ else
     }
 
     private static int BarHeight(int rows) => Math.Max(60, Math.Min(rows, 20) * 36 + 12);
+
+    /// <summary>
+    /// Accessibler Tone-Text (z. B. „Kritisch") für die sonst nur farbliche
+    /// Stat-Kachel-Aussage. Unbekannte Tones → leer (kein roher Key vorgelesen).
+    /// </summary>
+    private string ToneText(string? tone) => tone is "ok" or "warn" or "err" or "accent" ? I18n.T("kpi.tone." + tone) : "";
 
     /// <summary>Heatmap-Höhe aus Bucketzahl: ~16px/Bucket + Achsen, gedeckelt
     /// auf 160–460px, damit 14 typische Dauer-Buckets gut lesbar bleiben.</summary>

@@ -15,6 +15,21 @@ internal static class SdkConvert
 {
     private static readonly long UnixEpochTicks = new DateTime(1970, 1, 1, 0, 0, 0, DateTimeKind.Utc).Ticks;
 
+    /// <summary>
+    /// true, wenn <paramref name="value"/> mit einem der Prefixe beginnt.
+    /// null/leere Prefix-Liste → false (nichts verworfen). Ordinal-Vergleich.
+    /// </summary>
+    internal static bool StartsWithAny(string? value, IReadOnlyList<string>? prefixes)
+    {
+        if (string.IsNullOrEmpty(value) || prefixes is null || prefixes.Count == 0) return false;
+        foreach (var p in prefixes)
+        {
+            if (p is null) continue;
+            if (value.StartsWith(p, StringComparison.Ordinal)) return true;
+        }
+        return false;
+    }
+
     internal static long ToUnixNano(DateTime dt)
     {
         var ticks = dt.Kind == DateTimeKind.Utc ? dt.Ticks : dt.ToUniversalTime().Ticks;

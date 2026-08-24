@@ -82,12 +82,26 @@ public sealed record GrafanaTarget(
     string? Format);
 
 /// <summary>Feldkonfiguration (Einheit + Schwellen) eines Panels.</summary>
+/// <remarks>
+/// <c>LinksByColumn</c> trägt die aus <c>fieldConfig.overrides[]</c> gehobenen
+/// Grafana-Daten-Links: Key = Display-Name der per <c>byName</c>-Matcher
+/// getroffenen Tabellenspalte, Value = Liste der Links (Titel + URL-Vorlage).
+/// Der Heimdall-Tabellen-Renderer löst die URL pro Zeile auf und rendert die
+/// Zelle als &lt;a href&gt; (cross-dashboard Drill). null/leer = keine Links.
+/// </remarks>
 public sealed record GrafanaFieldConfig(
     string? Unit,
-    IReadOnlyList<GrafanaThresholdStep>? Thresholds);
+    IReadOnlyList<GrafanaThresholdStep>? Thresholds,
+    IReadOnlyDictionary<string, IReadOnlyList<GrafanaDataLink>>? LinksByColumn = null);
 
 /// <summary>Ein einzelner Threshold-Schritt (null-Wert = Basis).</summary>
 public sealed record GrafanaThresholdStep(double? Value, string Color);
+
+/// <summary>Ein Grafana-Daten-Link (Tabellen-Zelle → anderes Dashboard/URL).
+/// <c>Url</c> ist die rohe Vorlage mit Platzhaltern (<c>${__data.fields.X}</c>,
+/// <c>${__url_time_range}</c>, <c>${var:queryparam}</c>, <c>/d/{uid}/…</c>),
+/// die der Renderer pro Zeile auflöst.</summary>
+public sealed record GrafanaDataLink(string Title, string Url);
 
 /// <summary>Template-Variable (z. B. <c>$job</c>, <c>$http_route</c>).</summary>
 public sealed record GrafanaTemplatingVar(
@@ -289,7 +303,58 @@ public static class GrafanaDashboardModel
         if (!fc.TryGetProperty("defaults", out var def) || def.ValueKind != JsonValueKind.Object) return null;
         string? unit = StrOrNull(def, "unit");
         var steps = ParseThresholds(def);
-        return new GrafanaFieldConfig(unit, steps);
+        var links = ParseLinkOverrides(fc);
+        return new GrafanaFieldConfig(unit, steps, links);
+    }
+
+    /// <summary>
+    /// Hobt die Daten-Links aus <c>fieldConfig.overrides[]</c>. Jeder Override
+    /// trägt einen <c>matcher</c> (hier nur <c>byName</c> ausgewertet — Treffer
+    /// nach Display-Spaltenname) und eine <c>properties[]</c>, deren Einträge
+    /// mit <c>id == "links"</c> ein <c>value[]</c> von <c>{title,url}</c>-Objekten
+    /// halten. Aufgebaut wird ein Dict Display-Name → Link-Liste (ordinal,
+    /// case-sensitiv wie die Spaltennamen). Leeres/fehlerhaftes JSON → null.
+    /// </summary>
+    private static IReadOnlyDictionary<string, IReadOnlyList<GrafanaDataLink>>? ParseLinkOverrides(JsonElement fc)
+    {
+        if (!fc.TryGetProperty("overrides", out var ov) || ov.ValueKind != JsonValueKind.Array) return null;
+        Dictionary<string, IReadOnlyList<GrafanaDataLink>>? dict = null;
+        foreach (var o in ov.EnumerateArray())
+        {
+            if (o.ValueKind != JsonValueKind.Object) continue;
+            if (!o.TryGetProperty("matcher", out var m) || m.ValueKind != JsonValueKind.Object) continue;
+            if (!string.Equals(StrOrNull(m, "id"), "byName", StringComparison.OrdinalIgnoreCase)) continue;
+            string col = StrOrNull(m, "options") ?? string.Empty;
+            if (col.Length == 0) continue;
+            if (!o.TryGetProperty("properties", out var props) || props.ValueKind != JsonValueKind.Array) continue;
+            var links = new List<GrafanaDataLink>();
+            foreach (var prop in props.EnumerateArray())
+            {
+                if (prop.ValueKind != JsonValueKind.Object) continue;
+                if (!string.Equals(StrOrNull(prop, "id"), "links", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!prop.TryGetProperty("value", out var val) || val.ValueKind != JsonValueKind.Array) continue;
+                foreach (var link in val.EnumerateArray())
+                {
+                    if (link.ValueKind != JsonValueKind.Object) continue;
+                    string title = Str(link, "title");
+                    string url = Str(link, "url");
+                    if (!string.IsNullOrEmpty(url))
+                        links.Add(new GrafanaDataLink(title, url));
+                }
+            }
+            if (links.Count == 0) continue;
+            dict ??= new Dictionary<string, IReadOnlyList<GrafanaDataLink>>(StringComparer.Ordinal);
+            // Bei mehreren Overrides für dieselbe Spalte (selten) wird zusammengeführt.
+            if (dict.TryGetValue(col, out var existing))
+            {
+                var merged = new List<GrafanaDataLink>(existing);
+                merged.AddRange(links);
+                dict[col] = merged;
+            }
+            else
+                dict[col] = links;
+        }
+        return dict;
     }
 
     private static IReadOnlyList<GrafanaThresholdStep>? ParseThresholds(JsonElement def)

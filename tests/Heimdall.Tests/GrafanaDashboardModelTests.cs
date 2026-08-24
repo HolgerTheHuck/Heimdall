@@ -184,4 +184,124 @@ public class GrafanaDashboardModelTests
         Assert.Empty(dash.Templating);
         Assert.False(string.IsNullOrEmpty(dash.Uid)); // generiert
     }
+
+    // === Data-Links (fieldConfig.overrides → properties[id=links]) ============
+
+    [Fact]
+    public void Parse_Overrides_Links_ByColumn()
+    {
+        // Table-Panel mit zwei Overrides: Spalte „Endpoint" bekommt einen Daten-Link
+        // (byName-Matcher), Spalte „Value" einen weiteren. Die URL referenziert per
+        // ${__data.fields.X} die Original-Feldnamen http_route/http_request_method.
+        var json = """
+        {
+          "uid": "ov", "title": "O", "panels": [
+            { "id": 1, "type": "table", "title": "Top",
+              "gridPos": {"h":6,"w":12,"x":0,"y":0},
+              "targets": [{"expr":"sum by (http_route, http_request_method) (rate(x[5m]))", "instant": true, "format": "table"}],
+              "fieldConfig": {
+                "defaults": {"unit": "reqps"},
+                "overrides": [
+                  { "matcher": { "id": "byName", "options": "Endpoint" },
+                    "properties": [ { "id": "links", "value": [
+                      { "title": "Route summary: ${__data.fields.http_route}", "url": "/d/h1FE3PpWk/s?var-route=${__data.fields.http_route}" }
+                    ] } ] },
+                  { "matcher": { "id": "byName", "options": "Value" },
+                    "properties": [ { "id": "links", "value": [
+                      { "title": "Drill", "url": "/d/abc/d?${__url_time_range}" }
+                    ] } ] }
+                ]
+              }
+            }
+          ]
+        }
+        """;
+        var dash = GrafanaDashboardModel.Parse(json);
+        Assert.NotNull(dash);
+        var p = dash!.Panels.Single();
+        var links = p.FieldConfig!.LinksByColumn;
+        Assert.NotNull(links);
+        Assert.Equal(2, links!.Count);
+        // byName-Matcher → Display-Name („Endpoint"), nicht Original-Feldname.
+        Assert.True(links.ContainsKey("Endpoint"));
+        Assert.True(links.ContainsKey("Value"));
+        var ep = links["Endpoint"];
+        Assert.Single(ep);
+        Assert.Equal("Route summary: ${__data.fields.http_route}", ep[0].Title);
+        Assert.Equal("/d/h1FE3PpWk/s?var-route=${__data.fields.http_route}", ep[0].Url);
+        Assert.Equal("/d/abc/d?${__url_time_range}", links["Value"][0].Url);
+    }
+
+    [Fact]
+    public void Parse_Overrides_OhneMatcherWirdIgnoriert()
+    {
+        // Override ohne byName-Matcher (z. B. byRegexp) und Links ohne URL werden
+        // übergangen — lenient wie der restliche Parser.
+        var json = """
+        {
+          "uid": "x", "title": "X", "panels": [
+            { "id": 1, "type": "table", "title": "T",
+              "gridPos": {"h":6,"w":6,"x":0,"y":0},
+              "targets": [{"expr":"x", "instant": true}],
+              "fieldConfig": {
+                "defaults": {},
+                "overrides": [
+                  { "matcher": { "id": "byRegexp", "options": ".*" },
+                    "properties": [ { "id": "links", "value": [ { "title": "t", "url": "/d/a/b" } ] } ] },
+                  { "matcher": { "id": "byName", "options": "Route" },
+                    "properties": [ { "id": "links", "value": [ { "title": "empty", "url": "" } ] } ] }
+                ]
+              }
+            }
+          ]
+        }
+        """;
+        var dash = GrafanaDashboardModel.Parse(json);
+        var p = dash!.Panels.Single();
+        // byRegexp wird nicht ausgewertet → nur der byName-Override zählt; dessen
+        // einziger Link hat leere URL → verworfen → Override leer → nicht ins Dict.
+        Assert.Null(p.FieldConfig!.LinksByColumn);
+    }
+
+    [Fact]
+    public void Parse_OhneOverrides_LinksByColumnIstNull()
+    {
+        // Panel ohne overrides-Abschnitt → LinksByColumn null (kein Dict).
+        var dash = GrafanaDashboardModel.Parse("""
+        { "uid": "p", "title": "P", "panels": [
+          { "id": 1, "type": "table", "title": "T", "gridPos": {"h":6,"w":6,"x":0,"y":0},
+            "targets": [{"expr":"x","instant":true}],
+            "fieldConfig": {"defaults": {"unit": "short"}} }
+        ] }
+        """);
+        Assert.Null(dash!.Panels.Single().FieldConfig!.LinksByColumn);
+    }
+
+    [Fact]
+    public void Parse_Overrides_MehrereLinksProSpalte_BleibenOrdinal()
+    {
+        // Mehrere {title,url} in einem value[] → Liste in Original-Reihenfolge.
+        var json = """
+        {
+          "uid": "m", "title": "M", "panels": [
+            { "id": 1, "type": "table", "title": "T",
+              "gridPos": {"h":6,"w":6,"x":0,"y":0},
+              "targets": [{"expr":"x","instant":true}],
+              "fieldConfig": { "defaults": {}, "overrides": [
+                { "matcher": { "id": "byName", "options": "R" },
+                  "properties": [ { "id": "links", "value": [
+                    { "title": "A", "url": "/d/a/b" },
+                    { "title": "B", "url": "/d/c/d" }
+                  ] } ] }
+              ] }
+            }
+          ]
+        }
+        """;
+        var dash = GrafanaDashboardModel.Parse(json);
+        var links = dash!.Panels.Single().FieldConfig!.LinksByColumn!;
+        Assert.Equal(2, links["R"].Count);
+        Assert.Equal("A", links["R"][0].Title);
+        Assert.Equal("B", links["R"][1].Title);
+    }
 }

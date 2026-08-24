@@ -6,8 +6,9 @@
    refresh-Query-Param). Besitzt kein eigenes <form> — wird in die Filter-Forms
    eingebettet. *@
 @using System.Globalization
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 <div class="hmd-timerange">
-    <div class="hmd-range-btns" role="group" aria-label="Zeitraum">
+    <div class="hmd-range-btns" role="group" aria-label="@I18n.T("timerange.aria")">
         @foreach (var p in HeimdallRange.Presets)
         {
             var isOn = Preset == p.Key && From is null && To is null;
@@ -16,18 +17,18 @@
         }
     </div>
     <details class="hmd-range-custom">
-        <summary>Benutzerdefiniert</summary>
+        <summary>@I18n.T("timerange.custom")</summary>
         <div class="hmd-range-custom-fields">
-            <label>von <input type="datetime-local" name="from-iso" value="@Iso(From)" /></label>
-            <label>bis <input type="datetime-local" name="to-iso" value="@Iso(To)" /></label>
-            <span class="hmd-dim">Zeiten werden beim Laden in Unix-ns umgerechnet.</span>
+            <label>@I18n.T("timerange.from") <input type="datetime-local" name="from-iso" value="@Iso(From)" /></label>
+            <label>@I18n.T("timerange.to") <input type="datetime-local" name="to-iso" value="@Iso(To)" /></label>
+            <span class="hmd-dim">@I18n.T("timerange.hint")</span>
         </div>
         <input type="hidden" name="from" />
         <input type="hidden" name="to" />
     </details>
-    <label class="hmd-refresh">Auto-Refresh
+    <label class="hmd-refresh">@I18n.T("timerange.refresh")
         <select name="refresh">
-            <option value="" selected="@(string.IsNullOrEmpty(Refresh))">aus</option>
+            <option value="" selected="@(string.IsNullOrEmpty(Refresh))">@I18n.T("timerange.refresh.off")</option>
             <option value="5s" selected="@(Refresh == "5s")">5s</option>
             <option value="10s" selected="@(Refresh == "10s")">10s</option>
             <option value="30s" selected="@(Refresh == "30s")">30s</option>

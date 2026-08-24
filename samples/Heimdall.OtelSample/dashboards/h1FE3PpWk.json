@@ -1,0 +1,135 @@
+{
+  "description": "Route summary adapted to OpenTelemetry ASP.NET Core metrics (http_server_request_duration_seconds, http_server_active_requests). Replaces the prometheus-net original (gnetId 10915) whose metrics/labels the OTel sample does not emit.",
+  "gnetId": null,
+  "title": "ASP.NET Core - route summary (OTel)",
+  "uid": "h1FE3PpWk",
+  "schemaVersion": 39,
+  "version": 1,
+  "tags": ["otel", "aspnetcore"],
+  "time": { "from": "now-3h", "to": "now" },
+  "templating": {
+    "list": [
+      {
+        "name": "job",
+        "type": "query",
+        "label": "Job",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(http_server_active_requests, job)",
+        "definition": "label_values(http_server_active_requests, job)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "options": [],
+        "refresh": 2
+      },
+      {
+        "name": "route",
+        "type": "query",
+        "label": "Route",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(http_server_request_duration_seconds_count, http_route)",
+        "definition": "label_values(http_server_request_duration_seconds_count, http_route)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "options": [],
+        "refresh": 2
+      },
+      {
+        "name": "method",
+        "type": "query",
+        "label": "Method",
+        "datasource": { "type": "prometheus", "uid": "prometheus" },
+        "query": "label_values(http_server_request_duration_seconds_count, http_request_method)",
+        "definition": "label_values(http_server_request_duration_seconds_count, http_request_method)",
+        "includeAll": true,
+        "multi": true,
+        "current": { "selected": true, "text": "All", "value": "$__all" },
+        "options": [],
+        "refresh": 2
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 2,
+      "type": "graph",
+      "title": "Requests by route",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_request_duration_seconds_count{job=~\"$job\", http_route=~\"$route\", http_request_method=~\"$method\"}[3m])) by (http_route)",
+          "legendFormat": "{{http_route}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "singlestat",
+      "title": "Total req/s",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 5, "x": 14, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_request_duration_seconds_count{job=~\"$job\", http_route=~\"$route\", http_request_method=~\"$method\"}[3m]))",
+          "instant": false,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 9,
+      "type": "singlestat",
+      "title": "In progress",
+      "description": "Active server requests across the selected job(s).",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 4, "w": 5, "x": 19, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "short" }, "overrides": [] },
+      "options": {},
+      "targets": [
+        {
+          "expr": "sum(http_server_active_requests{job=~\"$job\"})",
+          "instant": false,
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "heatmap",
+      "title": "Request duration",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 10, "x": 14, "y": 4 },
+      "fieldConfig": { "defaults": { "unit": "s" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(increase(http_server_request_duration_seconds_bucket{job=~\"$job\", http_route=~\"$route\", http_request_method=~\"$method\"}[$__interval])) by (le)",
+          "format": "heatmap",
+          "legendFormat": "{{le}}",
+          "refId": "A"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "graph",
+      "title": "Error rate by route",
+      "description": "4xx and 5xx response status codes.",
+      "datasource": { "type": "prometheus", "uid": "prometheus" },
+      "gridPos": { "h": 8, "w": 14, "x": 0, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "reqps" }, "overrides": [] },
+      "targets": [
+        {
+          "expr": "sum(rate(http_server_request_duration_seconds_count{job=~\"$job\", http_route=~\"$route\", http_request_method=~\"$method\", http_response_status_code=~\"5..|4..\"}[3m])) by (http_route)",
+          "legendFormat": "{{http_route}}",
+          "refId": "A"
+        }
+      ]
+    }
+  ]
+}

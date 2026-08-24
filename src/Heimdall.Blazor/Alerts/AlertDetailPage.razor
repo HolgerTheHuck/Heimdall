@@ -5,80 +5,74 @@
 @using Heimdall.Blazor.Alerts
 @inject IAlertRuleStore Store
 @inject IAlertStateStore StateStore
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Alarm-Regel" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main">
-    <h1>@(_rule?.Name ?? "Regel nicht gefunden")</h1>
-    <p class="hmd-dim"><a class="hmd-back" href="@(BasePath + "/alerts")">← alle Alerts</a></p>
+<HeimdallDocument Title="@I18n.T("page.title.alertDetail")" BasePath="@BasePath">
+    <h1>@(_rule?.Name ?? I18n.T("alert.detail.notfound"))</h1>
+    <p class="hmd-dim"><a class="hmd-back" href="@(BasePath + "/alerts")">@I18n.T("alert.detail.back")</a></p>
 
     @if (_rule is null)
     {
-        <p class="hmd-empty">Keine Regel mit Id „@Id".</p>
+        <p class="hmd-empty" role="status">@I18n.T("alert.detail.empty", Id)</p>
     }
     else
     {
         var st = _state?.State ?? AlertState.Ok;
         <div class="hmd-kpi-row">
-            <HeimdallKpi Value="@StateLabel(st)" Label="Zustand" Tone="@StateTone(st)" />
-            <HeimdallKpi Value="@(_state?.LastValue?.ToString("0.####", CultureInfo.InvariantCulture) ?? "—")" Label="Letzter Wert" Tone="accent" />
-            <HeimdallKpi Value="@(_rule.Signal.ToString())" Label="Signal" Tone="accent" />
-            <HeimdallKpi Value="@(_rule.Enabled ? "ja" : "nein")" Label="aktiv" Tone="@(_rule.Enabled ? "ok" : "warn")" />
+            <HeimdallKpi Value="@StateLabel(st)" Label="@I18n.T("alert.col.state")" Tone="@StateTone(st)" ToneLabel="@ToneText(StateTone(st))" />
+            <HeimdallKpi Value="@(_state?.LastValue?.ToString("0.####", CultureInfo.InvariantCulture) ?? "—")" Label="@I18n.T("alert.detail.kpi.lastval")" Tone="accent" ToneLabel="@I18n.T("kpi.tone.accent")" />
+            <HeimdallKpi Value="@I18n.T("alert.signal." + _rule.Signal.ToString().ToLowerInvariant())" Label="@I18n.T("alert.col.signal")" Tone="accent" ToneLabel="@I18n.T("kpi.tone.accent")" />
+            <HeimdallKpi Value="@(_rule.Enabled ? I18n.T("common.yes") : I18n.T("common.no"))" Label="@I18n.T("alert.col.active")" Tone="@(_rule.Enabled ? "ok" : "warn")" ToneLabel="@ToneText(_rule.Enabled ? "ok" : "warn")" />
         </div>
 
         <table class="hmd-table hmd-kv">
+            <caption class="hmd-vh">@I18n.T("page.title.alertDetail")</caption>
             <tbody>
-            <tr><th>Name</th><td>@_rule.Name</td></tr>
-            <tr><th>Signal</th><td>@_rule.Signal</td></tr>
-            <tr><th>PromQL</th><td class="hmd-mono">@(_rule.Promql ?? "—")</td></tr>
-            <tr><th>Log-Text</th><td class="hmd-mono">@(_rule.LogText ?? "—")</td></tr>
-            <tr><th>Min. Severity</th><td class="hmd-mono">@(_rule.MinSeverity?.ToString(CultureInfo.InvariantCulture) ?? "—")</td></tr>
-            <tr><th>nur Fehler-Traces</th><td>@(_hasErr)</td></tr>
-            <tr><th>Service</th><td>@(_rule.ServiceName ?? "—")</td></tr>
-            <tr><th>Name enthält</th><td>@(_rule.NameContains ?? "—")</td></tr>
-            <tr><th>Fenster</th><td class="hmd-mono">@_rule.WindowSeconds.ToString(CultureInfo.InvariantCulture) s</td></tr>
-            <tr><th>Schwellen</th><td class="hmd-mono">@_rule.Threshold.ToString(CultureInfo.InvariantCulture)</td></tr>
-            <tr><th>for</th><td class="hmd-mono">@_rule.ForSeconds.ToString(CultureInfo.InvariantCulture) s</td></tr>
-            <tr><th>Eval-Takt</th><td class="hmd-mono">@(_rule.EvalIntervalSeconds == 0 ? "global" : _rule.EvalIntervalSeconds.ToString(CultureInfo.InvariantCulture) + " s")</td></tr>
-            <tr><th>Kanäle</th><td class="hmd-mono">@(_channels)</td></tr>
-            <tr><th>Beschreibung</th><td>@(_rule.Description ?? "—")</td></tr>
+            <tr><th scope="row">@I18n.T("alert.col.name")</th><td>@_rule.Name</td></tr>
+            <tr><th scope="row">@I18n.T("alert.col.signal")</th><td>@I18n.T("alert.signal." + _rule.Signal.ToString().ToLowerInvariant())</td></tr>
+            <tr><th scope="row">PromQL</th><td class="hmd-mono">@(_rule.Promql ?? "—")</td></tr>
+            <tr><th scope="row">@I18n.T("alert.detail.col.logtext")</th><td class="hmd-mono">@(_rule.LogText ?? "—")</td></tr>
+            <tr><th scope="row">@I18n.T("alert.detail.col.minseverity")</th><td class="hmd-mono">@(_rule.MinSeverity?.ToString(CultureInfo.InvariantCulture) ?? "—")</td></tr>
+            <tr><th scope="row">@I18n.T("alert.detail.col.errtraces")</th><td>@(_hasErr)</td></tr>
+            <tr><th scope="row">Service</th><td>@(_rule.ServiceName ?? "—")</td></tr>
+            <tr><th scope="row">@I18n.T("traces.filter.name")</th><td>@(_rule.NameContains ?? "—")</td></tr>
+            <tr><th scope="row">@I18n.T("alert.detail.col.window")</th><td class="hmd-mono">@_rule.WindowSeconds.ToString(CultureInfo.InvariantCulture) s</td></tr>
+            <tr><th scope="row">@I18n.T("alert.detail.col.threshold")</th><td class="hmd-mono">@_rule.Threshold.ToString(CultureInfo.InvariantCulture)</td></tr>
+            <tr><th scope="row">for</th><td class="hmd-mono">@_rule.ForSeconds.ToString(CultureInfo.InvariantCulture) s</td></tr>
+            <tr><th scope="row">@I18n.T("alert.detail.col.evalinterval")</th><td class="hmd-mono">@(_rule.EvalIntervalSeconds == 0 ? I18n.T("alert.detail.eval.global") : _rule.EvalIntervalSeconds.ToString(CultureInfo.InvariantCulture) + " s")</td></tr>
+            <tr><th scope="row">@I18n.T("alert.col.channels")</th><td class="hmd-mono">@(_channels)</td></tr>
+            <tr><th scope="row">@I18n.T("alert.detail.col.description")</th><td>@(_rule.Description ?? "—")</td></tr>
             </tbody>
         </table>
 
-        <h2 class="hmd-subhead">Zustand</h2>
+        <h2 class="hmd-subhead">@I18n.T("alert.detail.state.heading")</h2>
         @if (_state is null)
         {
-            <p class="hmd-empty">Noch nicht ausgewertet (Zustand implizit Ok).</p>
+            <p class="hmd-empty" role="status">@I18n.T("alert.detail.state.empty")</p>
         }
         else
         {
             <table class="hmd-table hmd-kv">
+                <caption class="hmd-vh">@I18n.T("alert.detail.state.heading")</caption>
                 <tbody>
-                <tr><th>Zustand</th><td><span class="hmd-alert-state hmd-alert-state--@(StateClass(_state.State))">@StateLabel(_state.State)</span></td></tr>
-                <tr><th>seit</th><td class="hmd-mono">@HeimdallFmt.Ts(_state.SinceUnixMs * 1_000_000L)</td></tr>
-                <tr><th>Letzte Auswertung</th><td class="hmd-mono">@HeimdallFmt.Ts(_state.LastEvalUnixMs * 1_000_000L)</td></tr>
-                <tr><th>Letzter Wert</th><td class="hmd-mono">@(_state.LastValue?.ToString("0.####", CultureInfo.InvariantCulture) ?? "—")</td></tr>
-                <tr><th>Letzte Benachrichtigung</th><td class="hmd-mono">@(_state.LastNotifiedUnixMs is long ln ? HeimdallFmt.Ts(ln * 1_000_000L) : "—")</td></tr>
-                <tr><th>Hinweis</th><td>@(_state.Message ?? "—")</td></tr>
+                <tr><th scope="row">@I18n.T("alert.col.state")</th><td><span class="hmd-alert-state hmd-alert-state--@(StateClass(_state.State))">@StateLabel(_state.State)</span></td></tr>
+                <tr><th scope="row">@I18n.T("alert.detail.col.since")</th><td class="hmd-mono">@HeimdallFmt.Ts(_state.SinceUnixMs * 1_000_000L)</td></tr>
+                <tr><th scope="row">@I18n.T("alert.col.lasteval")</th><td class="hmd-mono">@HeimdallFmt.Ts(_state.LastEvalUnixMs * 1_000_000L)</td></tr>
+                <tr><th scope="row">@I18n.T("alert.detail.kpi.lastval")</th><td class="hmd-mono">@(_state.LastValue?.ToString("0.####", CultureInfo.InvariantCulture) ?? "—")</td></tr>
+                <tr><th scope="row">@I18n.T("alert.detail.col.lastnotif")</th><td class="hmd-mono">@(_state.LastNotifiedUnixMs is long ln ? HeimdallFmt.Ts(ln * 1_000_000L) : "—")</td></tr>
+                <tr><th scope="row">@I18n.T("alert.detail.col.note")</th><td>@(_state.Message ?? "—")</td></tr>
                 </tbody>
             </table>
         }
 
         <div class="hmd-form-actions">
-            <a class="hmd-btn" href="@(BasePath + "/alerts/" + Uri.EscapeDataString(_rule.Id) + "/edit")">Bearbeiten</a>
+            <a class="hmd-btn" href="@(BasePath + "/alerts/" + Uri.EscapeDataString(_rule.Id) + "/edit")">@I18n.T("alert.detail.edit")</a>
             <form method="post" action="@(BasePath + "/alerts/" + Uri.EscapeDataString(_rule.Id) + "/delete")" style="display:inline">
-                <button type="submit" class="hmd-btn hmd-btn-danger">Löschen</button>
+                <button type="submit" class="hmd-btn hmd-btn-danger">@I18n.T("alert.detail.delete")</button>
             </form>
         </div>
     }
-
-    <HeimdallFooter BasePath="@BasePath" />
-</main>
-</body>
-</html>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";
@@ -95,17 +89,17 @@
         _rule = Store.Get(Id);
         if (_rule is null) return;
         _state = StateStore.Get(_rule.Id);
-        _hasErr = _rule.HasError switch { true => "ja", false => "nein", _ => "egal" };
+        _hasErr = _rule.HasError switch { true => I18n.T("common.yes"), false => I18n.T("common.no"), _ => I18n.T("common.dontcare") };
         _channels = _rule.Channels is null || _rule.Channels.Count == 0 ? "—" : string.Join(", ", _rule.Channels);
     }
 
     private static string StateClass(AlertState s) => s.ToString().ToLowerInvariant();
-    private static string StateLabel(AlertState s) => s switch
+    private string StateLabel(AlertState s) => s switch
     {
-        AlertState.Firing => "Firing",
-        AlertState.Pending => "Pending",
-        AlertState.Resolved => "Resolved",
-        _ => "Ok",
+        AlertState.Firing => I18n.T("alert.state.firing"),
+        AlertState.Pending => I18n.T("alert.state.pending"),
+        AlertState.Resolved => I18n.T("alert.state.resolved"),
+        _ => I18n.T("alert.state.ok"),
     };
     private static string StateTone(AlertState s) => s switch
     {
@@ -114,4 +108,7 @@
         AlertState.Resolved => "ok",
         _ => "accent",
     };
+
+    /// <summary>Accessibler Tone-Text („Kritisch"/„Warnung"/„OK") für die KPI-Farb-Aussage.</summary>
+    private string ToneText(string tone) => tone is "ok" or "warn" or "err" or "accent" ? I18n.T("kpi.tone." + tone) : "";
 }

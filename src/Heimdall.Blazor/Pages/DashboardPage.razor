@@ -9,39 +9,35 @@
 @using System.Globalization
 @using System.Collections.Generic
 @inject Heimdall.IHeimdallQuery Query
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Dashboard" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main">
-    <h1>Dashboard</h1>
-    <p class="hmd-dim">Monitoring über den Zeitraum „@_rangeLabel". Requests=@Requests, Errors=@Errors, Latenz=@Duration.</p>
+<HeimdallDocument Title="@I18n.T("page.title.monitoring")" BasePath="@BasePath">
+    <h1>@I18n.T("page.title.monitoring")</h1>
+    <p class="hmd-dim">@I18n.T("dashboard.subtitle", _rangeLabel, Requests, Errors, Duration)</p>
 
     <form class="hmd-filters" method="get" action="@(BasePath + "/dashboard")">
-        <label>Requests <input type="search" name="requests" value="@Requests" /></label>
-        <label>Errors <input type="search" name="errors" value="@Errors" /></label>
-        <label>Latenz-Metrik <input type="search" name="duration" value="@Duration" /></label>
-        <label>Limit <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
+        <label>@I18n.T("dashboard.filter.requests") <input type="search" name="requests" value="@Requests" /></label>
+        <label>@I18n.T("dashboard.filter.errors") <input type="search" name="errors" value="@Errors" /></label>
+        <label>@I18n.T("dashboard.filter.duration") <input type="search" name="duration" value="@Duration" /></label>
+        <label>@I18n.T("metrics.filter.limit") <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
         <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
-        <button type="submit">Laden</button>
+        <button type="submit">@I18n.T("metrics.filter.load")</button>
     </form>
 
     @if (string.IsNullOrWhiteSpace(Requests))
     {
-        <h2 class="hmd-subhead">Verfügbare Metriken</h2>
+        <h2 class="hmd-subhead">@I18n.T("metrics.available.title")</h2>
         @if (_availableNames.Count == 0)
         {
-            <section class="hmd-empty-state">
-                <h2>Keine Metriken</h2>
-                <p>Im gewählten Zeitraum liegen keine Metrik-Punkte vor. Zeitraum erweitern oder Metriken senden.</p>
-                <p class="hmd-dim">OTLP/HTTP <code>POST @BasePath/v1/metrics</code> · gRPC <code>localhost:4317</code> · zurück zur <a href="@BasePath">Übersicht</a></p>
+            <section class="hmd-empty-state" role="status">
+                <h2>@I18n.T("metrics.empty.title")</h2>
+                <p>@I18n.T("metrics.empty.body")</p>
+                <p class="hmd-dim">@I18n.T("traces.empty.hint.http") <code>POST @BasePath/v1/metrics</code> · @I18n.T("traces.empty.hint.grpc") <code>localhost:4317</code> · @I18n.T("common.back.to") <a href="@BasePath">@I18n.T("nav.overview")</a></p>
             </section>
         }
         else
         {
-            <p class="hmd-dim">Request-Counter wählen zum Belegen des Dashboards (Errors optional, Latenz default <code>http.server.request.duration</code>):</p>
+            <p class="hmd-dim">@I18n.T("dashboard.discovery.hint.a")<code>http.server.request.duration</code>@I18n.T("dashboard.discovery.hint.b")</p>
             <ul class="hmd-metric-list">
             @foreach (var n in _availableNames)
             {
@@ -53,42 +49,43 @@
     else if (_hasData)
     {
         <div class="hmd-kpi-row">
-            <HeimdallKpi Value="@_callsPerSec" Label="calls/s aktuell" Sub="@($"∅ {HeimdallCharting.FmtValue(HeimdallSeries.Mean(_reqRate))}/s")" Tone="accent" />
-            <HeimdallKpi Value="@_peak" Label="Spitzenlast" Sub="max calls/s" Tone="warn" />
-            <HeimdallKpi Value="@_errRatePct" Label="Errorrate" Sub="@($"gesamt {HeimdallCharting.FmtValue(_totalErr)}")" Tone="@_errTone" />
-            <HeimdallKpi Value="@_uptimePct" Label="Uptime" Sub="@($" Calls {HeimdallCharting.FmtValue(_totalReq)}")" Tone="@_upTone" />
-            <HeimdallKpi Value="@_p50Str" Label="p50" Sub="Antwortzeit" Tone="ok" />
-            <HeimdallKpi Value="@_p95Str" Label="p95" Sub="Antwortzeit" Tone="@_p95Tone" />
-            <HeimdallKpi Value="@_p99Str" Label="p99" Sub="Antwortzeit" Tone="ok" />
+            <HeimdallKpi Value="@_callsPerSec" Label="@I18n.T("dashboard.kpi.rate")" Sub="@I18n.T("dashboard.kpi.rate.sub", HeimdallCharting.FmtValue(HeimdallSeries.Mean(_reqRate)))" Tone="accent" ToneLabel="@ToneText("accent")" />
+            <HeimdallKpi Value="@_peak" Label="@I18n.T("dashboard.kpi.peak")" Sub="@I18n.T("dashboard.kpi.peak.sub")" Tone="warn" ToneLabel="@ToneText("warn")" />
+            <HeimdallKpi Value="@_errRatePct" Label="@I18n.T("dashboard.kpi.errrate")" Sub="@I18n.T("dashboard.kpi.errrate.sub", HeimdallCharting.FmtValue(_totalErr))" Tone="@_errTone" ToneLabel="@ToneText(_errTone)" />
+            <HeimdallKpi Value="@_uptimePct" Label="@I18n.T("dashboard.kpi.uptime")" Sub="@I18n.T("dashboard.kpi.uptime.sub", HeimdallCharting.FmtValue(_totalReq))" Tone="@_upTone" ToneLabel="@ToneText(_upTone)" />
+            <HeimdallKpi Value="@_p50Str" Label="p50" Sub="@I18n.T("dashboard.kpi.response")" Tone="ok" ToneLabel="@ToneText("ok")" />
+            <HeimdallKpi Value="@_p95Str" Label="p95" Sub="@I18n.T("dashboard.kpi.response")" Tone="@_p95Tone" ToneLabel="@ToneText(_p95Tone)" />
+            <HeimdallKpi Value="@_p99Str" Label="p99" Sub="@I18n.T("dashboard.kpi.response")" Tone="ok" ToneLabel="@ToneText("ok")" />
         </div>
 
-        <h2 class="hmd-subhead">Aufrufe pro Sekunde (calls/s)</h2>
-        <HeimdallChart Series="@_callsChart" Unit="calls/s" AriaLabel="Aufrufe pro Sekunde" />
+        <h2 class="hmd-subhead">@I18n.T("dashboard.heading.rate", Requests)</h2>
+        <HeimdallChart Series="@_callsChart" Unit="/s" AriaLabel="@I18n.T("dashboard.heading.rate", Requests)" />
 
-        <h2 class="hmd-subhead">Errorrate</h2>
-        <HeimdallChart Series="@_errChart" Unit="%" AriaLabel="Errorrate" />
+        <h2 class="hmd-subhead">@I18n.T("dashboard.heading.errrate")</h2>
+        <HeimdallChart Series="@_errChart" Unit="%" AriaLabel="@I18n.T("dashboard.heading.errrate")" />
 
         @if (_latencyChart.Count > 0)
         {
-            <h2 class="hmd-subhead">Antwortzeiten (p50 / p95 / p99)</h2>
-            <HeimdallChart Series="@_latencyChart" Unit="s" AriaLabel="Antwortzeiten Quantile" Height="240" />
+            <h2 class="hmd-subhead">@I18n.T("dashboard.heading.latency")</h2>
+            <HeimdallChart Series="@_latencyChart" Unit="s" AriaLabel="@I18n.T("dashboard.heading.latency")" Height="240" />
         }
         else
         {
-            <p class="hmd-empty">Keine Latenz-Histogramm-Punkte für „@Duration" — p50/p95/p99 nicht verfügbar.</p>
+            <p class="hmd-empty" role="status">@I18n.T("dashboard.latency.empty", Duration)</p>
         }
 
         <div class="hmd-panels">
             <section class="hmd-panel">
-                <h2 class="hmd-subhead">Logs im Zeitraum (@_logs.Count)</h2>
+                <h2 class="hmd-subhead">@I18n.T("dashboard.logs.heading", _logs.Count)</h2>
                 @if (_logs.Count == 0)
                 {
-                    <p class="hmd-empty">Keine Logs im Zeitraum.</p>
+                    <p class="hmd-empty" role="status">@I18n.T("dashboard.logs.empty")</p>
                 }
                 else
                 {
                     <table class="hmd-table hmd-logs">
-                        <thead><tr><th class="hmd-col-ts">Zeit</th><th class="hmd-col-sev">Sev</th><th>Body</th><th class="hmd-col-trace">Trace</th></tr></thead>
+                        <caption>@I18n.T("dashboard.logs.heading", _logs.Count)</caption>
+                        <thead><tr><th class="hmd-col-ts" scope="col">@I18n.T("table.time")</th><th class="hmd-col-sev" scope="col">@I18n.T("table.sev")</th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
                         <tbody>
                         @foreach (var l in _logs)
                         {
@@ -99,15 +96,16 @@
                 }
             </section>
             <section class="hmd-panel">
-                <h2 class="hmd-subhead">Traces im Zeitraum (@_traces.Count)</h2>
+                <h2 class="hmd-subhead">@I18n.T("dashboard.traces.heading", _traces.Count)</h2>
                 @if (_traces.Count == 0)
                 {
-                    <p class="hmd-empty">Keine Traces im Zeitraum.</p>
+                    <p class="hmd-empty" role="status">@I18n.T("dashboard.traces.empty")</p>
                 }
                 else
                 {
                     <table class="hmd-table hmd-dense">
-                        <thead><tr><th>Trace-ID</th><th>Start</th><th>Dauer</th><th>Spans</th><th>Status</th></tr></thead>
+                        <caption>@I18n.T("dashboard.traces.heading", _traces.Count)</caption>
+                        <thead><tr><th scope="col">@I18n.T("table.trace.id")</th><th scope="col">@I18n.T("table.start")</th><th scope="col">@I18n.T("table.duration")</th><th scope="col">@I18n.T("table.spans")</th><th scope="col">@I18n.T("table.status")</th></tr></thead>
                         <tbody>
                         @foreach (var t in _traces)
                         {
@@ -116,7 +114,7 @@
                                 <td>@HeimdallFmt.Ts(t.FirstStartUnixNano)</td>
                                 <td>@HeimdallFmt.Dur(t.DurationNs)</td>
                                 <td>@t.SpanCount</td>
-                                <td>@(t.HasError ? "✕" : "✓")</td>
+                                <td>@(t.HasError ? I18n.T("traces.status.errbadge") : I18n.T("traces.status.okbadge"))</td>
                             </tr>
                         }
                         </tbody>
@@ -127,13 +125,9 @@
     }
     else
     {
-        <p class="hmd-empty">Keine Daten für „@Requests" — Counter-Namen prüfen, Zeitraum erweitern oder <a href="@(BasePath + "/dashboard?" + RangeQuery(""))">verfügbare Metriken</a> anzeigen.</p>
+        <p class="hmd-empty" role="status">@I18n.T("dashboard.nodata.prefix", Requests)<a href="@(BasePath + "/dashboard?" + RangeQuery(""))">@I18n.T("dashboard.nodata.link")</a>@I18n.T("dashboard.nodata.suffix")</p>
     }
-
-    <HeimdallFooter BasePath="@BasePath" />
-</main>
-</body>
-</html>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";
@@ -173,6 +167,9 @@
     private string _errTone = "ok";
     private string _upTone = "ok";
     private string _p95Tone = "ok";
+
+    /// <summary>Accessibler Tone-Text („Kritisch"/„Warnung"/„OK") für die KPI-Farb-Aussage.</summary>
+    private string ToneText(string tone) => tone is "ok" or "warn" or "err" or "accent" ? I18n.T("kpi.tone." + tone) : "";
 
     protected override void OnInitialized()
     {

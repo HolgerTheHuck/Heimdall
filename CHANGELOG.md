@@ -7,12 +7,75 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
-_(keine Änderungen seit 1.1.0)_
+_(noch nichts veröffentlicht)_
 
-## [1.1.0] — 2026-08-23
+## [1.1.0] — 2026-08-24
 
-Audit-Release: alle 🔴/🟠/🟡-Befunde aus `AUDIT.md` (Komplett-Audit Stand
-2026-08-23). Funktions-Bugs, Security-Baseline, stille Datenverluste,
+UX-Layer über dem Audit-Release: i18n (de/en/fr), Drilldown-Landing, Listen-
+Paging, a11y-Remediation, SelfTelemetry-Schalter, Lazy-Dashboard-Panels
+(Shell sofort, Panels per Vanilla-JS nachgeladen). Dazu das Audit-Release
+(alle 🔴/🟠/🟡-Befunde aus `AUDIT.md`, Stand 2026-08-23): Funktions-Bugs,
+Security-Baseline, stille Datenverluste, AlertEvaluator-Härtung, DX-Fassade,
+Betrieb/UX, Doku/Paketierung. Build sauber, alle Tests grün.
+
+**UX-Layer**
+
+### Hinzugefügt
+- **SelfTelemetry-Schalter (`Heimdall:SelfTelemetry:Enabled`):** unterdrückt
+  Heimdall-Eigentelemetrie im eingebetteten Betrieb, damit das Bedienen des
+  Heimdall-UIs die zu beobachtende App nicht verrauscht. Default `false` → der
+  Heimdall-Exporter verwirft Spans/Metriken der Dashboard-Routes (`/otel/*`,
+  erkannt am `http.route`/`http.target`/`url.path`-Tag) und Logs der Kategorie
+  `Heimdall.*` (AlertEvaluator, Kanäle, …). `true` = alles erfassen, um Heimdall
+  selbst zu untersuchen. App-eigene Routes und Runtime-Metriken bleiben
+  unangetastet. Siehe `README.md` → „Eigentelemetrie unterdrücken".
+- **Exporter-Filteroptionen (`HeimdallExporterOptions`):** `ExcludeRoutePrefixes`
+  (Spans + Metrik-Punkte nach Pfad-Prefix) und `ExcludeLogCategoryPrefixes`
+  (Logs nach Kategorie-Prefix) — die Library-Grundlage des SelfTelemetry-
+  Schalters, frei konfigurierbar für jeden Embedded-Nutzer.
+- **Drilldown-Seite (`/drilldown`):** Sprungseite zu Traces/Logs/Metriken
+  (wie Grafana „Drilldown"). Die drei Signal-Detailseiten sind aus der
+  Menüleiste in diese Landing ausgelagert; die Leiste führt nur noch einen
+  „Drilldown"-Tab. Aktiver Tab wird markiert, wenn man sich auf einer der drei
+  Unterseiten befindet.
+- **Login-Seiten-Styling:** die `LoginPage.razor` nutzt jetzt das Heimdall-
+  Design-System (zentrierte Karte, Panel-Look, Akzentkante, fokus-markierte
+  Felder, Primary-Button) — zuvor ungestylt (Klassen waren nicht definiert).
+- **Paging für die Listen-Seiten:** Logs und Traces sind serverseitig
+  mengenbegrenzt (Limit) und haben jetzt eine „neuer/älter"-Paging-Steuerung
+  (`HeimdallPager`, GET-Links, kein JS), die über das `offset`-Query-Param
+  blättert (Backend-`OFFSET` war schon vorhanden, nur die UI nutzte ihn nicht).
+  Volle Seite = „älter" verfügbar; leere Seite jenseits Offset 0 = „keine
+  weiteren". Metriken (Zeitreihe) bekommt stattdessen „mehr anzeigen", das das
+  Limit verdoppelt (max 5000) — echtes Paging greift hier nicht, da der Chart
+  das ganze Fenster braucht.
+- **i18n (Deutsch/Englisch/Französisch):** vollständige Übersetzung der Heimdall-
+  UI über einen eigenen, schlanken `IHeimdallI18n`-Service (keine .resx). Umschaltbar
+  oben rechts über kleine Flaggen-Buttons (`/lang`-Endpoint setzt ein `heimdall-lang`-
+  Cookie); pro Request aufgelöst aus `?lang=`-Query → Cookie → `Accept-Language` →
+  Default `de`. `<html lang>` passt sich an. Alle Seiten, Komponenten und auch die
+  asynchronen Alert-Benachrichtigungen (SMTP-Betreff/-Body via
+  `HeimdallAlertingOptions.Language`, da der AlertEvaluator ohne HTTP-Kontext läuft)
+  sind übersetzt; Webhook-Payloads bleiben maschinen-lesbar.
+- **Barrierefreiheit (a11y):** durchgehende Remediation — Skip-Link zum `#main`,
+  systemweiter `:focus-visible`-Ring, Tabellen mit `<caption>` + `scope`, `role=img`
+  + lokalisierte `aria-label` auf allen SVG-Charts (Linie/Histogramm/Heatmap/Gauge/
+  BarGauge/Pie/Wasserfall), `role=status` auf Empty-States / `role=alert` auf
+  Fehler-Bannern, `aria-live`-Badge für Auto-Refresh, visuell-versteckter Tone-Text
+  (`Kritisch`/`Warnung`/`OK`) als Fallback zur rein farblichen KPI-Aussage,
+  `aria-hidden` auf dekorativen Emoji/Pfeilen, `aria-current`/`aria-pressed` in der
+  Navigation und Zeitbereich-Steuerung.
+
+### Geändert
+- **Menüleiste:** „Dashboards" direkt hinter „Dashboard" gerückt; Traces/Logs/
+  Metriken als eigene Tabs entfernt (jetzt über „Drilldown").
+- **Dashboard-Überschrift dynamisch:** `Aufrufe pro Sekunde (calls/s)` war
+  hartcodiert und passte nicht zu frei wählbaren Metriken (Discovery-Modus).
+  Jetzt `Rate „<Metrikname>" (/s)`; Chart-Unit `/s`, KPI-Labels entsprechend
+  generisch (`Rate aktuell`, `max /s`).
+
+**Audit-Release** — alle 🔴/🟠/🟡-Befunde aus `AUDIT.md` (Komplett-Audit Stand
+2026-08-23): Funktions-Bugs, Security-Baseline, stille Datenverluste,
 AlertEvaluator-Härtung, DX-Fassade, Betrieb/UX, Doku/Paketierung. Build sauber,
 alle Tests grün (321/321/389 auf net8/9/10).
 
@@ -62,6 +125,22 @@ alle Tests grün (321/321/389 auf net8/9/10).
 - **Zeitzone-Offset (`zzz`):** `HeimdallFmt.Ts` zeigt jetzt den UTC-Offset
   (z. B. `+02:00`), damit Anwender in nicht-UTC-Server-Zonen erkennen, dass die
   Anzeige Server-lokal ist.
+- **Login-Seite (Cookie-Session statt Browser-Basic-Auth-Dialog):** eigene
+  `.razor`-Seite mit HTML-Formular (POST), Branding-fähig, Session-Cookie mit
+  Timeout. `HeimdallSessionCookie` (signed Cookie, HMAC-SHA256 über
+  `user|expiry`, HttpOnly, SameSite=Lax, Secure bei HTTPS, `SessionTimeoutHours`
+  Default 12h). `HeimdallAuthMiddleware` redirectet bei fehlendem Cookie auf
+  `/login` (GET), der Login-Handler validiert Credentials (zeitkonstant via
+  `SecretComparer`), setzt den Cookie und redirectet auf `returnUrl`.
+  Logout-Endpoint löscht den Cookie. Basic-Auth bleibt als Fallback für
+  Scripting/Curl (kein Redirect für non-GET). `HeimdallAuthOptions` additiv um
+  `SessionTimeoutHours`, `CookieName`, `LoginPath`, `LogoutPath`. `AddHeimdallAuth`
+  registriert die Options in DI (für den Login-Handler). API-Pfade (OTLP/Prom)
+  bleiben bei 401 (kein Redirect — API-Clients folgen keinen Redirects).
+- **Blazor-Projektstruktur aufgeräumt:** `Pages/` (8 Seiten), `Components/`
+  (8 UI-Komponenten), `src/` (8 Source-Dateien) — vorher lagen alle Dateien
+  im Root. `@namespace Heimdall.Blazor` in alle Pages/Components (Namespace
+  bleibt Root — keine using-Änderungen nötig).
 
 ### Geändert
 - **`MaxBytes`-Default 5 GB im Host:** Plattenfüller-Schutz bei offenem Ingest

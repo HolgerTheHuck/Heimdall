@@ -209,8 +209,8 @@ dotnet run
 
 Dann:
 
-- **Dashboard:** `http://localhost:<port>/otel` (Übersicht, Traces, Logs, Metriken,
-  Endpoints, Alerts)
+- **Dashboard:** `http://localhost:<port>/otel` (Übersicht, Dashboard, Dashboards,
+  Endpoints, Drilldown → Traces/Logs/Metriken, Alerts)
 - **Prometheus-API:** `http://localhost:<port>/otel/api/v1/query?query=...`
   (Grafana kann hier als Datenquelle zeigen)
 - **Logs-Feldsuche:** `http://localhost:<port>/otel/logs?q={service.name="MyApi"} |= "error"`
@@ -250,6 +250,48 @@ app.UseHeimdallAuth(auth);
 - **`Enabled=false`** (Default) = Zero-Overhead-Passthrough — bestehende
   Deployments unverändert.
 - Vergleiche **zeitkonstant** (`SecretComparer`/`FixedTimeEquals`).
+
+### Eigentelemetrie unterdrücken (`Heimdall:SelfTelemetry`)
+
+Betreibt man Heimdall eingebettet (Pfad A), erfasst das OTel-SDK der **umgebenden
+App** den ganzen Prozess — inklusive der Heimdall-Oberfläche selbst: jeder
+Dashboard-Aufruf (`/otel/*`) erzeugt Spans/Metriken, und Heimdalls interne
+Diagnose-Logs (AlertEvaluator, Alarm-Kanäle, …, Kategorie `Heimdall.*`) landen
+über den Logger-Exporter im Log-Store. Im Dashboard verrauscht das die
+eigentlich zu beobachtende App. Daher ist die Erfassung der
+**Heimdall-Eigentelemetrie per Default aus** — angeschaltet wird sie nur, wenn
+man Heimdall selbst untersuchen will. Konfiguriert in `appsettings.json`:
+
+```json
+"Heimdall": { "SelfTelemetry": { "Enabled": false } }
+```
+
+- **`Enabled: false` (Default)** — der Heimdall-Exporter verwirft Spans und
+  Metrik-Punkte mit `http.route`/`http.target`/`url.path`-Prefix `/otel` sowie
+  Logs der Kategorie `Heimdall.*`. App-eigene Routes (`/api/…`) und
+  Runtime-Metriken (GC, ThreadPool, …) bleiben unangetastet.
+- **`Enabled: true`** — nichts wird verworfen; alle Telemetrie inkl. Heimdalls
+  eigener landet im Dashboard (für die Fehlersuche an Heimdall selbst).
+
+Die Schalter sitzen im Library-Exporter (`HeimdallExporterOptions`), nicht nur
+im Sample — jeder Embedded-Nutzer profitiert. Im Host der App:
+
+```csharp
+var resource = new HeimdallExporterOptions { Sink = sink, ServiceName = "MyApi", … };
+if (!builder.Configuration.GetValue<bool>("Heimdall:SelfTelemetry:Enabled"))
+{
+    resource.ExcludeRoutePrefixes = new[] { "/otel" };       // Dashboard-Routes
+    resource.ExcludeLogCategoryPrefixes = new[] { "Heimdall." }; // Diagnose-Logs
+}
+builder.Services.AddOpenTelemetry()
+    .WithTracing(t => t.UseHeimdallExporter(resource))
+    .WithMetrics(m => m.UseHeimdallExporter(resource))
+    .WithLogging(l => l.UseHeimdallExporter(resource));
+```
+
+Beide Listen sind frei konfigurierbar: weitere eigene Pfade (z. B. `/health`)
+oder weitere Kategorie-Prefixe lassen sich ergänzen; `null`/leer = nichts
+verwerfen.
 
 ### Pfad B — Stand-alone Host + OTLP
 
@@ -383,13 +425,28 @@ Voraussetzungen: .NET 8/9/10 SDK. 1.0 ist SQLite-only und hat keine
 Cross-Repo-Abhängigkeiten — ein kompletter Klon baut und testet ohne das
 Nachbarrepo `../Walhalla`.
 
-## Walhalla-Backend
+## Roadmap: Walhalla-Backend (v2.0.0)
 
-1.0 liefert nur das SQLite-Backend. Das frühere `Heimdall.Storage.Walhalla`
-(konsumierte die eingebettete WalhallaSql-Engine via cross-repo
-`ProjectReference`) ist aus Heimdall entfernt. Die Vertrags-Schicht
+Geplant für 2.0.0, nicht Teil der 1.x-Linie. Bis dahin gilt `Backend=sqlite`.
+
+**A) Walhalla als Heimdall-Storage-Backend (ersetzt SQLite).** Das frühere
+`Heimdall.Storage.Walhalla` (konsumierte die eingebettete WalhallaSql-Engine via
+cross-repo `ProjectReference`) ist aus Heimdall entfernt. Die Vertrags-Schicht
 `Heimdall.Abstractions` ist so angelegt, dass Walhalla künftig als
 **NuGet-Konsument** wiederkommt: sobald `Heimdall.Abstractions` gepackt ist,
-referenziert Walhalla nur noch dieses Paket (keine Zirkelabhängigkeit mehr),
-und ein separates `Heimdall.Storage.Walhalla`-Paket kann das Backend als
-NuGet-Abhängigkeit wieder anbieten. Bis dahin gilt `Backend=sqlite`.
+referenziert ein separates `Heimdall.Storage.Walhalla`-Paket nur dieses Paket
+(keine Zirkelabhängigkeit mehr) und implementiert `IHeimdallSink` +
+`IHeimdallQuery` + `IHeimdallMetricSource` — die SQLite-Implementierung
+(`src/Heimdall.Storage.SQLite`) ist dabei die Referenz-Spec. Der
+Erweiterungspunkt steht bereits in `host/Heimdall.Host/Program.cs` (`BuildSink`,
+Zweig `Backend=="walhalla"`).
+
+**B) Heimdall als Telemetriesystem für Walhalla.** Walhalla wird mit dem
+OpenTelemetry-.NET-SDK + `UseHeimdallExporter` instrumentiert (Metriken, Traces
+pro SQL-Statement, Logs). Zur Vermeidung der Rekursion gilt die
+Zwei-Instanzen-Topologie: **Heimdall-DATA** (`Backend=walhalla`, speichert
+App-Telemetrie in Walhalla-prod, instrumentiert sich NICHT selbst) und
+**Heimdall-CONTROL** (empfängt Walhallas Selbst-Telemetrie, speichert sie NICHT
+im überwachten Walhalla-prod, sondern in SQLite oder einem separaten
+Kontroll-Depot) — sonst verstärkt sich die Schleife, und bei einem
+Walhalla-Ausfall fiele genau die Telemetrie aus, die ihn melden soll.

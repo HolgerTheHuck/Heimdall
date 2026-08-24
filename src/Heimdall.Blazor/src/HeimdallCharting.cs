@@ -361,7 +361,7 @@ internal static class HeimdallCharting
     };
 
     /// <summary>Erzeugt das Balkendiagramm (Histogramm-Verteilung) als SVG-String.</summary>
-    public static string RenderHistSvg(IReadOnlyList<long> counts, IReadOnlyList<double> bounds, int width, int height)
+    public static string RenderHistSvg(IReadOnlyList<long> counts, IReadOnlyList<double> bounds, int width, int height, string? ariaLabel = null)
     {
         if (counts is null || counts.Count == 0) return string.Empty;
         const double padL = 44, padT = 14, padB = 28, padR = 8;
@@ -372,7 +372,8 @@ internal static class HeimdallCharting
 
         var sb = new StringBuilder(1024);
         sb.Append("<svg viewBox=\"0 0 ").Append(width).Append(' ').Append(height)
-          .Append("\" class=\"hmd-chart hmd-hist\" role=\"img\" aria-label=\"Histogramm\" preserveAspectRatio=\"xMidYMid meet\">");
+          .Append("\" class=\"hmd-chart hmd-hist\" role=\"img\" aria-label=\"")
+          .Append(Esc(ariaLabel ?? "Histogramm")).Append("\" preserveAspectRatio=\"xMidYMid meet\">");
         sb.Append("<line class=\"hmd-chart-grid\" x1=\"").Append(F(padL)).Append("\" y1=\"")
           .Append(F(padT)).Append("\" x2=\"").Append(F(padL + plotW)).Append("\" y2=\"").Append(F(padT)).Append("\"/>");
         sb.Append("<line class=\"hmd-chart-axis\" x1=\"").Append(F(padL)).Append("\" y1=\"")
@@ -410,7 +411,7 @@ internal static class HeimdallCharting
     /// </summary>
     public static string RenderHeatmapSvg(
         IReadOnlyList<HeatmapBucket> buckets, IReadOnlyList<long> columnTimesMs,
-        double maxValue, int width, int height)
+        double maxValue, int width, int height, string? ariaLabel = null)
     {
         if (buckets is null || buckets.Count == 0 || columnTimesMs is null || columnTimesMs.Count == 0)
             return string.Empty;
@@ -430,7 +431,8 @@ internal static class HeimdallCharting
 
         var sb = new StringBuilder(8192);
         sb.Append("<svg viewBox=\"0 0 ").Append(width).Append(' ').Append(F(svgH))
-          .Append("\" class=\"hmd-chart hmd-heatmap\" role=\"img\" aria-label=\"Heatmap\" preserveAspectRatio=\"xMidYMid meet\">");
+          .Append("\" class=\"hmd-chart hmd-heatmap\" role=\"img\" aria-label=\"")
+          .Append(Esc(ariaLabel ?? "Heatmap")).Append("\" preserveAspectRatio=\"xMidYMid meet\">");
 
         // Achsenrahmen (links + unten).
         sb.Append("<line class=\"hmd-chart-axis\" x1=\"").Append(F(padL)).Append("\" y1=\"")
@@ -556,7 +558,7 @@ internal static class HeimdallCharting
     /// Erzeugt horizontale Balken (Bargauge) als SVG. Jede Zeile skaliert gegen
     /// das Maximum aller Zeilen; Entartungen (leer, max<=0) werden abgesichert.
     /// </summary>
-    public static string RenderBarGaugeSvg(IReadOnlyList<BarGaugeRow> rows, int w, int h)
+    public static string RenderBarGaugeSvg(IReadOnlyList<BarGaugeRow> rows, int w, int h, string? ariaLabel = null)
     {
         if (rows is null || rows.Count == 0) return string.Empty;
         const double padL = 120, padT = 6, padB = 6, padR = 48;
@@ -571,7 +573,8 @@ internal static class HeimdallCharting
 
         var sb = new StringBuilder(512);
         sb.Append("<svg viewBox=\"0 0 ").Append(w).Append(' ').Append(h)
-          .Append("\" class=\"hmd-chart hmd-bargauge\" role=\"img\" aria-label=\"Bargauge\" preserveAspectRatio=\"xMidYMid meet\">");
+          .Append("\" class=\"hmd-chart hmd-bargauge\" role=\"img\" aria-label=\"")
+          .Append(Esc(ariaLabel ?? "Bargauge")).Append("\" preserveAspectRatio=\"xMidYMid meet\">");
         for (int i = 0; i < rows.Count; i++)
         {
             var row = rows[i];
@@ -633,7 +636,7 @@ internal static class HeimdallCharting
     /// Negatives/NaN werden abgesichert; die Gesamtsumme darf null sein
     /// (dann bleibt ein grauer Vollkreis).
     /// </summary>
-    public static string RenderPieSvg(IReadOnlyList<PieSlice> slices, int w, int h)
+    public static string RenderPieSvg(IReadOnlyList<PieSlice> slices, int w, int h, string? ariaLabel = null)
     {
         if (slices is null || slices.Count == 0) return string.Empty;
         double cx = w * 0.36, cy = h / 2.0;
@@ -644,7 +647,8 @@ internal static class HeimdallCharting
 
         var sb = new StringBuilder(512);
         sb.Append("<svg viewBox=\"0 0 ").Append(w).Append(' ').Append(h)
-          .Append("\" class=\"hmd-chart hmd-pie\" role=\"img\" aria-label=\"Kreisdiagramm\" preserveAspectRatio=\"xMidYMid meet\">");
+          .Append("\" class=\"hmd-chart hmd-pie\" role=\"img\" aria-label=\"")
+          .Append(Esc(ariaLabel ?? "Kreisdiagramm")).Append("\" preserveAspectRatio=\"xMidYMid meet\">");
 
         if (total <= 0)
         {

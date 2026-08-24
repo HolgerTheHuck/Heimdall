@@ -1,0 +1,34 @@
+@namespace Heimdall.Blazor
+@* Paging-Steuerung für server-gerenderte Listen (Logs, Traces). Reine GET-Links
+   (kein JS): „neuer" springt zu niedrigerem Offset, „älter" zu höherem. Die
+   Aufrufseite berechnet die URLs (erhält alle Filter-Params) und entscheidet über
+   HasPrev/HasNext (Offset>0 bzw. Seite voll = Limit erreicht). RangeLabel zeigt
+   die aktuelle Zeilenspanne. Deaktivierte Zustände als Ghost-Button (kein Link). *@
+@inject Heimdall.Blazor.IHeimdallI18n I18n
+<nav class="hmd-pager">
+    @if (HasPrev)
+    {
+        <a class="hmd-btn" href="@PrevUrl" rel="prev"><span aria-hidden="true">←</span> @I18n.T("pager.newer")</a>
+    }
+    else
+    {
+        <span class="hmd-btn hmd-btn-ghost" aria-disabled="true"><span aria-hidden="true">←</span> @I18n.T("pager.newer")</span>
+    }
+    <span class="hmd-pager-range hmd-dim">@RangeLabel</span>
+    @if (HasNext)
+    {
+        <a class="hmd-btn" href="@NextUrl" rel="next">@I18n.T("pager.older") <span aria-hidden="true">→</span></a>
+    }
+    else
+    {
+        <span class="hmd-btn hmd-btn-ghost" aria-disabled="true">@I18n.T("pager.older") <span aria-hidden="true">→</span></span>
+    }
+</nav>
+
+@code {
+    [Parameter] public bool HasPrev { get; set; }
+    [Parameter] public bool HasNext { get; set; }
+    [Parameter] public string PrevUrl { get; set; } = "#";
+    [Parameter] public string NextUrl { get; set; } = "#";
+    [Parameter] public string RangeLabel { get; set; } = "";
+}

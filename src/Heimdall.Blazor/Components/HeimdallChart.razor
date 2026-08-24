@@ -4,10 +4,11 @@
    in HeimdallCharting.RenderLineSvg und wird als MarkupString ausgegeben — das
    vermeidet die Razor-SVG-<text>-Parsing-Pitfalls. *@
 @using System.Collections.Generic
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
 @if (string.IsNullOrEmpty(_svg))
 {
-    <p class="hmd-empty">Keine Daten zum Zeichnen.</p>
+    <p class="hmd-empty" role="status">@I18n.T("chart.empty")</p>
 }
 else
 {
@@ -15,7 +16,7 @@ else
         @((MarkupString)_svg)
         @if (!string.IsNullOrEmpty(Unit))
         {
-            <figcaption class="hmd-chart-unit">Y-Achse: @Unit</figcaption>
+            <figcaption class="hmd-chart-unit">@I18n.T("chart.yaxis") @Unit</figcaption>
         }
         @if (_legend.Count > 0)
         {
@@ -34,7 +35,7 @@ else
     [Parameter] public string? Unit { get; set; }
     [Parameter] public int Width { get; set; } = 800;
     [Parameter] public int Height { get; set; } = 240;
-    [Parameter] public string AriaLabel { get; set; } = "Metrik-Zeitreihe";
+    [Parameter] public string? AriaLabel { get; set; }
 
     private string _svg = string.Empty;
     private List<(string Label, string Color)> _legend = new();
@@ -44,7 +45,8 @@ else
         _legend.Clear();
         var g = HeimdallCharting.ScaleChart(Series ?? Array.Empty<ChartSeries>(), Width, Height);
         if (g is null) { _svg = string.Empty; return; }
-        _svg = HeimdallCharting.RenderLineSvg(g, AriaLabel);
+        var label = string.IsNullOrEmpty(AriaLabel) ? I18n.T("chart.aria.line") : AriaLabel;
+        _svg = HeimdallCharting.RenderLineSvg(g, label);
         foreach (var s in g.Series)
             _legend.Add((s.Label, s.Color));
     }

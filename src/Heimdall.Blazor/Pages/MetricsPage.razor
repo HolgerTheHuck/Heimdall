@@ -4,36 +4,32 @@
 @using System.Collections.Generic
 @using System.Globalization
 @inject Heimdall.IHeimdallQuery Query
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Metriken" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main">
-    <h1>Metriken</h1>
+<HeimdallDocument Title="@I18n.T("page.title.metrics")" BasePath="@BasePath">
+    <h1>@I18n.T("page.title.metrics")</h1>
 
     <form class="hmd-filters" method="get" action="@(BasePath + "/metrics")">
-        <label>Name <input type="search" name="name" value="@Name" placeholder="http.server.request.duration" /></label>
-        <label>Limit <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
+        <label>@I18n.T("metrics.filter.name") <input type="search" name="name" value="@Name" placeholder="http.server.request.duration" /></label>
+        <label>@I18n.T("metrics.filter.limit") <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
         <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
-        <button type="submit">Laden</button>
+        <button type="submit">@I18n.T("metrics.filter.load")</button>
     </form>
 
     @if (string.IsNullOrWhiteSpace(Name))
     {
-        <h2 class="hmd-subhead">Verfügbare Metriken</h2>
+        <h2 class="hmd-subhead">@I18n.T("metrics.available.title")</h2>
         @if (_availableNames.Count == 0)
         {
-            <section class="hmd-empty-state">
-                <h2>Keine Metriken</h2>
-                <p>Im gewählten Zeitraum liegen keine Metrik-Punkte vor. Zeitraum erweitern oder Metriken senden.</p>
-                <p class="hmd-dim">OTLP/HTTP <code>POST @BasePath/v1/metrics</code> · gRPC <code>localhost:4317</code> · zurück zur <a href="@BasePath">Übersicht</a></p>
+            <section class="hmd-empty-state" role="status">
+                <h2>@I18n.T("metrics.empty.title")</h2>
+                <p>@I18n.T("metrics.empty.body")</p>
+                <p class="hmd-dim">@I18n.T("traces.empty.hint.http") <code>POST @BasePath/v1/metrics</code> · @I18n.T("traces.empty.hint.grpc") <code>localhost:4317</code> · @I18n.T("common.back.to") <a href="@BasePath">@I18n.T("nav.overview")</a></p>
             </section>
         }
         else
         {
-            <p class="hmd-dim">@Query.CountMetrics() Metrik-Punkte gesamt im Zeitraum. Namen wählen zum Anzeigen der Serie:</p>
+            <p class="hmd-dim">@I18n.T("metrics.available.hint", Query.CountMetrics())</p>
             <ul class="hmd-metric-list">
             @foreach (var n in _availableNames)
             {
@@ -44,31 +40,37 @@
     }
     else if (_series.Count == 0)
     {
-        <section class="hmd-empty-state">
-            <h2>Keine Messpunkte für „@Name"</h2>
-            <p>Zu diesem Metrik-Namen liegen im Zeitraum keine Punkte vor. Namen prüfen, Zeitraum erweitern oder Metriken senden.</p>
-            <p class="hmd-dim">OTLP/HTTP <code>POST @BasePath/v1/metrics</code> · gRPC <code>localhost:4317</code> · zurück zur <a href="@BasePath">Übersicht</a></p>
+        <section class="hmd-empty-state" role="status">
+            <h2>@I18n.T("metrics.empty.series.title", Name)</h2>
+            <p>@I18n.T("metrics.empty.series.body")</p>
+            <p class="hmd-dim">@I18n.T("traces.empty.hint.http") <code>POST @BasePath/v1/metrics</code> · @I18n.T("traces.empty.hint.grpc") <code>localhost:4317</code> · @I18n.T("common.back.to") <a href="@BasePath">@I18n.T("nav.overview")</a></p>
         </section>
     }
     else
     {
         <h2 class="hmd-subhead">
             @Name · @((Heimdall.HMetricType)_type) · @((Heimdall.HTemporality)_temp)
-            @if (!string.IsNullOrEmpty(_unit)) { <span class="hmd-dim">· Einheit @_unit</span> }
+            @if (!string.IsNullOrEmpty(_unit)) { <span class="hmd-dim">· @I18n.T("metrics.unit") @_unit</span> }
         </h2>
 
-        <HeimdallChart Series="@_chartSeries" Unit="@_unit" Height="240" />
+        <HeimdallChart Series="@_chartSeries" Unit="@_unit" AriaLabel="@I18n.T("chart.aria.metric", Name)" Height="240" />
+
+        @if (_truncated)
+        {
+            <p class="hmd-count">@I18n.T("metrics.truncated.body", _series.Count, _pageSize) <a class="hmd-btn" href="@MoreUrl()">@I18n.T("metrics.truncated.more", _nextLimit)</a></p>
+        }
 
         @if (_histCounts.Count > 0)
         {
-            <h3 class="hmd-subhead-sm">Verteilung (letzter Punkt)</h3>
-            <HeimdallHistogram BucketCounts="@_histCounts" ExplicitBounds="@_histBounds" Unit="@_unit" />
+            <h3 class="hmd-subhead-sm">@I18n.T("metrics.distribution.title")</h3>
+            <HeimdallHistogram BucketCounts="@_histCounts" ExplicitBounds="@_histBounds" Unit="@_unit" AriaLabel="@I18n.T("chart.hist.aria")" />
         }
 
         <details class="hmd-raw">
-            <summary>Roh-Tabelle (@_series.Count Punkt(e))</summary>
+            <summary>@I18n.T("metrics.raw.summary", _series.Count)</summary>
             <table class="hmd-table">
-                <thead><tr><th>Zeit</th><th>Typ</th><th>Wert</th><th>Count</th><th>Sum</th><th>Min</th><th>Max</th><th>Attrs</th></tr></thead>
+                <caption>@I18n.T("metrics.raw.caption")</caption>
+                <thead><tr><th scope="col">@I18n.T("table.time")</th><th scope="col">@I18n.T("metrics.col.type")</th><th scope="col">@I18n.T("metrics.col.value")</th><th scope="col">@I18n.T("metrics.col.count")</th><th scope="col">@I18n.T("metrics.col.sum")</th><th scope="col">Min</th><th scope="col">Max</th><th scope="col">@I18n.T("metrics.col.attrs")</th></tr></thead>
                 <tbody>
                 @foreach (var m in _series)
                 {
@@ -87,11 +89,8 @@
             </table>
         </details>
     }
-    <p class="hmd-count">@_series.Count Punkt(e) · @Query.CountMetrics() Metrik-Punkte gesamt</p>
-    <HeimdallFooter BasePath="@BasePath" />
-</main>
-</body>
-</html>
+    <p class="hmd-count">@I18n.T("metrics.count.bottom", _series.Count, Query.CountMetrics())</p>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";
@@ -109,6 +108,9 @@
     private int _type;
     private int _temp;
     private string? _unit;
+    private int _pageSize;
+    private int _nextLimit;
+    private bool _truncated;
 
     protected override void OnInitialized()
     {
@@ -121,9 +123,17 @@
             return;
         }
 
+        _pageSize = Limit < 1 ? 500 : Limit;
+        if (_pageSize > 5000) _pageSize = 5000;
         _series = new List<Heimdall.MetricRow>(
-            Query.MetricSeries(Name, range.From, range.To, Limit < 1 ? 500 : Limit));
+            Query.MetricSeries(Name, range.From, range.To, _pageSize));
         if (_series.Count == 0) return;
+
+        // Serie am Limit → wahrscheinlich mehr Punkte im Zeitraum. „mehr anzeigen"
+        // verdoppelt das Limit (max 5000), da Metriken eine Zeitreihe sind und echtes
+        // Paging (Offset) hier nicht greift (Chart braucht das ganze Fenster).
+        _truncated = _series.Count >= _pageSize && _pageSize < 5000;
+        _nextLimit = Math.Min(_pageSize * 2, 5000);
 
         _type = _series[0].Type;
         _temp = _series[0].Temporality;
@@ -178,5 +188,18 @@
             if (To is not null) s += "&to=" + To.Value.ToString(CultureInfo.InvariantCulture);
         }
         return s;
+    }
+
+    /// <summary>URL zum Laden weiterer Punkte (Limit verdoppeln, max 5000).</summary>
+    private string MoreUrl()
+    {
+        var s = "name=" + System.Uri.EscapeDataString(Name ?? "") + "&limit=" + _nextLimit.ToString(CultureInfo.InvariantCulture);
+        if (!string.IsNullOrEmpty(Preset)) s += "&preset=" + System.Uri.EscapeDataString(Preset);
+        else
+        {
+            if (From is not null) s += "&from=" + From.Value.ToString(CultureInfo.InvariantCulture);
+            if (To is not null) s += "&to=" + To.Value.ToString(CultureInfo.InvariantCulture);
+        }
+        return BasePath + "/metrics?" + s;
     }
 }

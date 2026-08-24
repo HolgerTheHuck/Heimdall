@@ -1,0 +1,46 @@
+@namespace Heimdall.Blazor
+@* Gemeinsames Dokument-Skeleton für alle Heimdall-Seiten. Single-Sources
+   <html lang> (aus dem per-Request resolveden IHeimdallI18n.Lang), <head>
+   (via HeimdallHead), Skip-Link (a11y), HeimdallNav (mit Flaggen-Schalter),
+   <main id="main"> als Skip-Ziel und HeimdallFooter. ersetzt die früher 15×
+   duplizierten Seitenskeletons. Statisches SSR, kein JS. *@
+@inject Heimdall.Blazor.IHeimdallI18n I18n
+<!DOCTYPE html>
+<html lang="@I18n.Lang">
+<head><HeimdallHead Title="@Title" /></head>
+<body class="@BodyClass">
+    <a class="hmd-skip" href="#main">@I18n.T("nav.skip")</a>
+    @if (!HideNav)
+    {
+        <HeimdallNav BasePath="@BasePath" />
+    }
+    <main id="main" class="@MainClass">@ChildContent</main>
+    @if (!HideFooter)
+    {
+        <HeimdallFooter BasePath="@BasePath" />
+    }
+</body>
+</html>
+
+@code {
+    /// <summary>Lokalisierter <title>/Überschrift-Titel der Seite.</summary>
+    [Parameter] public string Title { get; set; } = "Heimdall";
+
+    /// <summary>Dashboard-Prefix (Default /otel), durchgereicht an Nav/Footer.</summary>
+    [Parameter] public string BasePath { get; set; } = "/otel";
+
+    /// <summary>CSS-Klasse des <main>-Containers (z. B. "hmd-main hmd-main-wide").</summary>
+    [Parameter] public string MainClass { get; set; } = "hmd-main";
+
+    /// <summary>Optionale <body>-Klasse (z. B. Login-Variante).</summary>
+    [Parameter] public string? BodyClass { get; set; }
+
+    /// <summary>Nav ausblenden (Login-Seite).</summary>
+    [Parameter] public bool HideNav { get; set; }
+
+    /// <summary>Footer ausblenden (Login-Seite).</summary>
+    [Parameter] public bool HideFooter { get; set; }
+
+    /// <summary>Seiteninhalt innerhalb <main>.</summary>
+    [Parameter] public Microsoft.AspNetCore.Components.RenderFragment? ChildContent { get; set; }
+}

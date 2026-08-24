@@ -329,4 +329,132 @@ public class GrafanaTemplatingTests
         var v2 = new GrafanaTemplatingVar("job", "query", "label_values(x, job)", null, true, true);
         Assert.Equal("$__all", GrafanaTemplating.SelectedValue(v2, null));
     }
+
+    // --- InterpolateLinkUrl / InterpolateLinkTitle (Cross-Dashboard Data-Links) --
+    // Grafana-Tabellen-Links (fieldConfig.overrides → properties[id=links]) referenzieren
+    // Ziel-Dashboards per /d/<uid>/<slug> und tragen Feld-/Zeit-/Variablen-Platzhalter.
+    // Heimdall löst sie pro Zeile auf: /d/ → <basePath>/dashboards/<uid>, Felder
+    // URL-kodiert, ${__url_time_range} → Unix-ns (für ParseNs), ${var:queryparam} → var-<n>=…
+
+    [Fact]
+    public void InterpolateLinkUrl_UrlTimeRange_LiefertUnixNs()
+    {
+        // from/to in ms → ns (×1_000_000), damit der Dashboard-Endpoint ParseNs versteht.
+        var got = GrafanaTemplating.InterpolateLinkUrl(
+            "/d/h1FE3PpWk/summary?${__url_time_range}",
+            new Dictionary<string, string>(0), null!, fromMs: 1_000, toMs: 3_000, basePath: "/otel");
+        Assert.Equal("/otel/dashboards/h1FE3PpWk?from=1000000000&to=3000000000", got);
+    }
+
+    [Fact]
+    public void InterpolateLinkUrl_DataFields_WerdenKodiert()
+    {
+        // ${__data.fields.X} → Uri.EscapeDataString(Wert); api/Orders → api%2FOrders.
+        var fv = new Dictionary<string, string> { ["http_route"] = "api/Orders" };
+        var got = GrafanaTemplating.InterpolateLinkUrl(
+            "/d/h1FE3PpWk/s?var-route=${__data.fields.http_route}",
+            fv, null!, 0, 0, "/otel");
+        Assert.Equal("/otel/dashboards/h1FE3PpWk?var-route=api%2FOrders", got);
+    }
+
+    [Fact]
+    public void InterpolateLinkUrl_FieldAlias_EbenfallsErkannt()
+    {
+        // ${__field.X} ist Grafanas älterer Alias für ${__data.fields.X}.
+        var fv = new Dictionary<string, string> { ["http_route"] = "/x" };
+        var got = GrafanaTemplating.InterpolateLinkUrl(
+            "/d/x/s?r=${__field.http_route}", fv, null!, 0, 0, "/otel");
+        Assert.Equal("/otel/dashboards/x?r=%2Fx", got);
+    }
+
+    [Fact]
+    public void InterpolateLinkUrl_FehlendesFeld_LiefertLeer()
+    {
+        // Fehlt der Feld-Wert in der Zeile, wird der Platzhalter zu leerstring.
+        var got = GrafanaTemplating.InterpolateLinkUrl(
+            "/d/x/s?r=${__data.fields.missing}", new Dictionary<string, string>(0), null!, 0, 0, "/otel");
+        Assert.Equal("/otel/dashboards/x?r=", got);
+    }
+
+    [Fact]
+    public void InterpolateLinkUrl_QueryParam_LiefertVarGleichWert()
+    {
+        // ${var:queryparam} und ${var-<n>:queryparam} → var-<n>=<kodierter Wert>.
+        var vars = new Dictionary<string, string> { ["job"] = "shop", ["route"] = "api/Orders" };
+        var got = GrafanaTemplating.InterpolateLinkUrl(
+            "/d/x/s?${job:queryparam}&${var-route:queryparam}", null!, vars, 0, 0, "/otel");
+        Assert.Equal("/otel/dashboards/x?var-job=shop&var-route=api%2FOrders", got);
+    }
+
+    [Fact]
+    public void InterpolateLinkUrl_QueryParam_Fehlt_LiefertAll()
+    {
+        // Variable nicht in vars → $__all → Ziel-Dashboard wählt „alle".
+        var got = GrafanaTemplating.InterpolateLinkUrl(
+            "/d/x/s?${job:queryparam}", null!, new Dictionary<string, string>(0), 0, 0, "/otel");
+        Assert.Equal("/otel/dashboards/x?var-job=%24__all", got);
+    }
+
+    [Fact]
+    public void InterpolateLinkUrl_Komplett_OverviewNachSummary()
+    {
+        // Realistischer Drill-Link aus dem Overview-Dashboard (KdDACDp4z) auf die
+        // Route-Summary (h1FE3PpWk): Felder + Zeitbereich + /d/-Rewrite in einer URL.
+        var fv = new Dictionary<string, string>
+        {
+            ["http_route"] = "api/Orders",
+            ["http_request_method"] = "GET",
+        };
+        var got = GrafanaTemplating.InterpolateLinkUrl(
+            "/d/h1FE3PpWk/asp-net-core-route-summary?var-route=${__data.fields.http_route}" +
+            "&var-method=${__data.fields.http_request_method}&${__url_time_range}",
+            fv, null!, fromMs: 1_000, toMs: 3_000, basePath: "/otel");
+        Assert.Equal(
+            "/otel/dashboards/h1FE3PpWk?var-route=api%2FOrders&var-method=GET&from=1000000000&to=3000000000",
+            got);
+    }
+
+    [Fact]
+    public void InterpolateLinkUrl_DashPathOhneSlug()
+    {
+        // /d/<uid> ohne Slug-Anteil (direkt gefolgt von ?) wird ebenfalls korrekt gerewritet.
+        var got = GrafanaTemplating.InterpolateLinkUrl("/d/abc?x=1", null!, null!, 0, 0, "/otel");
+        Assert.Equal("/otel/dashboards/abc?x=1", got);
+    }
+
+    [Fact]
+    public void InterpolateLinkUrl_BasePathWirdRespektiert()
+    {
+        // Andere Einbindung (z. B. /telemetry) → basePath ersetzt /d/ entsprechend.
+        var got = GrafanaTemplating.InterpolateLinkUrl("/d/abc/s", null!, null!, 0, 0, "/telemetry");
+        Assert.Equal("/telemetry/dashboards/abc", got);
+    }
+
+    [Fact]
+    public void InterpolateLinkUrl_FeldVorPfadRewrite_VermeidetDoppelTreffer()
+    {
+        // Ein Feldwert, der zufällig "/d/" enthält, darf KEINEN neuen Pfad-Rewrite
+        // auslösen — Feld-Escaping (step 2) läuft vor dem Pfad-Rewrite (step 4).
+        // EscapeDataString macht "/" → %2F, also kein "/d/" im Ergebnis.
+        var fv = new Dictionary<string, string> { ["http_route"] = "/d/evil/x" };
+        var got = GrafanaTemplating.InterpolateLinkUrl(
+            "/d/abc/s?r=${__data.fields.http_route}", fv, null!, 0, 0, "/otel");
+        Assert.Equal("/otel/dashboards/abc?r=%2Fd%2Fevil%2Fx", got);
+    }
+
+    [Fact]
+    public void InterpolateLinkTitle_LöstFelderNichtKodiert()
+    {
+        // Titel (Tooltip) bekommt die Feldwerte unkodiert (für Menschen lesbar).
+        var fv = new Dictionary<string, string> { ["http_request_method"] = "GET", ["http_route"] = "api/Orders" };
+        Assert.Equal("GET api/Orders",
+            GrafanaTemplating.InterpolateLinkTitle("${__data.fields.http_request_method} ${__data.fields.http_route}", fv));
+    }
+
+    [Fact]
+    public void InterpolateLinkTitle_Null_Leer()
+    {
+        Assert.Equal("", GrafanaTemplating.InterpolateLinkTitle(null, new Dictionary<string, string>(0)));
+        Assert.Equal("", GrafanaTemplating.InterpolateLinkTitle("", new Dictionary<string, string>(0)));
+    }
 }

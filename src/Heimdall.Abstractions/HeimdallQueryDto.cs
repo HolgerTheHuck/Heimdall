@@ -61,7 +61,12 @@ public sealed record MetricRow(
     string? ExplicitBoundsJson,
     string AttrsJson);
 
-/// <summary>Filter fuer Trace-Auflistung.</summary>
+/// <summary>Filter fuer Trace-Auflistung.
+/// <c>Sort</c>/<c>Dir</c> steuern die serverseitige Sortierung VOR dem
+/// Paging (damit z. B. die Langläufer-Top über alle Seiten sichtbar werden,
+/// nicht nur innerhalb einer Seite). <c>Sort</c> ∈ start/duration/spans/status
+/// (Allowlist im SQLite-Backend), <c>Dir</c> ∈ asc/desc; null = bisher
+/// (neueste zuerst, first_start DESC).</summary>
 public sealed record TraceFilter(
     long? FromUnixNano = null,
     long? ToUnixNano = null,
@@ -69,7 +74,9 @@ public sealed record TraceFilter(
     string? ServiceName = null,
     string? NameContains = null,
     int Limit = 100,
-    int Offset = 0);
+    int Offset = 0,
+    string? Sort = null,
+    string? Dir = null);
 
 /// <summary>Filter fuer die flache Span-Auflistung (z. B. Server-Spans im
 /// Zeitfenster, gruppiert in der App nach Controller/Endpoint). Kind ist der
@@ -103,7 +110,9 @@ public sealed record LogSearch(
     string? TraceId = null,
     IReadOnlyList<AttrFilter>? AttrFilters = null,
     int Limit = 200,
-    int Offset = 0);
+    int Offset = 0,
+    string? Sort = null,
+    string? Dir = null);
 
 /// <summary>Leseseite; pro Backend eine Implementierung.</summary>
 public interface IHeimdallQuery

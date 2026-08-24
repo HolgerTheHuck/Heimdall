@@ -7,6 +7,7 @@
    erscheinen die strukturierten Attribute + Trace/Span/Scope/Severity darunter.
    TraceId-Spalte ist ein Link auf das Trace-Detail. Rein nativ, kein JS. *@
 @using System.Collections.Generic
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 <tr class="@SevClass()">
     <td class="hmd-mono">@HeimdallFmt.Ts(Log.TimeUnixNano)</td>
     <td><span class="hmd-badge">@HeimdallFmt.Sev(Log.Severity)</span></td>
@@ -25,7 +26,7 @@
                 }
                 else
                 {
-                    <p class="hmd-dim">keine Attribute</p>
+                    <p class="hmd-dim">@I18n.T("trace.attrs.none")</p>
                 }
                 <dl class="hmd-attr-list hmd-attr-ids">
                     <dt>trace</dt><dd class="hmd-mono">@(Log.TraceId ?? "—")</dd>

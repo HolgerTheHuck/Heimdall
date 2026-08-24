@@ -15,11 +15,13 @@ internal sealed class HeimdallTraceExporter : BaseExporter<Activity>
 {
     private readonly IHeimdallSink _sink;
     private readonly HResource _resource;
+    private readonly IReadOnlyList<string>? _excludeRoutes;
 
-    public HeimdallTraceExporter(IHeimdallSink sink, HResource resource)
+    public HeimdallTraceExporter(IHeimdallSink sink, HResource resource, IReadOnlyList<string>? excludeRoutes = null)
     {
         _sink = sink;
         _resource = resource;
+        _excludeRoutes = excludeRoutes;
     }
 
     public override ExportResult Export(in Batch<Activity> batch)
@@ -27,13 +29,31 @@ internal sealed class HeimdallTraceExporter : BaseExporter<Activity>
         var list = new List<HSpan>();
         foreach (var activity in batch)
         {
-            try { list.Add(ToSpan(activity)); }
+            try
+            {
+                // Heimdall-eigene Dashboard-Routes nicht als App-Verkehr erfassen.
+                if (_excludeRoutes is not null && ExcludeRoute(activity, _excludeRoutes)) continue;
+                list.Add(ToSpan(activity));
+            }
             catch { /* eine fehlerhafte Activity verwirft nur sich selbst */ }
         }
         if (list.Count == 0) return ExportResult.Success;
         try { _sink.WriteSpans(list); }
         catch { /* Storage-Fehler darf den SDK-Pipeline nicht infizieren */ }
         return ExportResult.Success;
+    }
+
+    /// <summary>true, wenn der Span einen http.route-/http.target-/url.path-Tag
+    /// trägt, der mit einem der Prefixe beginnt (Heimdall-eigene Routes).</summary>
+    private static bool ExcludeRoute(Activity a, IReadOnlyList<string> prefixes)
+    {
+        foreach (var kv in a.Tags)
+        {
+            if (kv.Value is null) continue;
+            if ((kv.Key == "http.route" || kv.Key == "http.target" || kv.Key == "url.path")
+                && SdkConvert.StartsWithAny(kv.Value, prefixes)) return true;
+        }
+        return false;
     }
 
     private HSpan ToSpan(Activity a)

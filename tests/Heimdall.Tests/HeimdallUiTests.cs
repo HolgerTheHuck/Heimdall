@@ -27,7 +27,9 @@ public class HeimdallUiTests : HostBootTestBase
     {
         var resp = await Client.GetAsync("/otel");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        var body = await resp.Content.ReadAsStringAsync();
+        // Razor HTML-kodiert @I18n.T-Ausgaben (Umlaute → Entity, XSS-sicher); um
+        // den sichtbaren Text zu prüfen, wird der Body vorher dekodiert.
+        var body = System.Net.WebUtility.HtmlDecode(await resp.Content.ReadAsStringAsync());
         Assert.Contains("Übersicht", body);
         // Leere Test-DB → geführter Empty-State (Block 7) statt Navcards.
         Assert.Contains("hmd-empty-state", body);
@@ -50,7 +52,7 @@ public class HeimdallUiTests : HostBootTestBase
         // TracesPage wurde von "/" nach "/traces" verschoben; Root ist nun Home.
         var resp = await Client.GetAsync("/otel/traces");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
-        var body = await resp.Content.ReadAsStringAsync();
+        var body = System.Net.WebUtility.HtmlDecode(await resp.Content.ReadAsStringAsync());
         Assert.Contains("<h1>Traces</h1>", body);
         Assert.Contains("Name enthält", body);   // Traces-Filter-Label
     }
@@ -70,7 +72,9 @@ public class HeimdallUiTests : HostBootTestBase
     public async Task Nav_MarkiertAktivenTabLogs()
     {
         var body = await (await Client.GetAsync("/otel/logs")).Content.ReadAsStringAsync();
-        Assert.Contains("href=\"/otel/logs\" aria-current=\"page\"", body);
+        // Traces/Logs/Metriken hängen unter dem Drilldown-Tab (Gruppe); auf /logs
+        // ist der Drilldown-Tab aktiv, nicht ein eigener Logs-Tab.
+        Assert.Contains("href=\"/otel/drilldown\" aria-current=\"page\"", body);
         // Übersicht-Tab (Root) darf auf /logs nicht aktiv sein.
         Assert.DoesNotContain("href=\"/otel\" aria-current=\"page\"", body);
     }
@@ -79,7 +83,8 @@ public class HeimdallUiTests : HostBootTestBase
     public async Task Nav_MarkiertAktivenTabMetriken()
     {
         var body = await (await Client.GetAsync("/otel/metrics")).Content.ReadAsStringAsync();
-        Assert.Contains("href=\"/otel/metrics\" aria-current=\"page\"", body);
+        // Metriken hängen unter dem Drilldown-Tab; auf /metrics ist dieser aktiv.
+        Assert.Contains("href=\"/otel/drilldown\" aria-current=\"page\"", body);
     }
 
     [Fact]
@@ -208,7 +213,7 @@ public class HeimdallUiTests : HostBootTestBase
         var nowNs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000_000L - 60_000_000_000L;
         sink.WriteMetrics(new[] { MetricPoint("orders", nowNs, 1) });
 
-        var body = await (await Client.GetAsync("/otel/metrics")).Content.ReadAsStringAsync();
+        var body = System.Net.WebUtility.HtmlDecode(await (await Client.GetAsync("/otel/metrics")).Content.ReadAsStringAsync());
         Assert.Contains("Verfügbare Metriken", body);   // Discovery-Modus statt „orders"-Default
         Assert.Contains("orders", body);                 // Name als anklickbarer Link gelistet
     }
@@ -227,7 +232,7 @@ public class HeimdallUiTests : HostBootTestBase
         var nowNs = System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000_000L - 60_000_000_000L;
         sink.WriteMetrics(new[] { MetricPoint("myapp.requests", nowNs, 1) });
 
-        var body = await (await Client.GetAsync("/otel/dashboard")).Content.ReadAsStringAsync();
+        var body = System.Net.WebUtility.HtmlDecode(await (await Client.GetAsync("/otel/dashboard")).Content.ReadAsStringAsync());
         Assert.Contains("Verfügbare Metriken", body);   // Discovery-Modus statt „orders"-Default
         Assert.Contains("myapp.requests", body);         // Name als anklickbarer Link gelistet
         Assert.DoesNotContain("orders", body);           // alter hartkodierter Default weg

@@ -3,31 +3,28 @@
    aufklappbar (<details>, nativ, kein JS) → volle Attribute + Events. *@
 @using System.Collections.Generic
 @inject Heimdall.IHeimdallQuery Query
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Trace" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main">
-    <p class="hmd-back"><a href="@(BasePath + "/traces")">← zurück zu Traces</a></p>
-    <h1>Trace <span class="hmd-mono">@TraceId</span></h1>
+<HeimdallDocument Title="@I18n.T("page.title.trace")" BasePath="@BasePath">
+    <p class="hmd-back"><a href="@(BasePath + "/traces")">@I18n.T("trace.back")</a></p>
+    <h1>@I18n.T("trace.title.prefix")<span class="hmd-mono">@TraceId</span></h1>
 
     @if (_spans.Count == 0)
     {
-        <p class="hmd-empty">Keine Spans zu dieser Trace-ID.</p>
+        <p class="hmd-empty" role="status">@I18n.T("trace.empty.spans")</p>
     }
     else
     {
         @if (!string.IsNullOrEmpty(_waterfall))
         {
-            <h2 class="hmd-subhead">Span-Zeitstrahl</h2>
+            <h2 class="hmd-subhead">@I18n.T("trace.timeline.heading")</h2>
             <figure class="hmd-chart-wrap">@((MarkupString)_waterfall)</figure>
         }
 
-        <h2 class="hmd-subhead">Spans</h2>
+        <h2 class="hmd-subhead">@I18n.T("trace.spans.heading")</h2>
         <table class="hmd-table hmd-dense">
-            <thead><tr><th>Span</th><th>Kind</th><th>Start</th><th>Dauer</th><th>Status</th><th>Attrs</th></tr></thead>
+            <caption>@I18n.T("trace.spans.heading")</caption>
+            <thead><tr><th scope="col">@I18n.T("trace.col.span")</th><th scope="col">@I18n.T("trace.col.kind")</th><th scope="col">@I18n.T("table.start")</th><th scope="col">@I18n.T("table.duration")</th><th scope="col">@I18n.T("table.status")</th><th scope="col">@I18n.T("metrics.col.attrs")</th></tr></thead>
             <tbody>
             @foreach (var s in _spans)
             {
@@ -38,16 +35,16 @@
                         @s.Name
                         @if (!string.IsNullOrEmpty(s.ParentSpanId))
                         {
-                            <span class="hmd-dim">↳ @HeimdallFmt.Truncate(s.ParentSpanId, 8)</span>
+                            <span class="hmd-dim" aria-hidden="true">↳ @HeimdallFmt.Truncate(s.ParentSpanId, 8)</span>
                         }
                     </td>
                     <td>@((Heimdall.HSpanKind)s.Kind)</td>
                     <td>@HeimdallFmt.Ts(s.StartUnixNano)</td>
                     <td>@HeimdallFmt.Dur(s.DurationNs)</td>
-                    <td>@(s.StatusCode == 2 ? "✕ " + (s.StatusMessage ?? "Fehler") : (s.StatusCode == 1 ? "✓ OK" : "—"))</td>
+                    <td>@(s.StatusCode == 2 ? I18n.T("trace.status.errprefix") + (s.StatusMessage ?? I18n.T("trace.status.err")) : (s.StatusCode == 1 ? I18n.T("traces.status.okbadge") : "—"))</td>
                     <td>
                         <details class="hmd-log-details">
-                            <summary class="hmd-log-summary">@(attrs.Count) Attribut(e) @(attrs.Count > 0 ? "▸" : "")</summary>
+                            <summary class="hmd-log-summary">@I18n.T("trace.attrs.count", attrs.Count) @if (attrs.Count > 0) { <span aria-hidden="true">▸</span> }</summary>
                             <div class="hmd-log-full">
                                 @if (attrs.Count > 0)
                                 {
@@ -60,19 +57,19 @@
                                 }
                                 else
                                 {
-                                    <p class="hmd-dim">keine Attribute</p>
+                                    <p class="hmd-dim">@I18n.T("trace.attrs.none")</p>
                                 }
                                 @if (!string.IsNullOrWhiteSpace(s.EventsJson) && s.EventsJson != "[]")
                                 {
                                     <details class="hmd-nested">
-                                        <summary>Events</summary>
+                                        <summary>@I18n.T("trace.events")</summary>
                                         <pre class="hmd-pre">@s.EventsJson</pre>
                                     </details>
                                 }
                                 @if (!string.IsNullOrWhiteSpace(s.ResourceJson) && s.ResourceJson != "{}")
                                 {
                                     <details class="hmd-nested">
-                                        <summary>Resource</summary>
+                                        <summary>@I18n.T("trace.resource")</summary>
                                         <pre class="hmd-pre">@s.ResourceJson</pre>
                                     </details>
                                 }
@@ -85,15 +82,16 @@
         </table>
     }
 
-    <h2 class="hmd-subhead">Logs dieses Traces</h2>
+    <h2 class="hmd-subhead">@I18n.T("trace.logs.heading")</h2>
     @if (_logs.Count == 0)
     {
-        <p class="hmd-empty">Keine Logs mit dieser Trace-ID verknüpft.</p>
+        <p class="hmd-empty" role="status">@I18n.T("trace.logs.empty")</p>
     }
     else
     {
         <table class="hmd-table hmd-logs">
-            <thead><tr><th class="hmd-col-ts">Zeit</th><th class="hmd-col-sev">Sev</th><th>Body</th><th class="hmd-col-trace">Trace</th></tr></thead>
+            <caption>@I18n.T("trace.logs.heading")</caption>
+            <thead><tr><th class="hmd-col-ts" scope="col">@I18n.T("table.time")</th><th class="hmd-col-sev" scope="col">@I18n.T("table.sev")</th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
             <tbody>
             @foreach (var l in _logs)
             {
@@ -102,11 +100,7 @@
             </tbody>
         </table>
     }
-
-    <HeimdallFooter BasePath="@BasePath" />
-</main>
-</body>
-</html>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";

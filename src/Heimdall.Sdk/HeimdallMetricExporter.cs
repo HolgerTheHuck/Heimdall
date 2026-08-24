@@ -15,11 +15,13 @@ internal sealed class HeimdallMetricExporter : BaseExporter<Metric>
 {
     private readonly IHeimdallSink _sink;
     private readonly HResource _resource;
+    private readonly IReadOnlyList<string>? _excludeRoutes;
 
-    public HeimdallMetricExporter(IHeimdallSink sink, HResource resource)
+    public HeimdallMetricExporter(IHeimdallSink sink, HResource resource, IReadOnlyList<string>? excludeRoutes = null)
     {
         _sink = sink;
         _resource = resource;
+        _excludeRoutes = excludeRoutes;
     }
 
     public override ExportResult Export(in Batch<Metric> batch)
@@ -44,10 +46,16 @@ internal sealed class HeimdallMetricExporter : BaseExporter<Metric>
         {
             // MetricTags ist intern; nur ueber var + pattern-basiertes foreach erreichbar.
             var attrsList = new List<HAttribute>();
+            string? route = null;
             foreach (var kv in mp.Tags)
             {
                 if (!string.IsNullOrEmpty(kv.Key)) attrsList.Add(new HAttribute(kv.Key, kv.Value));
+                if (kv.Key == "http.route" && kv.Value is string s) route = s;
             }
+
+            // Heimdall-eigene Dashboard-Routes pro Punkt verwerfen (aspnetcore-Meter
+            // taggen http.server.request.duration etc. mit http.route-Template).
+            if (_excludeRoutes is not null && SdkConvert.StartsWithAny(route, _excludeRoutes)) continue;
             IReadOnlyList<HAttribute> attrs = attrsList.Count == 0 ? HAttributes.Empty : attrsList;
             var ts = SdkConvert.ToUnixNano(mp.EndTime);
             HMetricType htype;

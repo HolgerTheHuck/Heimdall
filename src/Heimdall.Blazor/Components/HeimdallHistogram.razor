@@ -3,16 +3,17 @@
    counts.Length == bounds.Length + 1 (letzter Bucket = +Inf). SVG-Markup via
    HeimdallCharting.RenderHistSvg + MarkupString. *@
 @using System.Collections.Generic
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
 @if (string.IsNullOrEmpty(_svg))
 {
-    <p class="hmd-empty">Keine Buckets.</p>
+    <p class="hmd-empty" role="status">@I18n.T("chart.hist.empty")</p>
 }
 else
 {
     <figure class="hmd-chart-wrap">
         @((MarkupString)_svg)
-        <figcaption class="hmd-chart-unit">Buckets (Anzahl pro Schranke)</figcaption>
+        <figcaption class="hmd-chart-unit">@I18n.T("chart.hist.caption")</figcaption>
     </figure>
 }
 
@@ -22,12 +23,15 @@ else
     [Parameter] public string? Unit { get; set; }
     [Parameter] public int Width { get; set; } = 800;
     [Parameter] public int Height { get; set; } = 200;
+    /// <summary>Accessibler Name für das SVG-Diagramm (z. B. „Histogramm: &lt;Metrik&gt;").</summary>
+    [Parameter] public string? AriaLabel { get; set; }
 
     private string _svg = string.Empty;
 
     protected override void OnParametersSet()
     {
         if (BucketCounts is null || BucketCounts.Count == 0) { _svg = string.Empty; return; }
-        _svg = HeimdallCharting.RenderHistSvg(BucketCounts, ExplicitBounds ?? Array.Empty<double>(), Width, Height);
+        var label = string.IsNullOrEmpty(AriaLabel) ? I18n.T("chart.hist.aria") : AriaLabel;
+        _svg = HeimdallCharting.RenderHistSvg(BucketCounts, ExplicitBounds ?? Array.Empty<double>(), Width, Height, label);
     }
 }

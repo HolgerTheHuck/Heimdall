@@ -1,34 +1,28 @@
 @* Import-Seite: Grafana-Dashboard-JSON per Datei-Upload ODER Paste-Textarea
    hochladen (POST /dashboards/import). Nach dem Import Redirect zur View-Seite. *@
 @inject IGrafanaDashboardStore Store
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Dashboard importieren" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main">
-    <h1>Dashboard importieren</h1>
-    <p class="hmd-dim">Ein exportiertes Grafana-Dashboard-JSON (mit Prometheus/PromQL-Panels) hochladen. Heimdall wertet die Panel-Ausdrücke über die eigene PromQL-Engine aus und rendert sie server-seitig.</p>
+<HeimdallDocument Title="@I18n.T("page.title.grafanaImport")" BasePath="@BasePath">
+    <h1>@I18n.T("page.title.grafanaImport")</h1>
+    <p class="hmd-dim">@I18n.T("grafana.import.subtitle")</p>
 
     <form class="hmd-filters" method="post" action="@(BasePath + "/dashboards/import")" enctype="multipart/form-data">
-        <label>Datei
+        <label>@I18n.T("grafana.import.file")
             <input type="file" name="file" accept="application/json,.json" />
         </label>
-        <label style="flex-basis:100%">… oder JSON direkt einfügen
+        <label style="flex-basis:100%">@I18n.T("grafana.import.json")
             <textarea name="json" rows="12" placeholder='{ "title": "...", "panels": [...] }'></textarea>
         </label>
-        <button type="submit">Importieren</button>
-        <a class="hmd-btn" href="@(BasePath + "/dashboards")">Abbrechen</a>
+        <button type="submit">@I18n.T("grafana.import.submit")</button>
+        <a class="hmd-btn" href="@(BasePath + "/dashboards")">@I18n.T("alert.editor.cancel")</a>
     </form>
 
     @if (!string.IsNullOrEmpty(_error))
     {
-        <p class="hmd-empty hmd-err-text">@_error</p>
+        <p class="hmd-empty hmd-err-text" role="alert">@_error</p>
     }
-</main>
-</body>
-</html>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";

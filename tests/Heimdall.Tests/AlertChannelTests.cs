@@ -47,7 +47,7 @@ public class AlertChannelTests
     [Fact]
     public async Task SmtpChannel_Unkonfiguriert_SilentSkip()
     {
-        var ch = new SmtpAlertChannel(new SmtpChannelOptions(), NullLogger<SmtpAlertChannel>.Instance);
+        var ch = new SmtpAlertChannel(new SmtpChannelOptions(), "en", NullLogger<SmtpAlertChannel>.Instance);
         await ch.SendAsync(Notify(), default);   // Host/To leer → wirft nicht, tut nichts
     }
 
@@ -58,14 +58,14 @@ public class AlertChannelTests
         {
             Host = "smtp.example.com", Port = 25, From = "heimdall@ex.com", To = "ops@ex.com, dev@ex.com",
         };
-        var ch = new SmtpAlertChannel(opts, NullLogger<SmtpAlertChannel>.Instance);
+        var ch = new SmtpAlertChannel(opts, "en", NullLogger<SmtpAlertChannel>.Instance);
         var msg = ch.BuildMessage(Notify("5xx-Rate", AlertState.Firing, "abc"));
         Assert.Equal("heimdall@ex.com", msg.From!.Address);
         Assert.Equal(2, msg.To.Count);
         Assert.Equal("ops@ex.com", msg.To[0]!.Address);
         Assert.Equal("dev@ex.com", msg.To[1]!.Address);
         Assert.Contains("5xx-Rate", msg.Subject);
-        Assert.Contains("Firing", msg.Subject);
+        Assert.Contains("Firing", msg.Subject);   // en-Label für AlertState.Firing
         Assert.True(msg.IsBodyHtml);
         Assert.Contains("5xx-Rate", msg.Body);
         Assert.Contains("/otel/alerts/abc", msg.Body);

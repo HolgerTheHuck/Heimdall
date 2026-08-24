@@ -8,46 +8,53 @@
 @using System.Collections.Generic
 @using Heimdall.Blazor.Grafana
 @inject Heimdall.IHeimdallQuery Query
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Logs" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main hmd-main-wide">
-    <h1>Logs</h1>
+<HeimdallDocument Title="@I18n.T("page.title.logs")" BasePath="@BasePath" MainClass="hmd-main hmd-main-wide">
+    <h1>@I18n.T("page.title.logs")</h1>
 
     <form class="hmd-filters" method="get" action="@(BasePath + "/logs")">
-        <label class="hmd-logq">Suche <input type="search" name="q" value="@Query1" placeholder="{service.name=\"shop\"} |= \"timeout\"" /></label>
-        <label>Text <input type="search" name="text" value="@Text" placeholder="timeout" /></label>
-        <label>Min. Severity
+        <label class="hmd-logq">@I18n.T("logs.filter.search") <input type="search" name="q" value="@Query1" placeholder="{service.name=\"shop\"} |= \"timeout\"" /></label>
+        <label>@I18n.T("logs.filter.text") <input type="search" name="text" value="@Text" placeholder="timeout" /></label>
+        <label>@I18n.T("logs.filter.severity")
             <select name="sev">
-                <option value="" selected="@(MinSeverity is null)">alle</option>
+                <option value="" selected="@(MinSeverity is null)">@I18n.T("traces.status.all")</option>
                 <option value="9"  selected="@(MinSeverity == 9)">INFO+</option>
                 <option value="13" selected="@(MinSeverity == 13)">WARN+</option>
                 <option value="17" selected="@(MinSeverity == 17)">ERROR+</option>
                 <option value="21" selected="@(MinSeverity == 21)">FATAL</option>
             </select>
         </label>
-        <label>Limit <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
+        <label>@I18n.T("metrics.filter.limit") <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
         <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
-        <button type="submit">Suchen</button>
-        <label class="hmd-inline-chk"><input type="checkbox" name="expand" value="1" checked="@Expand" /> alle aufklappen</label>
+        <button type="submit">@I18n.T("logs.filter.submit")</button>
+        <label class="hmd-inline-chk"><input type="checkbox" name="expand" value="1" checked="@Expand" /> @I18n.T("logs.expand")</label>
     </form>
-    <p class="hmd-dim hmd-logq-hint">Syntax: <code>{schlüssel="wert"}</code> Feldfilter (index-gestützt, auch Resource-Attribute wie <code>service.name</code>) · <code>|= "text"</code> Body-Volltext · mehrere Filter kommasepariert · Operatoren <code>= != =~ !~</code>.</p>
+    <p class="hmd-dim hmd-logq-hint">@I18n.T("logs.syntax.prefix") <code>@I18n.T("logs.syntax.example")</code> @I18n.T("logs.syntax.f1") <code>service.name</code>@I18n.T("logs.syntax.f2") <code>|= "text"</code> @I18n.T("logs.syntax.bodytext") <code>= != =~ !~</code>.</p>
 
     @if (_logs.Count == 0)
     {
-        <section class="hmd-empty-state">
-            <h2>Keine Logs gefunden</h2>
-            <p>Im gewählten Zeitraum liegen keine Logs vor. Suchtext entfernen, Severity-Filter lockern oder Telemetrie senden.</p>
-            <p class="hmd-dim">OTLP/HTTP <code>POST @BasePath/v1/logs</code> · gRPC <code>localhost:4317</code> · zurück zur <a href="@BasePath">Übersicht</a></p>
+        <section class="hmd-empty-state" role="status">
+            @if (Offset > 0)
+            {
+                <h2>@I18n.T("logs.empty.more.title")</h2>
+                <p>@I18n.T("logs.empty.more.body")</p>
+                <p><a class="hmd-btn" href="@PageUrl(0)">@I18n.T("traces.empty.more.back")</a></p>
+            }
+            else
+            {
+                <h2>@I18n.T("logs.empty.title")</h2>
+                <p>@I18n.T("logs.empty.body")</p>
+                <p class="hmd-dim">@I18n.T("traces.empty.hint.http") <code>POST @BasePath/v1/logs</code> · @I18n.T("traces.empty.hint.grpc") <code>localhost:4317</code> · @I18n.T("common.back.to") <a href="@BasePath">@I18n.T("nav.overview")</a></p>
+            }
         </section>
     }
     else
     {
+        <div class="hmd-list-scroll">
         <table class="hmd-table hmd-logs">
-            <thead><tr><th class="hmd-col-ts">Zeit</th><th class="hmd-col-sev">Sev</th><th>Body</th><th class="hmd-col-trace">Trace</th></tr></thead>
+            <caption>@I18n.T("page.title.logs")</caption>
+            <thead><tr><th class="hmd-col-ts" scope="col" aria-sort="@AriaSort("time")"><a href="@SortUrl("time")" title="@I18n.T("sort.aria", I18n.T("table.time"))">@I18n.T("table.time")@SortIndicator("time")</a></th><th class="hmd-col-sev" scope="col" aria-sort="@AriaSort("severity")"><a href="@SortUrl("severity")" title="@I18n.T("sort.aria", I18n.T("table.sev"))">@I18n.T("table.sev")@SortIndicator("severity")</a></th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
             <tbody>
             @foreach (var l in _logs)
             {
@@ -55,33 +62,36 @@
             }
             </tbody>
         </table>
+        </div>
+        <HeimdallPager HasPrev="@(_offset > 0)"
+                       HasNext="@_hasMore"
+                       PrevUrl="@PageUrl(_offset - _pageSize)"
+                       NextUrl="@PageUrl(_offset + _pageSize)"
+                       RangeLabel="@I18n.T("common.row.range", _offset + 1, _offset + _logs.Count)" />
     }
-    <p class="hmd-count">@_logs.Count Log(s) · @Query.CountLogs() gesamt</p>
-    <HeimdallFooter BasePath="@BasePath" />
-</main>
+    <p class="hmd-count">@I18n.T("logs.count", _logs.Count, Query.CountLogs())</p>
 
-<script>
-// Ganze Zeile klappt den Log auf/zu (Progressive Enhancement). Klick auf einen
-// Link (Trace-Detail) und Textauswahl werden nicht als Toggle gewertet; ohne
-// JS bleibt der native <summary>-Toggle der <details>-Zelle nutzbar.
-(function () {
-    var table = document.querySelector('table.hmd-logs');
-    if (!table) return;
-    table.addEventListener('click', function (e) {
-        if (e.target.closest('a')) return;
-        var tr = e.target.closest('tbody tr');
-        if (!tr) return;
-        var d = tr.querySelector('details.hmd-log-details');
-        if (!d) return;
-        var sel = window.getSelection && window.getSelection();
-        if (sel && !sel.isCollapsed) return;   // Textauswahl nicht als Toggle
-        e.preventDefault();                    // native summary-Schaltung unterbinden
-        d.open = !d.open;
-    });
-})();
-</script>
-</body>
-</html>
+    <script>
+    // Ganze Zeile klappt den Log auf/zu (Progressive Enhancement). Klick auf einen
+    // Link (Trace-Detail) und Textauswahl werden nicht als Toggle gewertet; ohne
+    // JS bleibt der native <summary>-Toggle der <details>-Zelle nutzbar.
+    (function () {
+        var table = document.querySelector('table.hmd-logs');
+        if (!table) return;
+        table.addEventListener('click', function (e) {
+            if (e.target.closest('a')) return;
+            var tr = e.target.closest('tbody tr');
+            if (!tr) return;
+            var d = tr.querySelector('details.hmd-log-details');
+            if (!d) return;
+            var sel = window.getSelection && window.getSelection();
+            if (sel && !sel.isCollapsed) return;   // Textauswahl nicht als Toggle
+            e.preventDefault();                    // native summary-Schaltung unterbinden
+            d.open = !d.open;
+        });
+    })();
+    </script>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";
@@ -90,12 +100,21 @@
     [Parameter] public string? Query1 { get; set; }
     [Parameter] public int? MinSeverity { get; set; }
     [Parameter] public int Limit { get; set; } = 200;
+    [Parameter] public int Offset { get; set; } = 0;
     [Parameter] public bool Expand { get; set; }
     [Parameter] public string? Preset { get; set; }
     [Parameter] public long? From { get; set; }
     [Parameter] public long? To { get; set; }
+    [Parameter] public string? Sort { get; set; }
+    [Parameter] public string? Dir { get; set; }
 
     private List<Heimdall.LogRow> _logs = new();
+    private int _offset;
+    private int _pageSize;
+    private bool _hasMore;
+    // Effektive Sortierung (normalisiert): aktuellste zuerst als Default.
+    private string _sort = "time";
+    private string _dir = "desc";
 
     protected override void OnInitialized()
     {
@@ -119,6 +138,11 @@
                 if ((f.Op == "|=" || f.Op == "|~") && !string.IsNullOrEmpty(f.Value)) { body = f.Value; break; }
         }
 
+        _pageSize = Limit < 1 ? 200 : Limit;
+        _offset = Offset < 0 ? 0 : Offset;
+        _sort = Sort switch { "time" or "severity" => Sort, _ => "time" };
+        _dir = string.Equals(Dir, "asc", System.StringComparison.OrdinalIgnoreCase) ? "asc" : "desc";
+
         var s = new Heimdall.LogSearch
         {
             Text = body,
@@ -126,8 +150,67 @@
             FromUnixNano = range.From,
             ToUnixNano = range.To,
             AttrFilters = attrFilters,
-            Limit = Limit < 1 ? 200 : Limit,
+            Limit = _pageSize,
+            Offset = _offset,
+            Sort = _sort,
+            Dir = _dir,
         };
         _logs = new List<Heimdall.LogRow>(Query.SearchLogs(s));
+        // Volle Seite = wahrscheinlich weitere (ältere) Logs vorhanden.
+        _hasMore = _logs.Count >= _pageSize;
+    }
+
+    /// <summary>Baut die Logs-URL mit neuem Offset und erhält alle Filter-Params
+    /// inkl. der aktiven Sortierung (sort/dir).</summary>
+    private string PageUrl(int offset) => BuildUrl(offset, _sort, _dir);
+
+    /// <summary>URL für einen Sortier-Klick auf <paramref name="field"/>: gleiche
+    /// Spalte → Richtung umschalten; neue Spalte → absteigend (Default). Offset 0.</summary>
+    private string SortUrl(string field)
+    {
+        var dir = (field == _sort)
+            ? (_dir == "asc" ? "desc" : "asc")
+            : "desc";
+        return BuildUrl(0, field, dir);
+    }
+
+    /// <summary>WAI-ARIA <c>aria-sort</c>-Wert für eine Spalte.</summary>
+    private string AriaSort(string field)
+    {
+        if (field != _sort) return "none";
+        return _dir == "asc" ? "ascending" : "descending";
+    }
+
+    /// <summary>Visueller Richtungsindikator für die aktiven Sortierspalte.</summary>
+    private string SortIndicator(string field)
+    {
+        if (field != _sort) return "";
+        return _dir == "asc" ? " ↑" : " ↓";
+    }
+
+    /// <summary>Universeller URL-Builder: alle Filter-Params + sort/dir, wählbares Offset.</summary>
+    private string BuildUrl(int offset, string sort, string dir)
+    {
+        var o = offset < 0 ? 0 : offset;
+        var parts = new List<string>();
+        if (!string.IsNullOrEmpty(Query1)) parts.Add("q=" + System.Uri.EscapeDataString(Query1));
+        if (!string.IsNullOrEmpty(Text)) parts.Add("text=" + System.Uri.EscapeDataString(Text));
+        if (MinSeverity is int sev) parts.Add("sev=" + sev.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        parts.Add("limit=" + _pageSize.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (o > 0) parts.Add("offset=" + o.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (Expand) parts.Add("expand=1");
+        if (!string.IsNullOrEmpty(Preset)) parts.Add("preset=" + System.Uri.EscapeDataString(Preset));
+        else
+        {
+            if (From is long f) parts.Add("from=" + f.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (To is long t) parts.Add("to=" + t.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        // Sortierung nur schreiben, wenn sie vom Default (time/desc) abweicht.
+        if (sort != "time" || dir != "desc")
+        {
+            parts.Add("sort=" + sort);
+            parts.Add("dir=" + dir);
+        }
+        return BasePath + "/logs" + (parts.Count == 0 ? "" : "?" + string.Join("&", parts));
     }
 }

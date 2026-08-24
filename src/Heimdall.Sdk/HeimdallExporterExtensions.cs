@@ -27,7 +27,7 @@ public static class HeimdallExporterExtensions
     {
         Validate(options);
         var resource = options.BuildResource();
-        var exporter = new HeimdallTraceExporter(options.Sink!, resource);
+        var exporter = new HeimdallTraceExporter(options.Sink!, resource, options.ExcludeRoutePrefixes);
         return builder.AddProcessor(new BatchActivityExportProcessor(exporter));
     }
 
@@ -40,7 +40,7 @@ public static class HeimdallExporterExtensions
     {
         Validate(options);
         var resource = options.BuildResource();
-        var exporter = new HeimdallMetricExporter(options.Sink!, resource);
+        var exporter = new HeimdallMetricExporter(options.Sink!, resource, options.ExcludeRoutePrefixes);
         // 0 = SDK-Default (60 s); sonst benutzerdefinierte Kadenz (z. B. Demo 15 s).
         return options.MetricExportIntervalMs > 0
             ? builder.AddReader(new PeriodicExportingMetricReader(exporter, options.MetricExportIntervalMs))
@@ -56,7 +56,7 @@ public static class HeimdallExporterExtensions
     {
         Validate(options);
         var resource = options.BuildResource();
-        var exporter = new HeimdallLogExporter(options.Sink!, resource);
+        var exporter = new HeimdallLogExporter(options.Sink!, resource, options.ExcludeLogCategoryPrefixes);
         return builder.AddProcessor(new BatchLogRecordExportProcessor(exporter));
     }
 

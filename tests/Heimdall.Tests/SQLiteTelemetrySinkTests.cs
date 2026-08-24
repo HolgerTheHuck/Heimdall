@@ -198,4 +198,169 @@ public class SQLiteTelemetrySinkTests
         }
         finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
     }
+
+    // === Sortierung (serverseitig, vor LIMIT/OFFSET) ========================
+
+    /// <summary>Drei Traces mit klar unterschiedlicher Dauer und aufsteigenden
+    /// Startzeiten, sodass eine Dauer-Sortierung ein anderes Bild liefert als eine
+    /// Start-Sortierung (und nicht zufällig dasselbe Ergebnis steht).</summary>
+    private static void SeedDurations(SQLiteTelemetrySink sink, long t0)
+    {
+        var (ta, _) = Tid(1);   // 10 ms
+        var (tb, _) = Tid(2);   // 50 ms (Langläufer)
+        var (tc, _) = Tid(3);   //  5 ms  (mit Fehler-Status)
+        sink.WriteSpans(new[]
+        {
+            new HSpan(ta, Sid(1).id, null, "a", HSpanKind.Server,
+                t0,               t0 + 10_000_000, HStatusCode.Ok, null,
+                Array.Empty<HAttribute>(), Array.Empty<HSpanEvent>(), Array.Empty<HSpanLink>(), Res("s"), null),
+            new HSpan(tb, Sid(2).id, null, "b", HSpanKind.Server,
+                t0 + 1_000_000,   t0 + 1_000_000 + 50_000_000, HStatusCode.Ok, null,
+                Array.Empty<HAttribute>(), Array.Empty<HSpanEvent>(), Array.Empty<HSpanLink>(), Res("s"), null),
+            new HSpan(tc, Sid(3).id, null, "c", HSpanKind.Server,
+                t0 + 2_000_000,   t0 + 2_000_000 + 5_000_000, HStatusCode.Error, "boom",
+                Array.Empty<HAttribute>(), Array.Empty<HSpanEvent>(), Array.Empty<HSpanLink>(), Res("s"), null),
+        });
+    }
+
+    [Fact]
+    public void ListTraces_SortNachDauer_LanglauferZuerst()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            SeedDurations(sink, NowNs);
+
+            var desc = sink.ListTraces(new TraceFilter { Sort = "duration", Dir = "desc", Limit = 100 });
+            Assert.Equal(new long[] { 50_000_000, 10_000_000, 5_000_000 },
+                desc.Select(t => t.DurationNs).ToArray());
+
+            var asc = sink.ListTraces(new TraceFilter { Sort = "duration", Dir = "asc", Limit = 100 });
+            Assert.Equal(new long[] { 5_000_000, 10_000_000, 50_000_000 },
+                asc.Select(t => t.DurationNs).ToArray());
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public void ListTraces_SortNachStart_LiefertStartReihenfolge()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            long t0 = NowNs;
+            SeedDurations(sink, t0);
+
+            var asc = sink.ListTraces(new TraceFilter { Sort = "start", Dir = "asc", Limit = 100 });
+            Assert.Equal(new long[] { t0, t0 + 1_000_000, t0 + 2_000_000 },
+                asc.Select(t => t.FirstStartUnixNano).ToArray());
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public void ListTraces_SortNachStatus_FehlerZuerst()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            SeedDurations(sink, NowNs);
+
+            // desc: err=1 (c) vor err=0 (a,b); asc: umgekehrt.
+            var desc = sink.ListTraces(new TraceFilter { Sort = "status", Dir = "desc", Limit = 100 });
+            Assert.True(desc[0].HasError);
+            Assert.All(desc.Skip(1), t => Assert.False(t.HasError));
+
+            var asc = sink.ListTraces(new TraceFilter { Sort = "status", Dir = "asc", Limit = 100 });
+            Assert.True(asc[^1].HasError);
+            Assert.All(asc.Take(2), t => Assert.False(t.HasError));
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public void ListTraces_DefaultSort_NeuesteZuerst()
+    {
+        // Ohne Sort/Dir: bisheriges Verhalten (first_start DESC) bleibt erhalten.
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            long t0 = NowNs;
+            SeedDurations(sink, t0);
+
+            var def = sink.ListTraces(new TraceFilter { Limit = 100 });
+            Assert.Equal(new long[] { t0 + 2_000_000, t0 + 1_000_000, t0 },
+                def.Select(t => t.FirstStartUnixNano).ToArray());
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public void ListTraces_UnbekannterSort_FaelltAufDefault()
+    {
+        // Allowlist: unbekannter Sort-Wert → first_start (kein SQL-Injektionsvektor).
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            long t0 = NowNs;
+            SeedDurations(sink, t0);
+
+            var bogus = sink.ListTraces(new TraceFilter { Sort = "duration; DROP TABLE--", Dir = "desc", Limit = 100 });
+            Assert.Equal(3, bogus.Count);   // kein Werfen, kein Datenverlust
+            // Default = first_start DESC (unabhängig vom unbrauchbaren Dir bei unbekanntem Sort).
+            Assert.Equal(t0 + 2_000_000, bogus[0].FirstStartUnixNano);
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public void SearchLogs_SortNachSeverity()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            long t0 = NowNs;
+            sink.WriteLogs(new[]
+            {
+                new HLogRecord(t0,     HSeverity.Info,  "INFO",  "info",  null, null, Array.Empty<HAttribute>(), null, null),
+                new HLogRecord(t0 + 1, HSeverity.Error, "ERROR", "boom",  null, null, Array.Empty<HAttribute>(), null, null),
+                new HLogRecord(t0 + 2, HSeverity.Warn,  "WARN",  "warn",  null, null, Array.Empty<HAttribute>(), null, null),
+            });
+
+            var desc = sink.SearchLogs(new LogSearch { Sort = "severity", Dir = "desc", Limit = 100 });
+            Assert.Equal(new[] { (int)HSeverity.Error, (int)HSeverity.Warn, (int)HSeverity.Info },
+                desc.Select(l => l.Severity).ToArray());
+
+            var asc = sink.SearchLogs(new LogSearch { Sort = "severity", Dir = "asc", Limit = 100 });
+            Assert.Equal(new[] { (int)HSeverity.Info, (int)HSeverity.Warn, (int)HSeverity.Error },
+                asc.Select(l => l.Severity).ToArray());
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public void SearchLogs_DefaultSort_NeuesteZuerst()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            long t0 = NowNs;
+            sink.WriteLogs(new[]
+            {
+                new HLogRecord(t0,     HSeverity.Info, "INFO", "a", null, null, Array.Empty<HAttribute>(), null, null),
+                new HLogRecord(t0 + 1, HSeverity.Info, "INFO", "b", null, null, Array.Empty<HAttribute>(), null, null),
+            });
+
+            var def = sink.SearchLogs(new LogSearch { Limit = 100 });
+            Assert.Equal(new long[] { t0 + 1, t0 }, def.Select(l => l.TimeUnixNano).ToArray());
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
 }

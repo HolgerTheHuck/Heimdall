@@ -31,6 +31,23 @@ public sealed class HeimdallExporterOptions
     /// </summary>
     public int MetricExportIntervalMs { get; set; }
 
+    /// <summary>
+    /// Pfad-Prefixe (z. B. <c>"/otel"</c>), deren Telemetrie der Exporter verwirft:
+    /// Spans mit <c>http.route</c>/<c>http.target</c>/<c>url.path</c>-Tag-Prefix und
+    /// Metrik-Punkte mit <c>http.route</c>-Tag-Prefix werden nicht in die Sink
+    /// geschrieben. Verhindert, dass das Bedienen des Heimdall-UIs (oder andere
+    /// eigene Pfade) als Verkehr der beobachteten App erfasst wird. Default null =
+    /// nichts verworfen. Zum Untersuchen von Heimdall selbst leer lassen.
+    /// </summary>
+    public IReadOnlyList<string>? ExcludeRoutePrefixes { get; set; }
+
+    /// <summary>
+    /// Logger-Kategorie-Prefixe (z. B. <c>"Heimdall."</c>), deren Logs der Exporter
+    /// verwirft, damit Heimdalls interne Diagnose-Logs (AlertEvaluator, Kanäle, …)
+    /// nicht im Dashboard auftauchen. Default null = keine Logs verworfen.
+    /// </summary>
+    public IReadOnlyList<string>? ExcludeLogCategoryPrefixes { get; set; }
+
     internal HResource BuildResource()
     {
         var attrs = new List<HAttribute>();

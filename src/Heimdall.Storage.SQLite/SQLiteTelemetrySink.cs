@@ -248,7 +248,20 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         sb.Append(" GROUP BY trace_id");
         if (filter.HasError is not null)
             sb.Append(filter.HasError.Value ? " HAVING err=1" : " HAVING err=0");
-        sb.Append(" ORDER BY first_start DESC LIMIT @lim OFFSET @off");
+        // Sortierung VOR dem Paging (Allowlist — kein Raw-Input im SQL).
+        //   start → first_start (Alias) · duration → (MAX(end)-MIN(start))
+        //   spans → cnt · status → err (0/1). Default: first_start DESC.
+        string orderExpr = filter.Sort switch
+        {
+            "duration" => "(MAX(end_unix_nano) - MIN(start_unix_nano))",
+            "spans" => "cnt",
+            "status" => "err",
+            "start" => "first_start",
+            _ => "first_start",
+        };
+        string dir = string.Equals(filter.Dir, "asc", StringComparison.OrdinalIgnoreCase) ? "ASC" : "DESC";
+        sb.Append(" ORDER BY ").Append(orderExpr).Append(' ').Append(dir)
+          .Append(" LIMIT @lim OFFSET @off");
         ps.Add(Param("@lim", filter.Limit));
         ps.Add(Param("@off", filter.Offset));
 
@@ -364,7 +377,13 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 i++;
             }
         }
-        sb.Append(" ORDER BY ts_unix_nano DESC LIMIT @lim OFFSET @off");
+        // Sortierung VOR dem Paging (Allowlist — kein Raw-Input im SQL).
+        //   time → ts_unix_nano · severity → severity. Default: ts_unix_nano DESC.
+        string orderExpr = string.Equals(search.Sort, "severity", StringComparison.OrdinalIgnoreCase)
+            ? "severity" : "ts_unix_nano";
+        string dir = string.Equals(search.Dir, "asc", StringComparison.OrdinalIgnoreCase) ? "ASC" : "DESC";
+        sb.Append(" ORDER BY ").Append(orderExpr).Append(' ').Append(dir)
+          .Append(" LIMIT @lim OFFSET @off");
         ps.Add(Param("@lim", search.Limit));
         ps.Add(Param("@off", search.Offset));
 

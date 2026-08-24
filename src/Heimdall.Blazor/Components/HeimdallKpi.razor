@@ -1,7 +1,14 @@
 @namespace Heimdall.Blazor
 @* KPI/Single-Stat-Karte: großer Wert + Label + optionale Sub-Zeile. Tone waehlt die
-   Akzentfarbe (ok/warn/err/accent). Reines HTML/CSS, kein JS. *@
+   Akzentfarbe (ok/warn/err/accent). ToneLabel ist der a11y-Text-Fallback für die
+   sonst nur farbliche Tone-Aussage (Bildschirmleser: "Kritisch"/"Warnung"/"OK").
+   Reines HTML/CSS, kein JS. *@
 <article class="hmd-kpi hmd-kpi--@Tone">
+    @if (!string.IsNullOrEmpty(ToneLabel))
+    {
+        <span class="hmd-kpi-tone hmd-tone-@Tone" aria-hidden="true">●</span>
+        <span class="hmd-vh">@ToneLabel</span>
+    }
     <div class="hmd-kpi-value">@Value</div>
     <div class="hmd-kpi-label">@Label</div>
     @if (!string.IsNullOrEmpty(Sub))
@@ -15,4 +22,6 @@
     [Parameter] public string Label { get; set; } = string.Empty;
     [Parameter] public string? Sub { get; set; }
     [Parameter] public string Tone { get; set; } = "accent";
+    /// <summary>Accessibler Text für die Tone-Farbe (z. B. "Kritisch"); leer = kein Fallback.</summary>
+    [Parameter] public string? ToneLabel { get; set; }
 }

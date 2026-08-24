@@ -1,42 +1,55 @@
 @namespace Heimdall.Blazor
 @* Traces-Uebersicht: server-gerendert, Filter via GET-Form (kein JS/SignalR). *@
 @inject Heimdall.IHeimdallQuery Query
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Traces" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main">
-    <h1>Traces</h1>
+<HeimdallDocument Title="@I18n.T("page.title.traces")" BasePath="@BasePath">
+    <h1>@I18n.T("page.title.traces")</h1>
 
     <form class="hmd-filters" method="get" action="@(BasePath + "/traces")">
-        <label>Name enthält <input type="search" name="name" value="@NameContains" placeholder="checkout" /></label>
-        <label>Service <input type="search" name="svc" value="@ServiceName" placeholder="shop" /></label>
-        <label>Status
+        <label>@I18n.T("traces.filter.name") <input type="search" name="name" value="@NameContains" placeholder="checkout" /></label>
+        <label>@I18n.T("traces.filter.service") <input type="search" name="svc" value="@ServiceName" placeholder="shop" /></label>
+        <label>@I18n.T("traces.filter.status")
             <select name="err">
-                <option value="" selected="@(HasError is null)">alle</option>
-                <option value="1" selected="@(HasError is true)">nur Fehler</option>
-                <option value="0" selected="@(HasError is false)">nur OK</option>
+                <option value="" selected="@(HasError is null)">@I18n.T("traces.status.all")</option>
+                <option value="1" selected="@(HasError is true)">@I18n.T("traces.status.err")</option>
+                <option value="0" selected="@(HasError is false)">@I18n.T("traces.status.ok")</option>
             </select>
         </label>
-        <label>Limit <input type="number" name="limit" value="@Limit" min="1" max="1000" /></label>
+        <label>@I18n.T("traces.filter.limit") <input type="number" name="limit" value="@Limit" min="1" max="1000" /></label>
         <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
-        <button type="submit">Filtern</button>
+        <button type="submit">@I18n.T("traces.filter.submit")</button>
     </form>
 
     @if (_traces.Count == 0)
     {
-        <section class="hmd-empty-state">
-            <h2>Keine Traces gefunden</h2>
-            <p>Im gewählten Zeitraum liegen keine Spans vor. Zeitraum erweitern, Filter lockern oder Telemetrie senden.</p>
-            <p class="hmd-dim">OTLP/HTTP <code>POST @BasePath/v1/traces</code> · gRPC <code>localhost:4317</code> · zurück zur <a href="@BasePath">Übersicht</a></p>
+        <section class="hmd-empty-state" role="status">
+            @if (Offset > 0)
+            {
+                <h2>@I18n.T("traces.empty.more.title")</h2>
+                <p>@I18n.T("traces.empty.more.body")</p>
+                <p><a class="hmd-btn" href="@PageUrl(0)">@I18n.T("traces.empty.more.back")</a></p>
+            }
+            else
+            {
+                <h2>@I18n.T("traces.empty.title")</h2>
+                <p>@I18n.T("traces.empty.body")</p>
+                <p class="hmd-dim">@I18n.T("traces.empty.hint.http") <code>POST @BasePath/v1/traces</code> · @I18n.T("traces.empty.hint.grpc") <code>localhost:4317</code> · @I18n.T("common.back.to") <a href="@BasePath">@I18n.T("nav.overview")</a></p>
+            }
         </section>
     }
     else
     {
+        <div class="hmd-list-scroll">
         <table class="hmd-table hmd-dense">
-            <thead><tr><th>Trace-ID</th><th>Start</th><th>Dauer</th><th>Spans</th><th>Status</th></tr></thead>
+            <caption>@I18n.T("page.title.traces")</caption>
+            <thead><tr>
+                <th scope="col">@I18n.T("table.trace.id")</th>
+                <th scope="col" aria-sort="@AriaSort("start")"><a href="@SortUrl("start")" title="@I18n.T("sort.aria", I18n.T("table.start"))">@I18n.T("table.start")@SortIndicator("start")</a></th>
+                <th scope="col" aria-sort="@AriaSort("duration")"><a href="@SortUrl("duration")" title="@I18n.T("sort.aria", I18n.T("table.duration"))">@I18n.T("table.duration")@SortIndicator("duration")</a></th>
+                <th scope="col" aria-sort="@AriaSort("spans")"><a href="@SortUrl("spans")" title="@I18n.T("sort.aria", I18n.T("table.spans"))">@I18n.T("table.spans")@SortIndicator("spans")</a></th>
+                <th scope="col" aria-sort="@AriaSort("status")"><a href="@SortUrl("status")" title="@I18n.T("sort.aria", I18n.T("table.status"))">@I18n.T("table.status")@SortIndicator("status")</a></th>
+            </tr></thead>
             <tbody>
             @foreach (var t in _traces)
             {
@@ -45,17 +58,20 @@
                     <td>@HeimdallFmt.Ts(t.FirstStartUnixNano)</td>
                     <td>@HeimdallFmt.Dur(t.DurationNs)</td>
                     <td>@t.SpanCount</td>
-                    <td>@(t.HasError ? "✕ Fehler" : "✓ OK")</td>
+                    <td>@(t.HasError ? I18n.T("traces.status.errbadge") : I18n.T("traces.status.okbadge"))</td>
                 </tr>
             }
             </tbody>
         </table>
+        </div>
+        <HeimdallPager HasPrev="@(Offset > 0)"
+                       HasNext="@_hasMore"
+                       PrevUrl="@PageUrl(Offset - _pageSize)"
+                       NextUrl="@PageUrl(Offset + _pageSize)"
+                       RangeLabel="@I18n.T("common.row.range", Offset + 1, Offset + _traces.Count)" />
     }
-    <p class="hmd-count">@_traces.Count Trace(s) · @Query.CountSpans() Span(s) gesamt</p>
-    <HeimdallFooter BasePath="@BasePath" />
-</main>
-</body>
-</html>
+    <p class="hmd-count">@I18n.T("traces.count", _traces.Count, Query.CountSpans())</p>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";
@@ -67,12 +83,22 @@
     [Parameter] public string? Preset { get; set; }
     [Parameter] public long? From { get; set; }
     [Parameter] public long? To { get; set; }
+    [Parameter] public string? Sort { get; set; }
+    [Parameter] public string? Dir { get; set; }
 
     private System.Collections.Generic.List<Heimdall.TraceSummary> _traces = new();
+    private int _pageSize;
+    private bool _hasMore;
+    // Effektive Sortierung (normalisiert): Langläufer zuerst als Default.
+    private string _sort = "duration";
+    private string _dir = "desc";
 
     protected override void OnInitialized()
     {
         var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano());
+        _pageSize = Limit < 1 ? 100 : Limit;
+        _sort = Sort switch { "start" or "duration" or "spans" or "status" => Sort, _ => "duration" };
+        _dir = string.Equals(Dir, "asc", System.StringComparison.OrdinalIgnoreCase) ? "asc" : "desc";
         var f = new Heimdall.TraceFilter
         {
             FromUnixNano = range.From,
@@ -80,9 +106,68 @@
             NameContains = string.IsNullOrWhiteSpace(NameContains) ? null : NameContains,
             ServiceName = string.IsNullOrWhiteSpace(ServiceName) ? null : ServiceName,
             HasError = HasError,
-            Limit = Limit < 1 ? 100 : Limit,
+            Limit = _pageSize,
             Offset = Offset < 0 ? 0 : Offset,
+            Sort = _sort,
+            Dir = _dir,
         };
         _traces = new System.Collections.Generic.List<Heimdall.TraceSummary>(Query.ListTraces(f));
+        // Volle Seite = wahrscheinlich weitere (ältere) Traces vorhanden.
+        _hasMore = _traces.Count >= _pageSize;
+    }
+
+    /// <summary>Baut die Traces-URL mit neuem Offset und erhält alle Filter-Params
+    /// inkl. der aktiven Sortierung (sort/dir).</summary>
+    private string PageUrl(int offset) => BuildUrl(offset, _sort, _dir);
+
+    /// <summary>URL für einen Sortier-Klick auf <paramref name="field"/>: gleiche
+    /// Spalte → Richtung umschalten; neue Spalte → absteigend (Default für alle
+    /// Traces-Spalten). Offset wird auf 0 zurückgesetzt (neue Reihenfolge).</summary>
+    private string SortUrl(string field)
+    {
+        var dir = (field == _sort)
+            ? (_dir == "asc" ? "desc" : "asc")
+            : "desc";
+        return BuildUrl(0, field, dir);
+    }
+
+    /// <summary>WAI-ARIA <c>aria-sort</c>-Wert für eine Spalte.</summary>
+    private string AriaSort(string field)
+    {
+        if (field != _sort) return "none";
+        return _dir == "asc" ? "ascending" : "descending";
+    }
+
+    /// <summary>Visueller Richtungsindikator für die aktiven Sortierspalte.</summary>
+    private string SortIndicator(string field)
+    {
+        if (field != _sort) return "";
+        return _dir == "asc" ? " ↑" : " ↓";
+    }
+
+    /// <summary>Universeller URL-Builder: alle Filter-Params + sort/dir, wählbares Offset.</summary>
+    private string BuildUrl(int offset, string sort, string dir)
+    {
+        var o = offset < 0 ? 0 : offset;
+        var parts = new System.Collections.Generic.List<string>();
+        if (!string.IsNullOrEmpty(NameContains)) parts.Add("name=" + System.Uri.EscapeDataString(NameContains));
+        if (!string.IsNullOrEmpty(ServiceName)) parts.Add("svc=" + System.Uri.EscapeDataString(ServiceName));
+        if (HasError is bool h) parts.Add("err=" + (h ? "1" : "0"));
+        parts.Add("limit=" + _pageSize.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (o > 0) parts.Add("offset=" + o.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        if (!string.IsNullOrEmpty(Preset)) parts.Add("preset=" + System.Uri.EscapeDataString(Preset));
+        else
+        {
+            if (From is long ff) parts.Add("from=" + ff.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (To is long tt) parts.Add("to=" + tt.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        }
+        // Sortierung nur schreiben, wenn sie vom Default (duration/desc) abweicht —
+        // sonst bleibt die URL schlank und der Default greift serverseitig.
+        if (sort != "duration" || dir != "desc")
+        {
+            parts.Add("sort=" + sort);
+            parts.Add("dir=" + dir);
+        }
+        return BasePath + "/traces" + (parts.Count == 0 ? "" : "?" + string.Join("&", parts));
     }
 }

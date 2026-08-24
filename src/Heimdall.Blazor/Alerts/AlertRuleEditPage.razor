@@ -6,86 +6,78 @@
 @using Heimdall.Blazor.Alerts
 @inject IAlertRuleStore Store
 @inject HeimdallAlertingOptions Options
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Alarm-Regel" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main">
-    <h1>@(string.IsNullOrEmpty(Id) ? "Neue Alarm-Regel" : "Alarm-Regel bearbeiten")</h1>
-    <p class="hmd-dim"><a class="hmd-back" href="@(BasePath + "/alerts")">← alle Alerts</a></p>
+<HeimdallDocument Title="@I18n.T("page.title.alertRule")" BasePath="@BasePath">
+    <h1>@(string.IsNullOrEmpty(Id) ? I18n.T("alert.editor.heading.new") : I18n.T("alert.editor.heading.edit"))</h1>
+    <p class="hmd-dim"><a class="hmd-back" href="@(BasePath + "/alerts")">@I18n.T("alert.detail.back")</a></p>
 
     @if (!string.IsNullOrEmpty(Error))
     {
-        <p class="hmd-err-msg">@Error</p>
+        <p class="hmd-err-msg" role="alert">@Error</p>
     }
 
     <form method="post" action="@(BasePath + "/alerts/save")" class="hmd-form">
         <input type="hidden" name="id" value="@Id" />
 
         <fieldset>
-            <legend>Allgemein</legend>
-            <label>Name <input type="text" name="name" value="@_name" required /></label>
-            <label class="hmd-check"><input type="checkbox" name="enabled" value="1" checked="@_enabled" /> aktiviert</label>
-            <label>Signal
+            <legend>@I18n.T("alert.editor.legend.general")</legend>
+            <label>@I18n.T("alert.col.name") <input type="text" name="name" value="@_name" required /></label>
+            <label class="hmd-check"><input type="checkbox" name="enabled" value="1" checked="@_enabled" /> @I18n.T("alert.editor.field.enabled")</label>
+            <label>@I18n.T("alert.col.signal")
                 <select name="signal">
-                    <option value="Metric" selected="@(_signal == AlertSignal.Metric)">Metrik (PromQL)</option>
-                    <option value="Log" selected="@(_signal == AlertSignal.Log)">Log (Volltext + Severity)</option>
-                    <option value="Trace" selected="@(_signal == AlertSignal.Trace)">Trace (Fehler/Service/Name)</option>
+                    <option value="Metric" selected="@(_signal == AlertSignal.Metric)">@I18n.T("alert.editor.signal.metric")</option>
+                    <option value="Log" selected="@(_signal == AlertSignal.Log)">@I18n.T("alert.editor.signal.log")</option>
+                    <option value="Trace" selected="@(_signal == AlertSignal.Trace)">@I18n.T("alert.editor.signal.trace")</option>
                 </select>
             </label>
-            <label>Beschreibung <input type="text" name="description" value="@_description" /></label>
+            <label>@I18n.T("alert.detail.col.description") <input type="text" name="description" value="@_description" /></label>
         </fieldset>
 
         <fieldset>
-            <legend>Metrik (PromQL)</legend>
-            <p class="hmd-dim">Feuert, wenn der Ausdruck einen nicht-leeren Vektor liefert (Vergleich behält Treffer). Bsp: <code>sum(rate(http_requests_total{status=~"5.."}[5m])) &gt; 0</code></p>
+            <legend>@I18n.T("alert.editor.legend.metric")</legend>
+            <p class="hmd-dim">@I18n.T("alert.editor.metric.hint")<code>sum(rate(http_requests_total{status=~"5.."}[5m])) &gt; 0</code></p>
             <label>PromQL <textarea name="promql" rows="2" class="hmd-mono">@_promql</textarea></label>
         </fieldset>
 
         <fieldset>
-            <legend>Log</legend>
-            <p class="hmd-dim">Volltext auf <code>body</code> (FTS5/tsvector, optional) + Mindest-Severity. Feuert bei &gt; Threshold Treffern im Fenster.</p>
-            <label>Log-Text <input type="text" name="logText" value="@_logText" placeholder="z. B. timeout (leer = alle)" /></label>
-            <label>Min. Severity <input type="number" name="minSeverity" value="@(_minSeverity?.ToString(CultureInfo.InvariantCulture))" placeholder="17=ERROR, 13=WARN, 9=INFO" /></label>
+            <legend>@I18n.T("alert.editor.legend.log")</legend>
+            <p class="hmd-dim">@I18n.T("alert.editor.log.hint.a")<code>body</code>@I18n.T("alert.editor.log.hint.b")</p>
+            <label>@I18n.T("alert.detail.col.logtext") <input type="text" name="logText" value="@_logText" placeholder="@I18n.T("alert.editor.placeholder.logtext")" /></label>
+            <label>@I18n.T("alert.detail.col.minseverity") <input type="number" name="minSeverity" value="@(_minSeverity?.ToString(CultureInfo.InvariantCulture))" placeholder="17=ERROR, 13=WARN, 9=INFO" /></label>
         </fieldset>
 
         <fieldset>
-            <legend>Trace</legend>
-            <p class="hmd-dim">Feuert bei &gt; Threshold Traces im Fenster (filterbar nach Fehler/Service/Name).</p>
-            <label class="hmd-check"><input type="checkbox" name="hasError" value="1" checked="@(_hasError == true)" /> nur Fehler-Traces</label>
+            <legend>@I18n.T("alert.editor.legend.trace")</legend>
+            <p class="hmd-dim">@I18n.T("alert.editor.trace.hint")</p>
+            <label class="hmd-check"><input type="checkbox" name="hasError" value="1" checked="@(_hasError == true)" /> @I18n.T("alert.detail.col.errtraces")</label>
             <label>Service <input type="text" name="serviceName" value="@_serviceName" /></label>
-            <label>Name enthält <input type="text" name="nameContains" value="@_nameContains" /></label>
+            <label>@I18n.T("traces.filter.name") <input type="text" name="nameContains" value="@_nameContains" /></label>
         </fieldset>
 
         <fieldset>
-            <legend>Fenster &amp; Schwellen &amp; Verhalten</legend>
-            <label>Fenster (s) <input type="number" name="windowSeconds" value="@_windowSeconds.ToString(CultureInfo.InvariantCulture)" /></label>
-            <label>Schwellen <input type="number" name="threshold" value="@_threshold.ToString(CultureInfo.InvariantCulture)" /></label>
-            <label>for (s) <input type="number" name="forSeconds" value="@_forSeconds.ToString(CultureInfo.InvariantCulture)" placeholder="0 = sofort feuern" /></label>
-            <label>Eval-Takt (s) <input type="number" name="evalInterval" value="@_evalInterval.ToString(CultureInfo.InvariantCulture)" placeholder="0 = globaler Takt" /></label>
+            <legend>@I18n.T("alert.editor.legend.window")</legend>
+            <label>@I18n.T("alert.editor.field.window") <input type="number" name="windowSeconds" value="@_windowSeconds.ToString(CultureInfo.InvariantCulture)" /></label>
+            <label>@I18n.T("alert.detail.col.threshold") <input type="number" name="threshold" value="@_threshold.ToString(CultureInfo.InvariantCulture)" /></label>
+            <label>@I18n.T("alert.editor.field.for") <input type="number" name="forSeconds" value="@_forSeconds.ToString(CultureInfo.InvariantCulture)" placeholder="@I18n.T("alert.editor.placeholder.for")" /></label>
+            <label>@I18n.T("alert.editor.field.evalinterval") <input type="number" name="evalInterval" value="@_evalInterval.ToString(CultureInfo.InvariantCulture)" placeholder="@I18n.T("alert.editor.placeholder.eval")" /></label>
         </fieldset>
 
         <fieldset>
-            <legend>Kanäle</legend>
+            <legend>@I18n.T("alert.editor.legend.channels")</legend>
             <div class="hmd-check-row">
-                <label class="hmd-check"><input type="checkbox" name="channels" value="logger" checked="@_channels.Contains("logger")" /> logger @(Options.LoggerEnabled ? "" : "(deaktiviert)")</label>
-                <label class="hmd-check"><input type="checkbox" name="channels" value="email" checked="@_channels.Contains("email")" /> email @(Options.Smtp.Enabled ? "" : "(deaktiviert)")</label>
-                <label class="hmd-check"><input type="checkbox" name="channels" value="webhook" checked="@_channels.Contains("webhook")" /> webhook @(Options.Webhook.Enabled ? "" : "(deaktiviert)")</label>
+                <label class="hmd-check"><input type="checkbox" name="channels" value="logger" checked="@_channels.Contains("logger")" /> logger @(Options.LoggerEnabled ? "" : I18n.T("alert.editor.channel.disabled"))</label>
+                <label class="hmd-check"><input type="checkbox" name="channels" value="email" checked="@_channels.Contains("email")" /> email @(Options.Smtp.Enabled ? "" : I18n.T("alert.editor.channel.disabled"))</label>
+                <label class="hmd-check"><input type="checkbox" name="channels" value="webhook" checked="@_channels.Contains("webhook")" /> webhook @(Options.Webhook.Enabled ? "" : I18n.T("alert.editor.channel.disabled"))</label>
             </div>
         </fieldset>
 
         <div class="hmd-form-actions">
-            <button type="submit" class="hmd-btn">Speichern</button>
-            <a class="hmd-btn hmd-btn-ghost" href="@(BasePath + "/alerts")">Abbrechen</a>
+            <button type="submit" class="hmd-btn">@I18n.T("alert.editor.save")</button>
+            <a class="hmd-btn hmd-btn-ghost" href="@(BasePath + "/alerts")">@I18n.T("alert.editor.cancel")</a>
         </div>
     </form>
-
-    <HeimdallFooter BasePath="@BasePath" />
-</main>
-</body>
-</html>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";

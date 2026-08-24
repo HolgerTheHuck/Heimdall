@@ -138,6 +138,93 @@ public static class GrafanaTemplating
         };
     }
 
+    // --- Daten-Link-Interpolation (cross-dashboard Drill) -------------------
+    // Grafana-Daten-Links tragen URL-Vorlagen mit Platzhaltern, die das
+    // Ziel-Dashboard + die Werte der geklickten Zeile transportieren. Diese
+    // Regexen heben die Platzhalter heraus; die Auflösung passiert in
+    // InterpolateLinkUrl. Getrennt vom PromQL-VarToken, denn jenes stoppt am
+    // ersten '.' und würde '${__data.fields.http_route}' falsch (nur '${__data}')
+    // treffen.
+    private static readonly Regex LinkFieldToken = new(
+        @"\$\{(?:__data\.fields|__field)\.([A-Za-z_][A-Za-z0-9_]*)\}",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(500));
+    private static readonly Regex LinkQueryParamToken = new(
+        @"\$\{(?:(var-)?([A-Za-z_][A-Za-z0-9_]*)):queryparam\}",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(500));
+    // Grafana-Dashboard-Pfad '/d/{uid}/{slug}' → Heimdall '{basePath}/dashboards/{uid}'.
+    // Lookbehind verhindert Treffer innerhalb eines längeren Pfadsegments; slug verfällt.
+    private static readonly Regex LinkDashPath = new(
+        @"(?<![A-Za-z0-9])/d/([A-Za-z0-9_-]+)(/[^?&#]*)?",
+        RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(500));
+
+    /// <summary>
+    /// Löst eine Grafana-Daten-Link-URL-Vorlage pro Tabellenzeile auf:
+    /// <list type="bullet">
+    /// <item><c>${__url_time_range}</c> → <c>from=&lt;ns&gt;&amp;to=&lt;ns&gt;</c>
+    ///   (Unix-**ns**, damit der Dashboard-Endpoint <c>ParseNs</c> sie versteht).</item>
+    /// <item><c>${__data.fields.&lt;Name&gt;}</c> / <c>${__field.&lt;Name&gt;}</c> →
+    ///   URL-kodierter Wert des Feldes <c>&lt;Name&gt;</c> aus der geklickten Zeile
+    ///   (<paramref name="fieldValues"/>, Key = Original-Labelname; fehlt → leer).</item>
+    /// <item><c>${var-&lt;n&gt;:queryparam}</c> / <c>${&lt;n&gt;:queryparam}</c> →
+    ///   <c>var-&lt;n&gt;=&lt;wert&gt;</c> (Wert aus <paramref name="vars"/>,
+    ///   Default <c>$__all</c> → Ziel-Dashboard wählt „alle").</item>
+    /// <item><c>/d/&lt;uid&gt;/&lt;slug&gt;</c> → <c>&lt;basePath&gt;/dashboards/&lt;uid&gt;</c>
+    ///   (Grafana-Dashboard-URL → Heimdall-Route; slug verfällt).</item>
+    /// </list>
+    /// Reihenfolge: Felder/Zeit/Variablen VOR dem Pfad-Rewrite, damit eingefügte
+    /// Werte (URL-kodiert) keine neuen <c>/d/</c>-Treffer erzeugen.
+    /// </summary>
+    public static string InterpolateLinkUrl(
+        string url, IReadOnlyDictionary<string, string> fieldValues,
+        IReadOnlyDictionary<string, string> vars, long fromMs, long toMs, string basePath)
+    {
+        if (string.IsNullOrEmpty(url)) return url ?? string.Empty;
+
+        // 1) Zeitbereich (ns, da ParseNs ns erwartet).
+        long fromNs = fromMs * 1_000_000L;
+        long toNs = toMs * 1_000_000L;
+        url = url.Replace("${__url_time_range}",
+            "from=" + fromNs.ToString(CultureInfo.InvariantCulture) +
+            "&to=" + toNs.ToString(CultureInfo.InvariantCulture),
+            StringComparison.Ordinal);
+
+        // 2) Feldwerte der geklickten Zeile.
+        url = ReplaceLinkFields(url, fieldValues, encode: true);
+
+        // 3) Variablen als Query-Parameter (var-<name>=<wert>).
+        url = LinkQueryParamToken.Replace(url, m =>
+        {
+            string name = m.Groups[2].Value;
+            string val = (vars is not null && vars.TryGetValue(name, out var v) && !string.IsNullOrEmpty(v)) ? v : "$__all";
+            return "var-" + name + "=" + Uri.EscapeDataString(val);
+        });
+
+        // 4) Grafana-Dashboard-Pfad → Heimdall-Route.
+        url = LinkDashPath.Replace(url, m => basePath + "/dashboards/" + m.Groups[1].Value);
+
+        return url;
+    }
+
+    /// <summary>
+    /// Löst nur die Feld-Platzhalter (<c>${__data.fields.X}</c> /
+    /// <c>${__field.X}</c>) in einem Link-<b>Titel</b> auf (kein Pfad-Rewrite,
+    /// kein Zeitbereich) — z. B. „${__data.fields.http_request_method}
+    /// ${__data.fields.http_route}" → „GET api/Orders". Fehlt ein Feld → leer.
+    /// </summary>
+    public static string InterpolateLinkTitle(string? title, IReadOnlyDictionary<string, string> fieldValues)
+        => ReplaceLinkFields(title ?? "", fieldValues, encode: false);
+
+    private static string ReplaceLinkFields(string text, IReadOnlyDictionary<string, string> fieldValues, bool encode)
+    {
+        if (string.IsNullOrEmpty(text)) return text ?? "";
+        return LinkFieldToken.Replace(text, m =>
+        {
+            string name = m.Groups[1].Value;
+            string val = (fieldValues is not null && fieldValues.TryGetValue(name, out var v)) ? v ?? "" : "";
+            return encode ? Uri.EscapeDataString(val) : val;
+        });
+    }
+
     /// <summary>Kodiert einen Variablenwert fuer den PromQL-Kontext.</summary>
     public static string Encode(string? raw)
     {

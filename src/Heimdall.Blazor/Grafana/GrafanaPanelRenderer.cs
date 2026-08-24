@@ -37,8 +37,17 @@ public sealed record StatTile(
 /// <c>http_response_status_code</c>), jeweils mit Mini-Flächen-Graph — entspricht
 /// Grafanas stat-Panel mit <c>graphMode=area</c>/<c>wideLayout</c>.</summary>
 public sealed record StatGridResult(IReadOnlyList<StatTile> Tiles, string? Unit) : PanelRenderResult;
-/// <summary>Tabellen-Panels — Spalten + Zeilen.</summary>
-public sealed record TableResult(IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyList<string>> Rows) : PanelRenderResult;
+/// <summary>Tabellen-Panels — Spalten + Zeilen, optional pro Zelle ein Daten-Link
+/// (<c>LinkUrls</c>, gleiche Shape wie <c>Rows</c>; null/leer = kein Link).
+/// <c>LinkUrls[r][c]</c> trägt die bereits vollständig aufgelöste href (inkl.
+/// BasePath) + den pro Zeile interpolierten Titel (Tooltip).</summary>
+public sealed record TableResult(
+    IReadOnlyList<string> Columns,
+    IReadOnlyList<IReadOnlyList<string>> Rows,
+    IReadOnlyList<IReadOnlyList<TableCellLink?>>? LinkUrls = null) : PanelRenderResult;
+
+/// <summary>Aufgelöster Daten-Link einer Tabellenzelle: href (inkl. BasePath) + Titel.</summary>
+public sealed record TableCellLink(string Href, string? Title);
 /// <summary>Kreis-Gauge — Wert/Min/Max/Farbe/Tone.</summary>
 public sealed record GaugeResult(double Value, double Min, double Max, string Color, string Tone, string? Unit) : PanelRenderResult;
 /// <summary>Bargauge-Panels — Liste von Balken.</summary>
@@ -79,7 +88,9 @@ internal static class GrafanaPanelRenderer
         long toMs,
         long stepMs,
         IReadOnlyDictionary<string, string> vars,
-        IHeimdallQuery? query = null)
+        IHeimdallQuery? query = null,
+        string? lang = null,
+        string basePath = "/otel")
     {
         // Row-Section-Header: keine Auswertung, nur Überschrift (Vollbreite in der UI).
         if (panel.Kind == GrafanaPanelKind.Row)
@@ -95,8 +106,8 @@ internal static class GrafanaPanelRenderer
             {
                 if (query is null)
                     return new RenderedPanel(panel,
-                        new ErrorResult("Log-Panels benötigen Heimdalls Log-Store (IHeimdallQuery) — im eingebetteten Modus ohne Query nicht verfügbar."));
-                return new RenderedPanel(panel, RenderLogs(panel, query, fromMs, toMs, interp));
+                        new ErrorResult(HeimdallI18n.T(lang, "grafana.err.logsNoStore")));
+                return new RenderedPanel(panel, RenderLogs(panel, query, fromMs, toMs, interp, lang));
             }
 
             // Nicht-PromQL-Datasources (Loki &c.) kann Heimdall für Nicht-Logs-Panels
@@ -104,33 +115,33 @@ internal static class GrafanaPanelRenderer
             if (!string.Equals(panel.DatasourceType, "prometheus", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrEmpty(panel.DatasourceType))
                 return new RenderedPanel(panel,
-                    new ErrorResult("Datenquelle '" + panel.DatasourceType +
-                        "' wird nicht unterstützt (nur PromQL)."));
+                    new ErrorResult(HeimdallI18n.T(lang, "grafana.err.unsupportedDatasource", panel.DatasourceType)));
 
             if (panel.Targets.Count == 0)
-                return new RenderedPanel(panel, new EmptyResult("Keine PromQL-Targets im Panel."));
+                return new RenderedPanel(panel, new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noTargets")));
 
             return panel.Kind switch
             {
-                GrafanaPanelKind.Timeseries => new RenderedPanel(panel, RenderTimeseries(panel, engine, fromMs, toMs, stepMs, interp)),
-                GrafanaPanelKind.Stat => new RenderedPanel(panel, RenderStat(panel, engine, fromMs, toMs, stepMs, interp)),
-                GrafanaPanelKind.Table => new RenderedPanel(panel, RenderTable(panel, engine, toMs, interp)),
-                GrafanaPanelKind.Gauge => new RenderedPanel(panel, RenderGauge(panel, engine, toMs, interp)),
-                GrafanaPanelKind.BarGauge => new RenderedPanel(panel, RenderBarGauge(panel, engine, toMs, interp)),
-                GrafanaPanelKind.Pie => new RenderedPanel(panel, RenderPie(panel, engine, toMs, interp)),
-                GrafanaPanelKind.Heatmap => new RenderedPanel(panel, RenderHeatmap(panel, engine, fromMs, toMs, stepMs, interp)),
-                _ => new RenderedPanel(panel, RenderTimeseries(panel, engine, fromMs, toMs, stepMs, interp)),
+                GrafanaPanelKind.Timeseries => new RenderedPanel(panel, RenderTimeseries(panel, engine, fromMs, toMs, stepMs, interp, lang)),
+                GrafanaPanelKind.Stat => new RenderedPanel(panel, RenderStat(panel, engine, fromMs, toMs, stepMs, interp, lang)),
+                GrafanaPanelKind.Table => new RenderedPanel(panel, RenderTable(panel, engine, fromMs, toMs, interp, lang, basePath)),
+                GrafanaPanelKind.Gauge => new RenderedPanel(panel, RenderGauge(panel, engine, toMs, interp, lang)),
+                GrafanaPanelKind.BarGauge => new RenderedPanel(panel, RenderBarGauge(panel, engine, toMs, interp, lang)),
+                GrafanaPanelKind.Pie => new RenderedPanel(panel, RenderPie(panel, engine, toMs, interp, lang)),
+                GrafanaPanelKind.Heatmap => new RenderedPanel(panel, RenderHeatmap(panel, engine, fromMs, toMs, stepMs, interp, lang)),
+                _ => new RenderedPanel(panel, RenderTimeseries(panel, engine, fromMs, toMs, stepMs, interp, lang)),
             };
         }
         catch (Exception ex)
         {
-            return new RenderedPanel(panel, new ErrorResult("Panel '" + panel.Title + "': " + ex.Message));
+            return new RenderedPanel(panel,
+                new ErrorResult(HeimdallI18n.T(lang, "grafana.err.panel", panel.Title, ex.Message)));
         }
     }
 
     // === Timeseries ========================================================
     private static PanelRenderResult RenderTimeseries(
-        GrafanaPanel panel, PromEngine engine, long fromMs, long toMs, long stepMs, IReadOnlyDictionary<string, string> vars)
+        GrafanaPanel panel, PromEngine engine, long fromMs, long toMs, long stepMs, IReadOnlyDictionary<string, string> vars, string? lang)
     {
         var series = new List<ChartSeries>();
         int colorIdx = 0;
@@ -150,7 +161,7 @@ internal static class GrafanaPanelRenderer
         }
         var unit = panel.FieldConfig?.Unit;
         return series.Count == 0
-            ? new EmptyResult("Keine Daten im Zeitraum.")
+            ? new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noData"))
             : new ChartResult(series, unit);
     }
 
@@ -161,7 +172,7 @@ internal static class GrafanaPanelRenderer
     // Grafana graphMode=area/line (panel.WantsStatGraph) erzwingt die Kachel-Ansicht
     // AUCH bei nur EINER Serie (Sparkline + Wert) — wie in Grafana, nicht als bloße Zahl.
     private static PanelRenderResult RenderStat(
-        GrafanaPanel panel, PromEngine engine, long fromMs, long toMs, long stepMs, IReadOnlyDictionary<string, string> vars)
+        GrafanaPanel panel, PromEngine engine, long fromMs, long toMs, long stepMs, IReadOnlyDictionary<string, string> vars, string? lang)
     {
         var target = panel.Targets[0];
         var expr = GrafanaTemplating.Interpolate(target.Expr, vars);
@@ -174,7 +185,7 @@ internal static class GrafanaPanelRenderer
         if (!panel.WantsStatGraph && instSamples.Count <= 1)
         {
             var (value, ok) = EvalScalar(target, engine, toMs, vars);
-            if (!ok) return new EmptyResult("Kein Wert im Zeitraum.");
+            if (!ok) return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noValue"));
             var (tone, _) = ThresholdTone(panel.FieldConfig, value);
             return new StatResult(value, HeimdallCharting.FmtValue(value), tone, panel.FieldConfig?.Unit);
         }
@@ -183,7 +194,7 @@ internal static class GrafanaPanelRenderer
         // Mini-Flächen-Graph — auch bei nur EINER Serie (Sparkline + letzter Wert).
         var res = engine.EvalRange(expr, fromMs, toMs, stepMs);
         if (res.Kind != PromResultKind.Matrix || res.Matrix is null || res.Matrix.Series.Count == 0)
-            return new EmptyResult("Keine Werte im Zeitraum.");
+            return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noValues"));
 
         var tiles = new List<StatTile>();
         foreach (var rs in res.Matrix.Series)
@@ -202,7 +213,7 @@ internal static class GrafanaPanelRenderer
                 HeimdallCharting.FmtValue(lastV), tone, lastV, pts));
         }
         if (tiles.Count == 0)
-            return new EmptyResult("Keine beobachteten Werte im Zeitraum.");
+            return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noObserved"));
         tiles.Sort((a, b) => b.RawValue.CompareTo(a.RawValue));   // topk-Reihenfolge (größte zuerst)
         return new StatGridResult(tiles, panel.FieldConfig?.Unit);
     }
@@ -219,14 +230,15 @@ internal static class GrafanaPanelRenderer
 
     // === Table =============================================================
     private static PanelRenderResult RenderTable(
-        GrafanaPanel panel, PromEngine engine, long toMs, IReadOnlyDictionary<string, string> vars)
+        GrafanaPanel panel, PromEngine engine, long fromMs, long toMs,
+        IReadOnlyDictionary<string, string> vars, string? lang, string basePath)
     {
         var target = panel.Targets[0];
         var expr = GrafanaTemplating.Interpolate(target.Expr, vars);
         // Table-Panels sind in der Regel instant; falls nicht, evaluiere instant am Fensterende.
         var res = engine.EvalInstant(expr, toMs);
         var samples = ExtractSamples(res);
-        if (samples.Count == 0) return new EmptyResult("Keine Reihen für die Tabelle.");
+        if (samples.Count == 0) return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noTableRows"));
 
         // organize-Transformation (renameByName / excludeByName) best-effort anwenden.
         var (rename, exclude) = ParseOrganize(panel.Transformations);
@@ -246,30 +258,82 @@ internal static class GrafanaPanelRenderer
             columns.Add(rename.TryGetValue(k, out var rn) && !string.IsNullOrEmpty(rn) ? rn : k);
             colIndex.Add(labelKeys.IndexOf(k));
         }
-        if (!exclude.Contains("Value", StringComparer.OrdinalIgnoreCase))
+        bool hasValueCol = !exclude.Contains("Value", StringComparer.OrdinalIgnoreCase);
+        if (hasValueCol)
             columns.Add(rename.TryGetValue("Value", out var vn) && !string.IsNullOrEmpty(vn) ? vn : "Value");
 
+        // Daten-Links (fieldConfig.overrides → byName) pro angezeigter Spalte.
+        // Der byName-Matcher trifft den DISPLAY-Namen; die URL referenziert per
+        // ${__data.fields.X} aber den ORIGINAL-Feldnamen (Label-Key) — beide sind
+        // hier vorhanden (columns[i] = Display, labelKeys[colIndex[i]] = Original).
+        var links = panel.FieldConfig?.LinksByColumn;
+        // colLinks[i] = Links für Spalte i (Display-Name columns[i]), oder null.
+        IReadOnlyList<GrafanaDataLink>?[] colLinks = new IReadOnlyList<GrafanaDataLink>?[columns.Count];
+        bool anyLinks = false;
+        if (links is not null)
+        {
+            for (int i = 0; i < columns.Count; i++)
+                if (links.TryGetValue(columns[i], out var cl) && cl.Count > 0)
+                {
+                    colLinks[i] = cl;
+                    anyLinks = true;
+                }
+        }
+
         var rows = new List<IReadOnlyList<string>>();
+        List<List<TableCellLink?>>? linkUrls = anyLinks ? new List<List<TableCellLink?>>(samples.Count) : null;
         foreach (var s in samples)
         {
             var row = new List<string>();
+            // Feldwerte der Zeile (Original-Labelnamen → Wert) für ${__data.fields.X}.
+            // Nur aufbauen, wenn überhaupt Links vorhanden sind.
+            Dictionary<string, string>? fieldValues = anyLinks
+                ? new Dictionary<string, string>(s.Labels.Count + 1, StringComparer.Ordinal)
+                : null;
+            if (fieldValues is not null)
+            {
+                foreach (var kv in s.Labels) fieldValues[kv.Key] = kv.Value;
+                fieldValues["Value"] = HeimdallCharting.FmtValue(s.Value);
+            }
+
+            List<TableCellLink?>? rowLinks = anyLinks ? new List<TableCellLink?>(columns.Count) : null;
             for (int i = 0; i < colIndex.Count; i++)
             {
                 var key = labelKeys[colIndex[i]];
                 row.Add(s.Labels.TryGetValue(key, out var v) ? v : "");
+                rowLinks?.Add(ResolveCellLink(colLinks[i], fieldValues!, vars, fromMs, toMs, basePath));
             }
-            row.Add(HeimdallCharting.FmtValue(s.Value));
+            if (hasValueCol)
+            {
+                row.Add(HeimdallCharting.FmtValue(s.Value));
+                // Value-Spalten-Index = columns.Count - 1 (zuletzt angehängt).
+                rowLinks?.Add(ResolveCellLink(colLinks[columns.Count - 1], fieldValues!, vars, fromMs, toMs, basePath));
+            }
             rows.Add(row);
+            linkUrls?.Add(rowLinks!);
         }
-        return new TableResult(columns, rows);
+        return new TableResult(columns, rows, linkUrls);
+    }
+
+    /// <summary>Löst die ERSTE Link-URL + Titel einer Zelle auf (oder null falls keine Links).</summary>
+    private static TableCellLink? ResolveCellLink(
+        IReadOnlyList<GrafanaDataLink>? cellLinks, IReadOnlyDictionary<string, string> fieldValues,
+        IReadOnlyDictionary<string, string> vars, long fromMs, long toMs, string basePath)
+    {
+        if (cellLinks is null || cellLinks.Count == 0) return null;
+        var link = cellLinks[0];
+        string href = GrafanaTemplating.InterpolateLinkUrl(link.Url, fieldValues, vars, fromMs, toMs, basePath);
+        string? title = string.IsNullOrEmpty(link.Title) ? null
+            : GrafanaTemplating.InterpolateLinkTitle(link.Title, fieldValues);
+        return new TableCellLink(href, title);
     }
 
     // === Gauge =============================================================
     private static PanelRenderResult RenderGauge(
-        GrafanaPanel panel, PromEngine engine, long toMs, IReadOnlyDictionary<string, string> vars)
+        GrafanaPanel panel, PromEngine engine, long toMs, IReadOnlyDictionary<string, string> vars, string? lang)
     {
         var (value, ok) = EvalScalar(panel.Targets[0], engine, toMs, vars);
-        if (!ok) return new EmptyResult("Kein Wert für die Gauge.");
+        if (!ok) return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noGauge"));
         var (tone, color) = ThresholdTone(panel.FieldConfig, value);
         double max = MaxForGauge(panel.FieldConfig, value);
         return new GaugeResult(value, 0, max, color, tone, panel.FieldConfig?.Unit);
@@ -277,11 +341,11 @@ internal static class GrafanaPanelRenderer
 
     // === Bargauge ==========================================================
     private static PanelRenderResult RenderBarGauge(
-        GrafanaPanel panel, PromEngine engine, long toMs, IReadOnlyDictionary<string, string> vars)
+        GrafanaPanel panel, PromEngine engine, long toMs, IReadOnlyDictionary<string, string> vars, string? lang)
     {
         var expr = GrafanaTemplating.Interpolate(panel.Targets[0].Expr, vars);
         var samples = ExtractSamples(engine.EvalInstant(expr, toMs));
-        if (samples.Count == 0) return new EmptyResult("Keine Reihen für das Bargauge.");
+        if (samples.Count == 0) return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noBarGauge"));
         double max = 0;
         foreach (var s in samples) if (s.Value > max) max = s.Value;
         if (max <= 0) max = 1;
@@ -297,11 +361,11 @@ internal static class GrafanaPanelRenderer
 
     // === Pie ===============================================================
     private static PanelRenderResult RenderPie(
-        GrafanaPanel panel, PromEngine engine, long toMs, IReadOnlyDictionary<string, string> vars)
+        GrafanaPanel panel, PromEngine engine, long toMs, IReadOnlyDictionary<string, string> vars, string? lang)
     {
         var expr = GrafanaTemplating.Interpolate(panel.Targets[0].Expr, vars);
         var samples = ExtractSamples(engine.EvalInstant(expr, toMs));
-        if (samples.Count == 0) return new EmptyResult("Keine Reihen für das Kreisdiagramm.");
+        if (samples.Count == 0) return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noPie"));
         var slices = new List<PieSlice>();
         for (int i = 0; i < samples.Count; i++)
         {
@@ -324,7 +388,7 @@ internal static class GrafanaPanelRenderer
     /// Label oder sind alle Zellen ≤ 1e-9, entsteht <see cref="EmptyResult"/>.
     /// </summary>
     private static PanelRenderResult RenderHeatmap(
-        GrafanaPanel panel, PromEngine engine, long fromMs, long toMs, long stepMs, IReadOnlyDictionary<string, string> vars)
+        GrafanaPanel panel, PromEngine engine, long fromMs, long toMs, long stepMs, IReadOnlyDictionary<string, string> vars, string? lang)
     {
         // Pro le-Bucket eine kumulative Zeitreihe sammeln.
         var byLe = new Dictionary<string, List<RangePoint>>(StringComparer.Ordinal);
@@ -345,7 +409,7 @@ internal static class GrafanaPanelRenderer
             }
         }
         if (byLe.Count == 0)
-            return new EmptyResult("Keine Histogramm-Buckets (le) im Zeitraum.");
+            return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noHistBuckets"));
 
         // le-Werte parsen + aufsteigend sortieren (+Inf ans Ende).
         var raw = new List<(double Le, string Str, List<RangePoint> Pts)>(byLe.Count);
@@ -356,7 +420,7 @@ internal static class GrafanaPanelRenderer
         var timesSet = new SortedSet<long>();
         foreach (var b in raw) foreach (var p in b.Pts) timesSet.Add(p.TimestampMs);
         if (timesSet.Count == 0)
-            return new EmptyResult("Keine Datenpunkte im Zeitraum.");
+            return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noDataPoints"));
         var times = timesSet.ToArray();
 
         // Kumulativ → inkrementell: increment[i] = cum[i] − cum[i−1] (Forward-Fill
@@ -381,7 +445,7 @@ internal static class GrafanaPanelRenderer
         }
 
         if (max <= 1e-9)
-            return new EmptyResult("Keine beobachteten Werte im Zeitraum (alle Buckets ≤ 0).");
+            return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noObservedZero"));
 
         return new HeatmapResult(buckets, times, max, panel.FieldConfig?.Unit);
     }
@@ -432,10 +496,10 @@ internal static class GrafanaPanelRenderer
     /// ohne pro-Log-Resource-Label Treffer liefert. Anzeige-Limit 100.
     /// </summary>
     private static PanelRenderResult RenderLogs(
-        GrafanaPanel panel, IHeimdallQuery query, long fromMs, long toMs, IReadOnlyDictionary<string, string> vars)
+        GrafanaPanel panel, IHeimdallQuery query, long fromMs, long toMs, IReadOnlyDictionary<string, string> vars, string? lang)
     {
         if (panel.Targets.Count == 0 || string.IsNullOrWhiteSpace(panel.Targets[0].Expr))
-            return new EmptyResult("Keine Log-Abfrage im Panel.");
+            return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noLogQuery"));
 
         var expr = GrafanaTemplating.Interpolate(panel.Targets[0].Expr, vars);
         var ql = LogQl.Parse(expr);
@@ -460,7 +524,7 @@ internal static class GrafanaPanelRenderer
             if (MatchStream(ql.Stream, r) && MatchLines(ql.Lines, r))
                 matched.Add(r);
 
-        if (matched.Count == 0) return new EmptyResult("Keine Logs im Zeitraum.");
+        if (matched.Count == 0) return new EmptyResult(HeimdallI18n.T(lang, "grafana.empty.noLogs"));
 
         const int Cap = 100;
         int truncated = Math.Max(0, matched.Count - Cap);

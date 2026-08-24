@@ -7,55 +7,52 @@
 @inject IAlertRuleStore Store
 @inject IAlertStateStore StateStore
 @inject HeimdallAlertingOptions Options
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Alerts" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main">
-    <h1>Alerts</h1>
+<HeimdallDocument Title="@I18n.T("page.title.alerts")" BasePath="@BasePath">
+    <h1>@I18n.T("page.title.alerts")</h1>
     <p class="hmd-dim">
-        Konfigurierbare Alarmregeln über Logs, Metriken und Traces.
+        @I18n.T("alert.subtitle")
         @if (!Options.Enabled)
         {
-            <span class="hmd-alert-hint">· Auswertung deaktiviert (Heimdall:Alerting:Enabled=false) — Regeln sind verwaltbar, werden aber nicht getaktet.</span>
+            <span class="hmd-alert-hint">@I18n.T("alert.disabled.hint")</span>
         }
-        · @(_rules.Count) Regel(n).
+        @I18n.T("alert.rules.count", _rules.Count)
     </p>
 
     <div class="hmd-filters">
         <form method="get" action="@(BasePath + "/alerts")" style="display:inline-flex; gap:.5rem; flex-wrap:wrap;">
-            <label>Zustand
+            <label>@I18n.T("alert.filter.state")
                 <select name="state">
-                    <option value="" selected="@(string.IsNullOrEmpty(StateFilter))">alle</option>
-                    <option value="firing" selected="@(StateFilter == "firing")">Firing</option>
-                    <option value="pending" selected="@(StateFilter == "pending")">Pending</option>
-                    <option value="resolved" selected="@(StateFilter == "resolved")">Resolved</option>
-                    <option value="ok" selected="@(StateFilter == "ok")">Ok</option>
+                    <option value="" selected="@(string.IsNullOrEmpty(StateFilter))">@I18n.T("traces.status.all")</option>
+                    <option value="firing" selected="@(StateFilter == "firing")">@I18n.T("alert.state.firing")</option>
+                    <option value="pending" selected="@(StateFilter == "pending")">@I18n.T("alert.state.pending")</option>
+                    <option value="resolved" selected="@(StateFilter == "resolved")">@I18n.T("alert.state.resolved")</option>
+                    <option value="ok" selected="@(StateFilter == "ok")">@I18n.T("alert.state.ok")</option>
                 </select>
             </label>
             <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
-            <button type="submit">Aktualisieren</button>
+            <button type="submit">@I18n.T("alert.filter.update")</button>
         </form>
-        <a class="hmd-btn" href="@(BasePath + "/alerts/new")">+ Neue Regel</a>
+        <a class="hmd-btn" href="@(BasePath + "/alerts/new")">@I18n.T("alert.new.rule")</a>
     </div>
 
     @if (_rules.Count == 0)
     {
-        <p class="hmd-empty">Keine Alarmregeln vorhanden — <a href="@(BasePath + "/alerts/new")">neue Regel anlegen</a>.</p>
+        <p class="hmd-empty" role="status">@I18n.T("alert.empty.prefix")<a href="@(BasePath + "/alerts/new")">@I18n.T("alert.empty.link")</a>@I18n.T("alert.empty.suffix")</p>
     }
     else
     {
         <div class="hmd-kpi-row">
-            <HeimdallKpi Value="@_firing.ToString(CultureInfo.InvariantCulture)" Label="Firing" Sub="aktive Alarme" Tone="err" />
-            <HeimdallKpi Value="@_pending.ToString(CultureInfo.InvariantCulture)" Label="Pending" Sub="wartet auf for" Tone="warn" />
-            <HeimdallKpi Value="@_resolved.ToString(CultureInfo.InvariantCulture)" Label="Resolved" Sub="kürzlich aufgelöst" Tone="ok" />
-            <HeimdallKpi Value="@_rules.Count.ToString(CultureInfo.InvariantCulture)" Label="Regeln" Sub="gesamt" Tone="accent" />
+            <HeimdallKpi Value="@_firing.ToString(CultureInfo.InvariantCulture)" Label="@I18n.T("alert.state.firing")" Sub="@I18n.T("alert.kpi.firing.sub")" Tone="err" ToneLabel="@I18n.T("kpi.tone.err")" />
+            <HeimdallKpi Value="@_pending.ToString(CultureInfo.InvariantCulture)" Label="@I18n.T("alert.state.pending")" Sub="@I18n.T("alert.kpi.pending.sub")" Tone="warn" ToneLabel="@I18n.T("kpi.tone.warn")" />
+            <HeimdallKpi Value="@_resolved.ToString(CultureInfo.InvariantCulture)" Label="@I18n.T("alert.state.resolved")" Sub="@I18n.T("alert.kpi.resolved.sub")" Tone="ok" ToneLabel="@I18n.T("kpi.tone.ok")" />
+            <HeimdallKpi Value="@_rules.Count.ToString(CultureInfo.InvariantCulture)" Label="@I18n.T("alert.kpi.rules.label")" Sub="@I18n.T("alert.kpi.rules.sub")" Tone="accent" ToneLabel="@I18n.T("kpi.tone.accent")" />
         </div>
 
         <table class="hmd-table">
-            <thead><tr><th>Name</th><th>Signal</th><th>Zustand</th><th>Wert</th><th>Letzte Auswertung</th><th>for</th><th>Kanäle</th><th>aktiv</th><th></th></tr></thead>
+            <caption>@I18n.T("alert.table.caption")</caption>
+            <thead><tr><th scope="col">@I18n.T("alert.col.name")</th><th scope="col">@I18n.T("alert.col.signal")</th><th scope="col">@I18n.T("alert.col.state")</th><th scope="col">@I18n.T("alert.col.value")</th><th scope="col">@I18n.T("alert.col.lasteval")</th><th scope="col">for</th><th scope="col">@I18n.T("alert.col.channels")</th><th scope="col">@I18n.T("alert.col.active")</th><th scope="col"><span class="hmd-vh">@I18n.T("table.actions")</span></th></tr></thead>
             <tbody>
             @foreach (var r in _rules)
             {
@@ -63,24 +60,20 @@
                 var st = ev?.State ?? AlertState.Ok;
                 <tr>
                     <td><a href="@(BasePath + "/alerts/" + Uri.EscapeDataString(r.Id))">@r.Name</a></td>
-                    <td>@r.Signal</td>
+                    <td>@I18n.T("alert.signal." + r.Signal.ToString().ToLowerInvariant())</td>
                     <td><span class="hmd-alert-state hmd-alert-state--@(StateClass(st))">@StateLabel(st)</span></td>
                     <td class="hmd-mono">@(ev?.LastValue?.ToString("0.####", CultureInfo.InvariantCulture) ?? "—")</td>
                     <td class="hmd-mono">@(ev is not null ? HeimdallFmt.Ts(ev.LastEvalUnixMs * 1_000_000L) : "—")</td>
                     <td class="hmd-mono">@(_forSeconds.GetValueOrDefault(r.Id).ToString(CultureInfo.InvariantCulture)) s</td>
                     <td class="hmd-mono">@(r.Channels is null ? "—" : string.Join(", ", r.Channels))</td>
-                    <td>@(r.Enabled ? "ja" : "nein")</td>
-                    <td><a href="@(BasePath + "/alerts/" + Uri.EscapeDataString(r.Id))">→</a></td>
+                    <td>@(r.Enabled ? I18n.T("common.yes") : I18n.T("common.no"))</td>
+                    <td><a href="@(BasePath + "/alerts/" + Uri.EscapeDataString(r.Id))" aria-label="@I18n.T("alert.action.open")">→</a></td>
                 </tr>
             }
             </tbody>
         </table>
     }
-
-    <HeimdallFooter BasePath="@BasePath" />
-</main>
-</body>
-</html>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";
@@ -123,11 +116,11 @@
     }
 
     private static string StateClass(AlertState s) => s.ToString().ToLowerInvariant();
-    private static string StateLabel(AlertState s) => s switch
+    private string StateLabel(AlertState s) => s switch
     {
-        AlertState.Firing => "Firing",
-        AlertState.Pending => "Pending",
-        AlertState.Resolved => "Resolved",
-        _ => "Ok",
+        AlertState.Firing => I18n.T("alert.state.firing"),
+        AlertState.Pending => I18n.T("alert.state.pending"),
+        AlertState.Resolved => I18n.T("alert.state.resolved"),
+        _ => I18n.T("alert.state.ok"),
     };
 }

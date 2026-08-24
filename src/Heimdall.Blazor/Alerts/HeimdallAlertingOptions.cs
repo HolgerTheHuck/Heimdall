@@ -50,6 +50,14 @@ public sealed class HeimdallAlertingOptions
 
     public WebhookChannelOptions Webhook { get; set; } = new();
 
+    /// <summary>
+    /// Sprache für asynchrone Alert-Benachrichtigungen (Mail-Body/-Betreff), da der
+    /// AlertEvaluator als Singleton-HostedService außerhalb eines HTTP-Kontexts läuft
+    /// und das pro-Request `heimdall-lang`-Cookie nicht lesen kann. "de"|"en"|"fr";
+    /// Default "de". Webhook-Payloads bleiben maschinen-lesbar (unübersetzt).
+    /// </summary>
+    public string Language { get; set; } = "de";
+
     /// <summary>Logger-Kanal (Konsol-Log) registrieren — immer verfuegbar, gut fuer Dev/Demo.</summary>
     public bool LoggerEnabled { get; set; } = true;
 }

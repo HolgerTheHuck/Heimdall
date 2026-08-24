@@ -15,11 +15,13 @@ internal sealed class HeimdallLogExporter : BaseExporter<LogRecord>
 {
     private readonly IHeimdallSink _sink;
     private readonly HResource _resource;
+    private readonly IReadOnlyList<string>? _excludeCategories;
 
-    public HeimdallLogExporter(IHeimdallSink sink, HResource resource)
+    public HeimdallLogExporter(IHeimdallSink sink, HResource resource, IReadOnlyList<string>? excludeCategories = null)
     {
         _sink = sink;
         _resource = resource;
+        _excludeCategories = excludeCategories;
     }
 
     public override ExportResult Export(in Batch<LogRecord> batch)
@@ -27,7 +29,15 @@ internal sealed class HeimdallLogExporter : BaseExporter<LogRecord>
         var list = new List<HLogRecord>();
         foreach (var r in batch)
         {
-            try { list.Add(ToLog(r)); } catch { }
+            try
+            {
+                // Heimdall-eigene Diagnose-Logs (Kategorie-Prefix, z. B. "Heimdall.")
+                // nicht ins Dashboard schreiben.
+                if (_excludeCategories is not null
+                    && SdkConvert.StartsWithAny(r.CategoryName, _excludeCategories)) continue;
+                list.Add(ToLog(r));
+            }
+            catch { }
         }
         if (list.Count == 0) return ExportResult.Success;
         try { _sink.WriteLogs(list); } catch { }

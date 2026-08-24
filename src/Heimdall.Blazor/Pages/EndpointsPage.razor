@@ -10,54 +10,51 @@
 @using System.Globalization
 @using System.Collections.Generic
 @inject Heimdall.IHeimdallQuery Query
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Endpoints" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main">
-    <h1>Endpoints</h1>
+<HeimdallDocument Title="@I18n.T("page.title.endpoints")" BasePath="@BasePath">
+    <h1>@I18n.T("page.title.endpoints")</h1>
     @if (string.IsNullOrEmpty(Controller))
     {
-        <p class="hmd-dim">API-Übersicht über den Zeitraum „@_rangeLabel". Server-Spans=@_spans.Count.</p>
+        <p class="hmd-dim">@I18n.T("endpoint.subtitle", _rangeLabel, _spans.Count)</p>
     }
     else
     {
-        <p class="hmd-dim"><a class="hmd-back" href="@(BasePath + "/endpoints")">← alle Controller</a> · Controller „@Controller" · Server-Spans=@(_focusStat.Count).</p>
+        <p class="hmd-dim"><a class="hmd-back" href="@(BasePath + "/endpoints")">@I18n.T("endpoint.back.all")</a> · @I18n.T("endpoint.controller.label", Controller) · @I18n.T("endpoint.spans.label", _focusStat.Count)</p>
     }
 
     <form class="hmd-filters" method="get" action="@_formAction">
-        <label>Controller-Attr <input type="search" name="controllerAttr" value="@ControllerAttr" /></label>
-        <label>Action-Attr <input type="search" name="actionAttr" value="@ActionAttr" /></label>
-        <label>Route-Attr <input type="search" name="routeAttr" value="@RouteAttr" /></label>
-        <label>Limit <input type="number" name="limit" value="@Limit" min="1" max="20000" /></label>
+        <label>@I18n.T("endpoint.filter.controllerattr") <input type="search" name="controllerAttr" value="@ControllerAttr" /></label>
+        <label>@I18n.T("endpoint.filter.actionattr") <input type="search" name="actionAttr" value="@ActionAttr" /></label>
+        <label>@I18n.T("endpoint.filter.routeattr") <input type="search" name="routeAttr" value="@RouteAttr" /></label>
+        <label>@I18n.T("metrics.filter.limit") <input type="number" name="limit" value="@Limit" min="1" max="20000" /></label>
         <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
-        <button type="submit">Laden</button>
+        <button type="submit">@I18n.T("metrics.filter.load")</button>
     </form>
 
     @if (_hasData)
     {
         <div class="hmd-kpi-row">
-            <HeimdallKpi Value="@(_focusStat.Count.ToString(CultureInfo.InvariantCulture))" Label="Aufrufe" Sub="@($"∅ {HeimdallCharting.FmtValue(_callsPerSec)}/s")" Tone="accent" />
-            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.AvgNs)" Label="∅ Antwortzeit" Sub="avg" Tone="ok" />
-            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.MinNs)" Label="min" Sub="Antwortzeit" Tone="ok" />
-            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.MaxNs)" Label="max" Sub="Antwortzeit" Tone="@_maxTone" />
-            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.P95)" Label="p95" Sub="Antwortzeit" Tone="@_p95Tone" />
-            <HeimdallKpi Value="@_errPct" Label="Fehlerrate" Sub="@($"Fehler {_focusStat.Errors}")" Tone="@_errTone" />
+            <HeimdallKpi Value="@(_focusStat.Count.ToString(CultureInfo.InvariantCulture))" Label="@I18n.T("endpoint.kpi.calls")" Sub="@I18n.T("dashboard.kpi.rate.sub", HeimdallCharting.FmtValue(_callsPerSec))" Tone="accent" ToneLabel="@ToneText("accent")" />
+            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.AvgNs)" Label="@I18n.T("endpoint.kpi.avg.resp")" Sub="@I18n.T("endpoint.kpi.avg")" Tone="ok" ToneLabel="@ToneText("ok")" />
+            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.MinNs)" Label="min" Sub="@I18n.T("dashboard.kpi.response")" Tone="ok" ToneLabel="@ToneText("ok")" />
+            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.MaxNs)" Label="max" Sub="@I18n.T("dashboard.kpi.response")" Tone="@_maxTone" ToneLabel="@ToneText(_maxTone)" />
+            <HeimdallKpi Value="@HeimdallFmt.Dur((long)_focusStat.P95)" Label="p95" Sub="@I18n.T("dashboard.kpi.response")" Tone="@_p95Tone" ToneLabel="@ToneText(_p95Tone)" />
+            <HeimdallKpi Value="@_errPct" Label="@I18n.T("endpoint.kpi.errrate")" Sub="@I18n.T("endpoint.kpi.err.sub", _focusStat.Errors)" Tone="@_errTone" ToneLabel="@ToneText(_errTone)" />
         </div>
 
         @if (string.IsNullOrEmpty(Controller))
         {
-            <h2 class="hmd-subhead">Controller (@_rollup.Controllers.Count)</h2>
+            <h2 class="hmd-subhead">@I18n.T("endpoint.heading.controllers", _rollup.Controllers.Count)</h2>
             @if (_rollup.Controllers.Count == 0)
             {
-                <p class="hmd-empty">Keine Controller im Zeitraum.</p>
+                <p class="hmd-empty" role="status">@I18n.T("endpoint.empty.controllers")</p>
             }
             else
             {
                 <table class="hmd-table">
-                    <thead><tr><th>Controller</th><th>Aufrufe</th><th>∅/s</th><th>avg</th><th>min</th><th>max</th><th>p95</th><th>Fehler</th><th></th></tr></thead>
+                    <caption>@I18n.T("endpoint.col.controller")</caption>
+                    <thead><tr><th scope="col">@I18n.T("endpoint.col.controller")</th><th scope="col">@I18n.T("endpoint.col.calls")</th><th scope="col">∅/s</th><th scope="col">avg</th><th scope="col">min</th><th scope="col">max</th><th scope="col">p95</th><th scope="col">@I18n.T("endpoint.col.err")</th><th scope="col"><span class="hmd-vh">@I18n.T("table.actions")</span></th></tr></thead>
                     <tbody>
                     @foreach (var c in _rollup.Controllers)
                     {
@@ -70,7 +67,7 @@
                             <td>@HeimdallFmt.Dur((long)c.MaxNs)</td>
                             <td>@HeimdallFmt.Dur((long)c.P95)</td>
                             <td>@ErrPct(c)</td>
-                            <td><a href="@(BasePath + "/endpoints/" + Uri.EscapeDataString(c.Controller))">→</a></td>
+                            <td><a href="@(BasePath + "/endpoints/" + Uri.EscapeDataString(c.Controller))" aria-label="@I18n.T("endpoint.action.open")">→</a></td>
                         </tr>
                     }
                     </tbody>
@@ -80,15 +77,16 @@
         else
         {
             var eps = _controllerEndpoints;
-            <h2 class="hmd-subhead">Endpoints / Actions (@eps.Count)</h2>
+            <h2 class="hmd-subhead">@I18n.T("endpoint.heading.endpoints", eps.Count)</h2>
             @if (eps.Count == 0)
             {
-                <p class="hmd-empty">Keine Endpoints für Controller „@Controller" im Zeitraum.</p>
+                <p class="hmd-empty" role="status">@I18n.T("endpoint.empty.endpoints", Controller)</p>
             }
             else
             {
                 <table class="hmd-table">
-                    <thead><tr><th>Action</th><th>Route</th><th>Aufrufe</th><th>avg</th><th>min</th><th>max</th><th>p50</th><th>p95</th><th>p99</th><th>Fehler</th><th></th></tr></thead>
+                    <caption>@I18n.T("endpoint.heading.endpoints", eps.Count)</caption>
+                    <thead><tr><th scope="col">Action</th><th scope="col">Route</th><th scope="col">@I18n.T("endpoint.col.calls")</th><th scope="col">avg</th><th scope="col">min</th><th scope="col">max</th><th scope="col">p50</th><th scope="col">p95</th><th scope="col">p99</th><th scope="col">@I18n.T("endpoint.col.err")</th><th scope="col"><span class="hmd-vh">@I18n.T("table.actions")</span></th></tr></thead>
                     <tbody>
                     @foreach (var e in eps)
                     {
@@ -113,13 +111,9 @@
     }
     else
     {
-        <p class="hmd-empty">Keine Server-Spans im Zeitraum (Limit=@Limit). Attribut-Namen prüfen oder Zeitraum vergrößern.</p>
+        <p class="hmd-empty" role="status">@I18n.T("endpoint.empty.nospans", Limit)</p>
     }
-
-    <HeimdallFooter BasePath="@BasePath" />
-</main>
-</body>
-</html>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";
@@ -147,6 +141,9 @@
     private string _errTone = "ok";
     private string _p95Tone = "ok";
     private string _maxTone = "ok";
+
+    /// <summary>Accessibler Tone-Text („Kritisch"/„Warnung"/„OK") für die KPI-Farb-Aussage.</summary>
+    private string ToneText(string tone) => tone is "ok" or "warn" or "err" or "accent" ? I18n.T("kpi.tone." + tone) : "";
 
     protected override void OnInitialized()
     {

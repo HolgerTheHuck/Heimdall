@@ -1,0 +1,17 @@
+@* Fragment-Antwort des Per-Panel-Endpoints: nur das einzelne Panel, ohne
+   HeimdallDocument-Shell. Die <link> auf heimdall.css sorgt dafür, dass das
+   Panel auch bei Direct-Nav/No-JS stylt; in die Host-Page injiziert wird sie
+   vom Browser deduped. Der Lazy-Loader tauscht einen Platzhalter per
+   outerHTML gegen dieses Fragment aus — danach greift das bestehende
+   Chart-Enhancement per Event-Delegation automatisch (kein Re-Init). *@
+@using Heimdall.Blazor.Grafana
+
+<link rel="stylesheet" href="/_content/Heimdall.Blazor/css/heimdall.css" />
+<GrafanaPanelView Panel="@Panel" BasePath="@BasePath" />
+
+@code {
+    [Parameter] public RenderedPanel Panel { get; set; } = null!;
+
+    /// <summary>Mount-Pfad des Dashboards (für Trace-Links in Log-Zeilen).</summary>
+    [Parameter] public string BasePath { get; set; } = "/otel";
+}

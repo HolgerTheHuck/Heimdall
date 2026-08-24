@@ -54,7 +54,10 @@ public static class HeimdallEndpointExtensions
             if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
             var auth = ctx.RequestServices.GetService<Heimdall.AspNetCore.HeimdallAuthOptions>();
             if (auth is null || !auth.Enabled)
-                return Results.Redirect($"{prefix}/login?err=Auth+nicht+aktiv");
+            {
+                var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
+                return Results.Redirect($"{prefix}/login?err=" + Uri.EscapeDataString(i18n.T("login.error.noauth")));
+            }
 
             var form = await ctx.Request.ReadFormAsync();
             var username = form["username"].ToString();
@@ -66,7 +69,8 @@ public static class HeimdallEndpointExtensions
             if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password) ||
                 !Heimdall.AspNetCore.HeimdallSessionCookie.CheckCredentials(username, password, auth))
             {
-                var err = Uri.EscapeDataString("Benutzername oder Passwort falsch");
+                var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
+                var err = Uri.EscapeDataString(i18n.T("login.error.badcreds"));
                 var user = Uri.EscapeDataString(username ?? string.Empty);
                 return Results.Redirect($"{prefix}/login?err={err}&user={user}");
             }
@@ -87,7 +91,11 @@ public static class HeimdallEndpointExtensions
         group.MapGet("/", () =>
             new RazorComponentResult<HomePage>(new { BasePath = prefix }));
 
-        group.MapGet("/traces", (string? name, string? svc, string? err, string? limit, string? offset, string? preset, string? from, string? to) =>
+        // Drilldown-Sprungseite zu Traces/Logs/Metriken (wie Grafana „Drilldown").
+        group.MapGet("/drilldown", () =>
+            new RazorComponentResult<DrilldownPage>(new { BasePath = prefix }));
+
+        group.MapGet("/traces", (string? name, string? svc, string? err, string? limit, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
             new RazorComponentResult<TracesPage>(new
             {
                 BasePath = prefix,
@@ -96,6 +104,8 @@ public static class HeimdallEndpointExtensions
                 HasError = ParseErr(err),
                 Limit = ParseInt(limit) ?? 100,
                 Offset = ParseInt(offset) ?? 0,
+                Sort = sort,
+                Dir = dir,
                 Preset = preset,
                 From = ParseNs(from),
                 To = ParseNs(to),
@@ -104,7 +114,7 @@ public static class HeimdallEndpointExtensions
         group.MapGet("/trace/{tid}", (string tid) =>
             new RazorComponentResult<TraceDetailPage>(new { BasePath = prefix, TraceId = tid }));
 
-        group.MapGet("/logs", (string? text, string? q, string? sev, string? limit, string? expand, string? preset, string? from, string? to) =>
+        group.MapGet("/logs", (string? text, string? q, string? sev, string? limit, string? expand, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
             new RazorComponentResult<LogsPage>(new
             {
                 BasePath = prefix,
@@ -113,6 +123,9 @@ public static class HeimdallEndpointExtensions
                 MinSeverity = ParseInt(sev),
                 Limit = ParseInt(limit) ?? 200,
                 Expand = expand == "1",
+                Offset = ParseInt(offset) ?? 0,
+                Sort = sort,
+                Dir = dir,
                 Preset = preset,
                 From = ParseNs(from),
                 To = ParseNs(to),
@@ -203,7 +216,10 @@ public static class HeimdallEndpointExtensions
             }
             else if (!string.IsNullOrWhiteSpace(form["json"])) content = form["json"];
             if (string.IsNullOrWhiteSpace(content))
-                return Results.Redirect($"{prefix}/dashboards/import?err=Kein+Dashboard-JSON");
+            {
+                var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
+                return Results.Redirect($"{prefix}/dashboards/import?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.nodashboardjson")));
+            }
             try { var uid = store.Save(content!); return Results.Redirect($"{prefix}/dashboards/{uid}"); }
             catch (Exception ex) { return Results.Redirect($"{prefix}/dashboards/import?err=" + Uri.EscapeDataString(ex.Message)); }
         });
@@ -213,10 +229,47 @@ public static class HeimdallEndpointExtensions
             var vars = ctx.Request.Query
                 .Where(k => k.Key.StartsWith("var-", StringComparison.Ordinal))
                 .ToDictionary(k => k.Key.Substring(4), k => k.Value.ToString(), StringComparer.Ordinal);
+            // Zurück-Link zum zuvor angesehenen Dashboard (Overview → Detail →
+            // Zurück → Overview). Nur interne Dashboard-Routen werden akzeptiert
+            // (Open-Redirect-Schutz); sonst null (Browser-Back bleibt Reserve).
+            string? backUrl = ResolveBackUrl(ctx, prefix, uid);
+
             return new RazorComponentResult<GrafanaDashboardViewPage>(new
             {
                 BasePath = prefix, Uid = uid, Preset = preset, From = ParseNs(from), To = ParseNs(to), Vars = vars,
+                BackUrl = backUrl,
             });
+        });
+
+        // Per-Panel-Fragment für das Lazy-Loading: die Shell rendert sofort
+        // Platzhalter, dieser Endpoint liefert pro Panel (Index in ExpandPanels)
+        // das ausgewertete Fragment. Storage erlaubt konkurrente Reads (WAL),
+        // d. h. parallele Panel-Fetches laufen wirklich concurrently. idx ist die
+        // Position in der Render-Slot-Liste (nicht GrafanaPanel.Id — das ist bei
+        // Repeat-Expansion nicht eindeutig). Ohne JS öffnet der No-JS-Link der
+        // Shell dieses Fragment direkt (stylt via inline <link>).
+        group.MapGet("/dashboards/{uid}/panel/{idx:int}", (HttpContext ctx, string uid, int idx, string? preset, string? from, string? to) =>
+        {
+            var store = ctx.RequestServices.GetRequiredService<IGrafanaDashboardStore>();
+            var dash = store.Get(uid);
+            if (dash is null) return Results.NotFound();
+
+            var engine = ctx.RequestServices.GetRequiredService<Heimdall.Prometheus.PromEngine>();
+            var query = ctx.RequestServices.GetRequiredService<Heimdall.IHeimdallQuery>();
+            var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
+
+            var vars = ctx.Request.Query
+                .Where(k => k.Key.StartsWith("var-", StringComparison.Ordinal))
+                .ToDictionary(k => k.Key.Substring(4), k => k.Value.ToString(), StringComparer.Ordinal);
+
+            var prep = GrafanaDashboardRender.BuildRenderVars(dash, vars, preset, ParseNs(from), ParseNs(to), HeimdallRange.NowUnixNano());
+            var slots = GrafanaDashboardRender.ExpandPanels(dash, prep.RenderVars);
+            if (idx < 0 || idx >= slots.Count) return Results.NotFound();
+
+            var slot = slots[idx];
+            var titled = slot.Panel with { Title = slot.Title };
+            var rp = GrafanaPanelRenderer.Render(titled, engine, prep.FromMs, prep.ToMs, prep.StepMs, slot.Vars, query, i18n.Lang, prefix);
+            return new RazorComponentResult<GrafanaPanelFragment>(new { Panel = rp, BasePath = prefix });
         });
 
         group.MapPost("/dashboards/{uid}/delete", (HttpContext ctx, string uid, IGrafanaDashboardStore store) =>
@@ -256,7 +309,10 @@ public static class HeimdallEndpointExtensions
             var id = form["id"].ToString();
             var name = form["name"].ToString();
             if (string.IsNullOrWhiteSpace(name))
-                return Results.Redirect($"{prefix}/alerts/new?err=Regelname+fehlt");
+            {
+                var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
+                return Results.Redirect($"{prefix}/alerts/new?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.rulename")));
+            }
             if (!Enum.TryParse<AlertSignal>(form["signal"].ToString(), true, out var signal))
                 signal = AlertSignal.Metric;
             var channels = form["channels"].Select(v => v?.ToString() ?? string.Empty).Where(s => !string.IsNullOrEmpty(s)).ToList<string>();
@@ -297,6 +353,32 @@ public static class HeimdallEndpointExtensions
             return Results.Redirect($"{prefix}/alerts");
         });
 
+        // Sprache umschalten (de/en/fr): setzt den `heimdall-lang`-Cookie und
+        // redirectet zurück. POST + CheckSameOrigin (wie alle State-Changes hier),
+        // da State-Change via GET ein OWASP-Antipattern ist (cache-/CSRF-bar). Das
+        // Flaggen-UI in HeimdallNav rendert kleine <form method=post><button>.
+        // `ret` wird auf den Prefix eingegrenzt, damit kein Open-Redirect entsteht.
+        group.MapPost("/lang", async (HttpContext ctx) =>
+        {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            // Form-Body lesen (wie die anderen POST-Handler hier): Minimal-APIs binden
+            // einfache Parameter sonst aus dem Query-String, nicht dem Form-Body.
+            var form = await ctx.Request.ReadFormAsync();
+            var set = form["set"].ToString();
+            var ret = form["ret"].ToString();
+            var lang = set is "de" or "en" or "fr" ? set : HeimdallI18n.DefaultLang;
+            var retUrl = string.IsNullOrEmpty(ret) || !ret.StartsWith(prefix, StringComparison.Ordinal) ? prefix : ret;
+            ctx.Response.Cookies.Append("heimdall-lang", lang, new CookieOptions
+            {
+                MaxAge = TimeSpan.FromDays(365),
+                IsEssential = true,
+                SameSite = SameSiteMode.Lax,
+                HttpOnly = false,   // allows future client-side switcher; harmless either way
+                Path = "/",
+            });
+            return Results.Redirect(retUrl);
+        });
+
         return group;
     }
 
@@ -332,6 +414,30 @@ public static class HeimdallEndpointExtensions
         if (s == "1" || string.Equals(s, "true", StringComparison.OrdinalIgnoreCase)) return true;
         if (s == "0" || string.Equals(s, "false", StringComparison.OrdinalIgnoreCase)) return false;
         return null;
+    }
+
+    /// <summary>
+    /// Bestimmt den Zurück-Link zum zuvor angesehenen Dashboard aus dem Referer-
+    /// Header. Nur interne Dashboard-Routen werden akzeptiert (Open-Redirect-
+    /// Schutz): der Pfad muss unter <c>{prefix}/dashboards/</c> liegen, das
+    /// extrahierte UID-Segment alphanumerisch sein und vom aktuellen UID
+    /// abweichen. Sonst null (kein Back-Link; der Browser-Back bleibt Reserve).
+    /// </summary>
+    private static string? ResolveBackUrl(HttpContext ctx, string prefix, string uid)
+    {
+        var referer = ctx.Request.Headers.Referer.ToString();
+        if (string.IsNullOrEmpty(referer)) return null;
+        if (!Uri.TryCreate(referer, UriKind.Absolute, out var uri)) return null;
+        var path = uri.AbsolutePath;
+        var dashRoot = prefix + "/dashboards/";
+        if (!path.StartsWith(dashRoot, StringComparison.Ordinal)) return null;
+        var rest = path.Substring(dashRoot.Length);
+        var seg = rest.Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+        if (string.IsNullOrEmpty(seg) || seg == "import" || seg == uid) return null;
+        // Nur Dashboard-UID-artige Segmente zulassen (kein Open-Redirect-Vektor).
+        foreach (var ch in seg)
+            if (!(char.IsLetterOrDigit(ch) || ch == '_' || ch == '-')) return null;
+        return dashRoot + seg;
     }
 
     /// <summary>

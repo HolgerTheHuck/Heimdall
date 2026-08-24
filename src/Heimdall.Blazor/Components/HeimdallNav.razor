@@ -2,19 +2,37 @@
 @* Navigationsleiste (sticky). BasePath ist das Praefix, unter dem das Dashboard haengt.
    Der aktive Tab wird ueber den Request-Pfad markiert (aria-current="page") — via
    HttpContext, das im statischen SSR als CascadingParameter verfuegbar ist. "@"
-   rendert aria-current nur bei dem Tab, dessen Pfad zum aktuellen Request passt. *@
+   rendert aria-current nur bei dem Tab, dessen Pfad zum aktuellen Request passt.
+   Rechts: Flaggen-Schalter (de/en/fr) als kleine POST-Forms (CSRF-sicher via
+   /lang-Endpoint + CheckSameOrigin); Windows rendert keine Emoji-Flaggen, daher
+   inline SVG. Kein JS. *@
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 <header class="hmd-nav">
-    <a class="hmd-brand" href="@BasePath">⌖ Heimdall</a>
-    <nav class="hmd-tabs" aria-label="Hauptnavigation">
-        <a href="@BasePath" aria-current="@Active("")">Übersicht</a>
-        <a href="@(BasePath + "/dashboard")" aria-current="@Active("/dashboard")">Dashboard</a>
-        <a href="@(BasePath + "/endpoints")" aria-current="@Active("/endpoints")">Endpoints</a>
-        <a href="@(BasePath + "/traces")" aria-current="@Active("/traces")">Traces</a>
-        <a href="@(BasePath + "/logs")" aria-current="@Active("/logs")">Logs</a>
-        <a href="@(BasePath + "/metrics")" aria-current="@Active("/metrics")">Metriken</a>
-        <a href="@(BasePath + "/dashboards")" aria-current="@Active("/dashboards")">Dashboards</a>
-        <a href="@(BasePath + "/alerts")" aria-current="@Active("/alerts")">Alerts</a>
+    <a class="hmd-brand" href="@BasePath"><span aria-hidden="true">⌖</span> Heimdall</a>
+    <nav class="hmd-tabs" aria-label="@I18n.T("nav.aria.label")">
+        <a href="@BasePath" aria-current="@Active("")">@I18n.T("nav.overview")</a>
+        <a href="@(BasePath + "/dashboard")" aria-current="@Active("/dashboard")">@I18n.T("nav.monitoring")</a>
+        <a href="@(BasePath + "/dashboards")" aria-current="@Active("/dashboards")">@I18n.T("nav.dashboards")</a>
+        <a href="@(BasePath + "/endpoints")" aria-current="@Active("/endpoints")">@I18n.T("nav.endpoints")</a>
+        <a href="@(BasePath + "/drilldown")" aria-current="@ActiveAny("/traces", "/logs", "/metrics")">@I18n.T("nav.drilldown")</a>
+        <a href="@(BasePath + "/alerts")" aria-current="@Active("/alerts")">@I18n.T("nav.alerts")</a>
     </nav>
+    <div class="hmd-lang" role="group" aria-label="@I18n.T("nav.flag.group")">
+        @foreach (var l in Heimdall.Blazor.HeimdallI18n.Languages)
+        {
+            var isActive = I18n.Lang == l;
+            var label = I18n.T("nav.flag." + l);
+            <form method="post" action="@(BasePath + "/lang")" class="hmd-lang-form">
+                <input type="hidden" name="set" value="@l" />
+                <input type="hidden" name="ret" value="@CurrentUrl" />
+                <button type="submit" class="hmd-lang-btn@(isActive ? " is-active" : "")"
+                        lang="@l" aria-label="@label" title="@label"
+                        aria-current="@(isActive ? "true" : null)">
+                    @FlagSvg(l)
+                </button>
+            </form>
+        }
+    </div>
 </header>
 
 @code {
@@ -30,6 +48,10 @@
     protected override void OnInitialized()
         => _path = HttpContext?.Request.Path.Value ?? null;
 
+    /// <summary>Aktuelle Request-URL (Pfad + Query) als Return-Ziel für /lang.</summary>
+    private string CurrentUrl
+        => (HttpContext?.Request.Path.Value ?? BasePath) + (HttpContext?.Request.QueryString.Value ?? "");
+
     /// <summary>
     /// Liefert "page", wenn der Tab-Pfad der aktuelle Request-Pfad ist (Root-Tab:
     /// exakt BasePath; Unterseiten: StartsWith). Sonst null (kein aria-current).
@@ -41,5 +63,27 @@
         if (tabSuffix.Length == 0)
             return _path == BasePath || _path == BasePath + "/" ? "page" : null;
         return _path.StartsWith(tabPath + "/", StringComparison.Ordinal) || _path == tabPath ? "page" : null;
+    }
+
+    /// <summary>Wie Active, markiert aber den Eltern-Tab, wenn EINER der
+    /// Sub-Pfade aktiv ist (Drilldown-Gruppe: Traces/Logs/Metriken).</summary>
+    private string? ActiveAny(params string[] tabSuffixes)
+    {
+        foreach (var s in tabSuffixes)
+            if (Active(s) == "page") return "page";
+        return null;
+    }
+
+    /// <summary>Inline-SVG-Flagge für die Sprache (Windows rendert keine Emoji-Flaggen).</summary>
+    private Microsoft.AspNetCore.Components.MarkupString FlagSvg(string lang)
+    {
+        var svg = lang switch
+        {
+            "de" => """<svg viewBox="0 0 5 3" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" preserveAspectRatio="none"><rect width="5" height="1" fill="#000"/><rect y="1" width="5" height="1" fill="#D00"/><rect y="2" width="5" height="1" fill="#FFCE00"/></svg>""",
+            "en" => """<svg viewBox="0 0 60 40" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" preserveAspectRatio="none"><rect width="60" height="40" fill="#012169"/><path d="M0,0 L60,40 M60,0 L0,40" stroke="#fff" stroke-width="8"/><path d="M0,0 L60,40 M60,0 L0,40" stroke="#C8102E" stroke-width="3"/><rect x="25" width="10" height="40" fill="#fff"/><rect y="15" width="60" height="10" fill="#fff"/><rect x="27" width="6" height="40" fill="#C8102E"/><rect y="17" width="60" height="6" fill="#C8102E"/></svg>""",
+            "fr" => """<svg viewBox="0 0 3 2" xmlns="http://www.w3.org/2000/svg" aria-hidden="true" preserveAspectRatio="none"><rect width="1" height="2" fill="#0055A4"/><rect x="1" width="1" height="2" fill="#fff"/><rect x="2" width="1" height="2" fill="#EF4135"/></svg>""",
+            _ => "",
+        };
+        return new Microsoft.AspNetCore.Components.MarkupString(svg);
     }
 }

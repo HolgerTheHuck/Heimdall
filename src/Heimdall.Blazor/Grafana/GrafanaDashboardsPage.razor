@@ -3,25 +3,22 @@
    Oben ein Link zur Import-Seite. Kein JS. *@
 @using Heimdall.Blazor.Grafana
 @inject IGrafanaDashboardStore Store
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Grafana-Dashboards" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main">
-    <h1>Grafana-Dashboards</h1>
-    <p class="hmd-dim">Importierte Dashboards werden lokal gespeichert und in Heimdall selbst gerendert — keine externe Grafana-Instanz nötig.</p>
-    <p><a class="hmd-btn" href="@(BasePath + "/dashboards/import")">+ Dashboard importieren</a></p>
+<HeimdallDocument Title="@I18n.T("page.title.grafanaList")" BasePath="@BasePath">
+    <h1>@I18n.T("page.title.grafanaList")</h1>
+    <p class="hmd-dim">@I18n.T("grafana.list.subtitle")</p>
+    <p><a class="hmd-btn" href="@(BasePath + "/dashboards/import")">@I18n.T("grafana.list.import")</a></p>
 
     @if (_list.Count == 0)
     {
-        <p class="hmd-empty">Noch keine Dashboards importiert. Ein Grafana-Dashboard-JSON (mit PromQL-Panels) hochladen → es wird gegen die Heimdall-Metriken gerendert.</p>
+        <p class="hmd-empty" role="status">@I18n.T("grafana.list.empty")</p>
     }
     else
     {
         <table class="hmd-table">
-            <thead><tr><th>Titel</th><th>UID</th><th>Panels</th><th></th></tr></thead>
+            <caption>@I18n.T("page.title.grafanaList")</caption>
+            <thead><tr><th scope="col">@I18n.T("grafana.list.col.title")</th><th scope="col">UID</th><th scope="col">@I18n.T("grafana.list.col.panels")</th><th scope="col"><span class="hmd-vh">@I18n.T("table.actions")</span></th></tr></thead>
             <tbody>
                 @foreach (var d in _list)
                 {
@@ -31,7 +28,7 @@
                         <td>@d.PanelCount</td>
                         <td>
                             <form method="post" action="@(BasePath + "/dashboards/" + d.Uid + "/delete")">
-                                <button type="submit" class="hmd-btn hmd-btn-danger">Löschen</button>
+                                <button type="submit" class="hmd-btn hmd-btn-danger">@I18n.T("alert.detail.delete")</button>
                             </form>
                         </td>
                     </tr>
@@ -39,11 +36,7 @@
             </tbody>
         </table>
     }
-
-    <HeimdallFooter BasePath="@BasePath" />
-</main>
-</body>
-</html>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";

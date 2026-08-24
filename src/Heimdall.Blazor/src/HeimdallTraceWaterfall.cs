@@ -21,7 +21,7 @@ internal static class HeimdallTraceWaterfall
     /// ≤1 Span (Aufrufer zeigt stattdessen einen Hinweis). <paramref name="width"/> ist die
     /// viewBox-Breite; das SVG skaliert via <c>width:100%</c>.
     /// </summary>
-    public static string RenderWaterfallSvg(IReadOnlyList<Heimdall.SpanRow> spans, int width = 1000)
+    public static string RenderWaterfallSvg(IReadOnlyList<Heimdall.SpanRow> spans, int width = 1000, string? ariaLabel = null)
     {
         if (spans is null || spans.Count <= 1) return string.Empty;
 
@@ -93,7 +93,8 @@ internal static class HeimdallTraceWaterfall
         double height = padTop + ordered.Count * rowH + padBottom;
         var sb = new StringBuilder(ordered.Count * 128);
         sb.Append("<svg viewBox=\"0 0 ").Append(width).Append(' ').Append(F(height))
-          .Append("\" class=\"hmd-chart hmd-waterfall\" role=\"img\" aria-label=\"Trace-Wasserfall\" preserveAspectRatio=\"xMidYMid meet\">");
+          .Append("\" class=\"hmd-chart hmd-waterfall\" role=\"img\" aria-label=\"")
+          .Append(Esc(ariaLabel ?? "Trace-Wasserfall")).Append("\" preserveAspectRatio=\"xMidYMid meet\">");
 
         // Zeitachse (5 relative Ticks).
         for (int i = 0; i <= 4; i++)

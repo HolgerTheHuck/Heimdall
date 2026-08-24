@@ -5,59 +5,56 @@
    Onboarding-Panel mit dem OTLP-Endpunkt. Pure C#-Aggregation auf IHeimdallQuery. *@
 @using System.Collections.Generic
 @inject Heimdall.IHeimdallQuery Query
+@inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<!DOCTYPE html>
-<html lang="de">
-<head><HeimdallHead Title="Übersicht" /></head>
-<body>
-<HeimdallNav BasePath="@BasePath" />
-<main class="hmd-main">
+<HeimdallDocument Title="@I18n.T("page.title.home")" BasePath="@BasePath">
     <div class="hmd-page-head">
-        <h1>Übersicht</h1>
-        <span class="hmd-dim">Heimdall-Observability · Schnappschuss der aktuellen Datenlage</span>
+        <h1>@I18n.T("page.title.home")</h1>
+        <span class="hmd-dim">@I18n.T("home.subtitle")</span>
     </div>
 
     @if (_isEmpty)
     {
-        <section class="hmd-empty-state">
-            <h2>Noch keine Telemetrie eingegangen</h2>
-            <p>Sende OpenTelemetry-Daten an Heimdall, dann erscheinen hier Health-KPIs, letzte Fehler-Traces und Logs.</p>
+        <section class="hmd-empty-state" role="status">
+            <h2>@I18n.T("home.empty.title")</h2>
+            <p>@I18n.T("home.empty.body")</p>
             <ul class="hmd-mono">
                 <li>OTLP/HTTP:  <code>POST @BasePath/v1/traces</code> · <code>@BasePath/v1/metrics</code> · <code>@BasePath/v1/logs</code></li>
                 <li>OTLP/gRPC:  <code>localhost:4317</code> (TraceService / LogsService / MetricsService.Export)</li>
             </ul>
-            <p class="hmd-dim">Beispiel-Senden via <code>OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:5099@BasePath</code> an das laufende Host.</p>
+            <p class="hmd-dim">@I18n.T("home.empty.sample") <code>OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:5099@BasePath</code></p>
         </section>
     }
     else
     {
         <div class="hmd-kpi-row">
-            <HeimdallKpi Value="@_spansStr" Label="Spans" Sub="gesamt" Tone="accent" />
-            <HeimdallKpi Value="@_logsStr" Label="Logs" Sub="gesamt" Tone="ok" />
-            <HeimdallKpi Value="@_metricsStr" Label="Metrik-Punkte" Sub="gesamt" Tone="warn" />
-            <HeimdallKpi Value="@_errTracesStr" Label="Fehler-Traces" Sub="@($"neueste {_errTraces.Count}")" Tone="@(_errTraces.Count > 0 ? "err" : "ok")" />
+            <HeimdallKpi Value="@_spansStr" Label="@I18n.T("home.kpi.spans")" Sub="@I18n.T("kpi.sub.total")" Tone="accent" ToneLabel="@I18n.T("kpi.tone.accent")" />
+            <HeimdallKpi Value="@_logsStr" Label="@I18n.T("home.kpi.logs")" Sub="@I18n.T("kpi.sub.total")" Tone="ok" ToneLabel="@I18n.T("kpi.tone.ok")" />
+            <HeimdallKpi Value="@_metricsStr" Label="@I18n.T("home.kpi.metrics")" Sub="@I18n.T("kpi.sub.total")" Tone="warn" ToneLabel="@I18n.T("kpi.tone.warn")" />
+            <HeimdallKpi Value="@_errTracesStr" Label="@I18n.T("home.kpi.errtraces")" Sub="@I18n.T("kpi.sub.latest", _errTraces.Count)" Tone="@(_errTraces.Count > 0 ? "err" : "ok")" ToneLabel="@I18n.T(_errTraces.Count > 0 ? "kpi.tone.err" : "kpi.tone.ok")" />
         </div>
 
         <div class="hmd-navcards">
-            <a class="hmd-navcard" href="@(BasePath + "/dashboard")"><span class="hmd-navcard-ico">📊</span><span class="hmd-navcard-t">Dashboard</span><span class="hmd-navcard-s">RED-Metriken, Latenzen, Uptime</span></a>
-            <a class="hmd-navcard" href="@(BasePath + "/traces")"><span class="hmd-navcard-ico">⛓</span><span class="hmd-navcard-t">Traces</span><span class="hmd-navcard-s">Spans suchen und inspizieren</span></a>
-            <a class="hmd-navcard" href="@(BasePath + "/logs")"><span class="hmd-navcard-ico">📜</span><span class="hmd-navcard-t">Logs</span><span class="hmd-navcard-s">Volltext-Suche + Severity</span></a>
-            <a class="hmd-navcard" href="@(BasePath + "/metrics")"><span class="hmd-navcard-ico">📈</span><span class="hmd-navcard-t">Metriken</span><span class="hmd-navcard-s">Zeitreihen & Histogramme</span></a>
-            <a class="hmd-navcard" href="@(BasePath + "/endpoints")"><span class="hmd-navcard-ico">🛣</span><span class="hmd-navcard-t">Endpoints</span><span class="hmd-navcard-s">Controller/Action-Drilldown</span></a>
-            <a class="hmd-navcard" href="@(BasePath + "/dashboards")"><span class="hmd-navcard-ico">🗃</span><span class="hmd-navcard-t">Dashboards</span><span class="hmd-navcard-s">Grafana-JSON importieren & rendern</span></a>
+            <a class="hmd-navcard" href="@(BasePath + "/dashboard")"><span class="hmd-navcard-ico" aria-hidden="true">📊</span><span class="hmd-navcard-t">@I18n.T("navcard.dashboard.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.dashboard.sub")</span></a>
+            <a class="hmd-navcard" href="@(BasePath + "/traces")"><span class="hmd-navcard-ico" aria-hidden="true">⛓</span><span class="hmd-navcard-t">@I18n.T("navcard.traces.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.traces.sub")</span></a>
+            <a class="hmd-navcard" href="@(BasePath + "/logs")"><span class="hmd-navcard-ico" aria-hidden="true">📜</span><span class="hmd-navcard-t">@I18n.T("navcard.logs.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.logs.sub")</span></a>
+            <a class="hmd-navcard" href="@(BasePath + "/metrics")"><span class="hmd-navcard-ico" aria-hidden="true">📈</span><span class="hmd-navcard-t">@I18n.T("navcard.metrics.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.metrics.sub")</span></a>
+            <a class="hmd-navcard" href="@(BasePath + "/endpoints")"><span class="hmd-navcard-ico" aria-hidden="true">🛣</span><span class="hmd-navcard-t">@I18n.T("navcard.endpoints.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.endpoints.sub")</span></a>
+            <a class="hmd-navcard" href="@(BasePath + "/dashboards")"><span class="hmd-navcard-ico" aria-hidden="true">🗃</span><span class="hmd-navcard-t">@I18n.T("navcard.dashboards.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.dashboards.sub")</span></a>
         </div>
 
         <div class="hmd-panels">
             <section class="hmd-panel">
-                <h2 class="hmd-subhead">Neueste Fehler-Traces (@_errTraces.Count)</h2>
+                <h2 class="hmd-subhead">@I18n.T("home.section.errtraces") (@_errTraces.Count)</h2>
                 @if (_errTraces.Count == 0)
                 {
-                    <p class="hmd-empty">Keine Fehler-Traces — alle Spans im Status OK.</p>
+                    <p class="hmd-empty" role="status">@I18n.T("empty.noErrTraces")</p>
                 }
                 else
                 {
                     <table class="hmd-table hmd-dense">
-                        <thead><tr><th>Trace-ID</th><th>Start</th><th>Dauer</th><th>Spans</th></tr></thead>
+                        <caption>@I18n.T("home.section.errtraces")</caption>
+                        <thead><tr><th scope="col">@I18n.T("table.trace.id")</th><th scope="col">@I18n.T("table.start")</th><th scope="col">@I18n.T("table.duration")</th><th scope="col">@I18n.T("table.spans")</th></tr></thead>
                         <tbody>
                         @foreach (var t in _errTraces)
                         {
@@ -73,15 +70,16 @@
                 }
             </section>
             <section class="hmd-panel">
-                <h2 class="hmd-subhead">Neueste Fehler-Logs (@_errLogs.Count)</h2>
+                <h2 class="hmd-subhead">@I18n.T("home.section.errlogs") (@_errLogs.Count)</h2>
                 @if (_errLogs.Count == 0)
                 {
-                    <p class="hmd-empty">Keine Fehler-Logs (Severity ≥ ERROR).</p>
+                    <p class="hmd-empty" role="status">@I18n.T("empty.noErrLogs")</p>
                 }
                 else
                 {
                     <table class="hmd-table hmd-logs">
-                        <thead><tr><th class="hmd-col-ts">Zeit</th><th class="hmd-col-sev">Sev</th><th>Body</th><th class="hmd-col-trace">Trace</th></tr></thead>
+                        <caption>@I18n.T("home.section.errlogs")</caption>
+                        <thead><tr><th class="hmd-col-ts" scope="col">@I18n.T("table.time")</th><th class="hmd-col-sev" scope="col">@I18n.T("table.sev")</th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
                         <tbody>
                         @foreach (var l in _errLogs)
                         {
@@ -93,11 +91,7 @@
             </section>
         </div>
     }
-
-    <HeimdallFooter BasePath="@BasePath" />
-</main>
-</body>
-</html>
+</HeimdallDocument>
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";

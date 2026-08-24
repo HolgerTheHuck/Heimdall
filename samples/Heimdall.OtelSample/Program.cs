@@ -42,7 +42,12 @@ builder.WebHost.UseUrls(Url);
 var auth = builder.Configuration.GetSection("Heimdall:Auth")
                     .Get<HeimdallAuthOptions>() ?? new HeimdallAuthOptions();
 auth.ProtectedPrefix = "/otel";
+// Login/Logout-Pfade unter dem Dashboard-Prefix (Blazor-Routen /otel/login).
+auth.LoginPath = "/otel/login";
+auth.LogoutPath = "/otel/logout";
 auth.Validate();
+// Options in DI registrieren (für Login/Logout-Handler), wenn Auth aktiv.
+if (auth.Enabled) builder.Services.AddHeimdallAuth(auth);
 
 // Eingebettetes Backend: SQLite implementiert IHeimdallSink (OTel-Exporter-Ziel)
 // UND IHeimdallQuery (Dashboard-Lesevertrag). Frische DB pro Start, damit das
@@ -80,6 +85,16 @@ var resource = new HeimdallExporterOptions
     // mit echten Werten statt leer zu bleiben.
     MetricExportIntervalMs = 15_000,
 };
+
+// Heimdall-Eigentelemetrie unterdrücken (Default, Heimdall:SelfTelemetry:Enabled=false):
+// verwirft Spans/Metriken der Dashboard-Routes (/otel/*) und Logs der Kategorie
+// Heimdall.*, damit das Bedienen des Heimdall-UIs die zu beobachtende App nicht
+// verrauscht. Enabled=true → nichts verworfen, um Heimdall selbst zu untersuchen.
+if (!builder.Configuration.GetValue<bool>("Heimdall:SelfTelemetry:Enabled"))
+{
+    resource.ExcludeRoutePrefixes = new[] { "/otel" };
+    resource.ExcludeLogCategoryPrefixes = new[] { "Heimdall." };
+}
 
 // ILogger → OTel-Logs: formatierten Message-Body übernehmen + Scopes anreichern,
 // damit die Loki-Logs-Panels des Dashboards aussagekräftige Zeilen sehen.

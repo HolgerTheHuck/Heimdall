@@ -20,6 +20,11 @@ public static class HeimdallServiceExtensions
     public static IServiceCollection AddHeimdallDashboard(this IServiceCollection services, IHeimdallQuery query)
     {
         if (query is null) throw new System.ArgumentNullException(nameof(query));
+        // i18n (de/en/fr): IHttpHttpContextAccessor + scoped IHeimdallI18n liest die
+        // Sprache pro Request aus dem `heimdall-lang`-Cookie (?lang=-Query/Accept-Language).
+        // AddRazorComponents() erzeugt den per-Request-DI-Scope, in dem der Service resolved.
+        services.AddHttpContextAccessor();
+        services.AddScoped<IHeimdallI18n, HeimdallI18nService>();
         services.AddRazorComponents();          // EndpointHtmlRenderer fuer RazorComponentResult
         services.AddSingleton(query);
         return services;
@@ -72,7 +77,7 @@ public static class HeimdallServiceExtensions
             services.AddSingleton<IAlertChannel, LoggerAlertChannel>();
         if (opts.Smtp is { Enabled: true })
             services.AddSingleton<IAlertChannel>(sp => new SmtpAlertChannel(
-                opts.Smtp, sp.GetRequiredService<ILogger<SmtpAlertChannel>>()));
+                opts.Smtp, opts.Language, sp.GetRequiredService<ILogger<SmtpAlertChannel>>()));
         if (opts.Webhook is { Enabled: true })
         {
             services.AddHttpClient();

@@ -359,6 +359,8 @@
         var iv = setInterval(function () { location.reload(); }, secs * 1000);
         var badge = document.createElement("div");
         badge.className = "hmd-refresh-badge";
+        badge.setAttribute("role", "status");
+        badge.setAttribute("aria-live", "polite");
         badge.textContent = "Auto-Refresh " + r;
         var stop = document.createElement("button");
         stop.type = "button";
@@ -391,9 +393,65 @@
         bindRefreshSelect();
     }
 
+    // === Lazy Dashboard-Panels ============================================
+    // Die Dashboard-Shell rendert sofort Platzhalter-Kacheln (kein PromQL vor
+    // dem ersten Byte). Hier werden sie per Vanilla-JS vom Per-Panel-Endpoint
+    // nachgeladen: IntersectionObserver (falls verfügbar) fetcht bei Viewport-
+    // Nähe, sonst sofort (Progressive Enhancement — ohne IO alle laden, aber
+    // die Shell steht schon). Nach dem outerHTML-Swap greift das bestehende
+    // Chart-Enhancement per Event-Delegation automatisch (kein Re-Init).
+
+    function panelUrl(base, uid, idx) {
+        return base + "/dashboards/" + encodeURIComponent(uid) + "/panel/" + idx + location.search;
+    }
+
+    function loadPanel(panel, url) {
+        if (panel._hmdLoading) return;
+        panel._hmdLoading = true;
+        fetch(url, { headers: { "Accept": "text/html" }, credentials: "same-origin" })
+            .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.text(); })
+            .then(function (html) { panel.outerHTML = html; })
+            .catch(function () {
+                panel._hmdLoading = false;
+                panel.classList.remove("hmd-gpanel--loading");
+                var body = panel.querySelector(".hmd-gpanel-body");
+                if (body) {
+                    body.innerHTML = '<p class="hmd-empty hmd-err-text" role="status">' +
+                        esc(panel.getAttribute("data-hmd-failed") || "Panel could not be loaded.") + "</p>";
+                }
+            });
+    }
+
+    function initLazyPanels() {
+        var grid = document.querySelector(".hmd-grid[data-hmd-base][data-hmd-uid]");
+        if (!grid) return;
+        var base = grid.getAttribute("data-hmd-base") || "";
+        var uid = grid.getAttribute("data-hmd-uid") || "";
+        var panels = grid.querySelectorAll(".hmd-gpanel[data-hmd-panel]");
+        if (!panels.length) return;
+
+        if ("IntersectionObserver" in window) {
+            var io = new IntersectionObserver(function (entries) {
+                for (var i = 0; i < entries.length; i++) {
+                    if (entries[i].isIntersecting) {
+                        var p = entries[i].target;
+                        io.unobserve(p);
+                        loadPanel(p, panelUrl(base, uid, p.getAttribute("data-hmd-panel")));
+                    }
+                }
+            }, { rootMargin: "200px" });
+            for (var k = 0; k < panels.length; k++) io.observe(panels[k]);
+        } else {
+            for (var j = 0; j < panels.length; j++)
+                loadPanel(panels[j], panelUrl(base, uid, panels[j].getAttribute("data-hmd-panel")));
+        }
+    }
+
+    function initAll() { initTimePicker(); initLazyPanels(); }
+
     if (document.readyState === "loading") {
-        document.addEventListener("DOMContentLoaded", initTimePicker);
+        document.addEventListener("DOMContentLoaded", initAll);
     } else {
-        initTimePicker();
+        initAll();
     }
 })();
