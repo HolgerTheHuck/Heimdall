@@ -7,7 +7,9 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
-**Stand-alone-Host über OTLP/HTTP + OTLP/gRPC validiert (e2e, inkl. Docker).**
+## [1.2.0] — 2026-08-24
+
+**Stand-alone-Host über OTLP/HTTP + OTLP/gRPC validiert (e2e, inkl. Docker). Bugfix-Release: gRPC+Auth, /healthz unter Auth, SelfTelemetry-Route-Filter.**
 
 ### Hinzugefügt
 - **OTLP-Sender-Sample (`samples/Heimdall.OtlpSender`):** End-to-End-CLIENT
@@ -44,6 +46,23 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
   nutzt `/dev/tcp`, daher nicht blockierend). Fix via `AnonymousPaths`
   (s. o.); `/healthz` liefert jetzt 200 ohne Credentials bei intakter Auth
   für alle anderen Pfade.
+- **SelfTelemetry-Route-Filter war wirkungslos (`Heimdall.Sdk`):** der
+  Exporter-Filter (`ExcludeRoutePrefixes`) iterierte `Activity.Tags` — das ist
+  die string-only-Sicht. Die OTel-AspNetCore-Instrumentation setzt
+  `http.route` aber via der object-Überladung von `SetTag`, sodass der Tag nur
+  in `Activity.TagObjects` auftaucht. `ToSpan` las korrekterweise `TagObjects`
+  → der Span wurde mitsamt `http.route` gespeichert; der Filter las `Tags` →
+  sah `http.route` nicht → `/otel`-Spans (`/otel/logs`,
+  `/otel/dashboards/{uid}/panel/{idx:int}`) slippten als Eigentelemetrie durch,
+  obwohl `SelfTelemetry:Enabled: false` bzw. `ExcludeRoutePrefixes = ["/otel"]`
+  gesetzt war. Fix: `ExcludeRoute` liest jetzt `Activity.TagObjects` (wie
+  `ToSpan`) und prüft neben `http.route`/`http.target`/`url.path` auch
+  `aspnetmvc.route` (Heimdalls eigene Enrichment-Middleware — verlässlicher
+  Fallback, falls die ASP.NET-Instrumentation `http.route` nicht setzt).
+  Regressionstests in `HeimdallSdkTests` reproduzieren den Bug via
+  `a.SetTag(key, (object)route)` (erzwingt die object-Überladung). Betraf nur
+  den Traces-Filter; der Metrik-Filter las bereits `MetricPoint.Tags` (alle
+  Tags) und war nie anfällig.
 
 ## [1.1.0] — 2026-08-24
 

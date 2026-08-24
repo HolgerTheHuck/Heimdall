@@ -25,10 +25,10 @@
          am wichtigsten). Zentral statt pro-csproj, um Drift zu vermeiden. -->
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
 
-    <!-- Zentrale Versionierung (1.1.0). Ersetzt die per-csproj 0.1.0-Saetze. -->
-    <Version>1.1.0</Version>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
+    <!-- Zentrale Versionierung (1.2.0). Ersetzt die per-csproj 0.1.0-Saetze. -->
+    <Version>1.2.0</Version>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
 
     <!-- Deterministische Builds + SourceLink (Zukunftssicherung fuer 1.0 public). -->
     <Deterministic>true</Deterministic>
