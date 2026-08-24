@@ -100,6 +100,10 @@ opts.Auth.PrometheusPrefix = opts.Prometheus.Prefix;
 // /otel/login und /otel/logout, nicht /login). ProtectedPrefix=null (Host=global).
 opts.Auth.LoginPath = opts.Dashboard.Prefix.TrimEnd('/') + "/login";
 opts.Auth.LogoutPath = opts.Dashboard.Prefix.TrimEnd('/') + "/logout";
+// /healthz als anonymous Ausnahme — Compose/K8s-Proben kommen ohne Credentials
+// und müssen 200 bekommen (sonst 302-Redirect auf Login = fälschlich „unhealthy").
+// Der Health-Endpoint ist ohnehin absichtlich ohne DB-Ping (nur Bereit-Signal).
+opts.Auth.AnonymousPaths = new[] { "/healthz" };
 if (opts.Auth.Enabled) builder.Services.AddHeimdallAuth(opts.Auth);
 builder.Services.AddSingleton(opts);   // HostShutdownTest + ggf. weitere DI-Konsumenten
 

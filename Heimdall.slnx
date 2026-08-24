@@ -5,6 +5,7 @@
   <Folder Name="/samples/">
     <Project Path="samples/Heimdall.MvcSample/Heimdall.MvcSample.csproj" />
     <Project Path="samples/Heimdall.OtelSample/Heimdall.OtelSample.csproj" />
+    <Project Path="samples/Heimdall.OtlpSender/Heimdall.OtlpSender.csproj" />
   </Folder>
   <Folder Name="/src/">
     <Project Path="src/Heimdall.Abstractions/Heimdall.Abstractions.csproj" />

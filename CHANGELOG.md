@@ -7,7 +7,43 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
-_(noch nichts veröffentlicht)_
+**Stand-alone-Host über OTLP/HTTP + OTLP/gRPC validiert (e2e, inkl. Docker).**
+
+### Hinzugefügt
+- **OTLP-Sender-Sample (`samples/Heimdall.OtlpSender`):** End-to-End-CLIENT
+  mit dem echten OpenTelemetry-SDK (1.16.0), erzeugt feste Signale (1 Trace/2
+  Spans, 1 Counter, 1 Histogram, 3 Logs) und exportiert sie via OTLP/HTTP
+  **oder** OTLP/gRPC an den Stand-alone-Host. Schalter `--protocol http|grpc`,
+  `--endpoint`, `--header x-heimdall-key=…` (alternativ `OTEL_EXPORTER_OTLP_*`).
+  In `Heimdall.slnx` aufgenommen. Validiert die echte Wire des Hosts statt
+  Roh-Protobuf per curl.
+- **`HeimdallAuthOptions.AnonymousPaths`:** konfigurierbare Ausnahmen-Liste
+  (exakte Pfade), die Auth völlig umgehen — für Health-/Readiness-Proben, die
+  von Compose/Kubernetes ohne Credentials gerufen werden. Der Host trägt
+  `/healthz` ein.
+- **Regressionstest `OtlpGrpcAuthTests`:** sichert gRPC+Auth (OK mit
+  `x-heimdall-key`, `Unauthenticated` ohne/falschem Key) am TestServer-Host.
+
+### Behoben
+- **gRPC+Auth war wirkungslos (Stand-alone-Host UND Embedded):** die
+  `HeimdallAuthMiddleware` wies jeden OTLP/gRPC-POST mit 401 ab (UI/Rest-Zweig:
+  POST ohne Session-Cookie/Basic), weil die proto-fixierten gRPC-Pfade
+  (`/opentelemetry.proto.collector.{signal}.v1.{Signal}Service/Export`) nicht
+  als HTTP-API-Pfade (`{prefix}/v1/*`) erkannt werden. Der Service — und damit
+  seine eigene Auth via `OtlpGrpcAuth` (`x-heimdall-key` →
+  `RpcException(Unauthenticated)`) — wurde nie erreicht. Fix: gRPC-Requests
+  (Content-Type `application/grpc*`) werden an den Service durchgereicht, der
+  seine Auth selbst prüft (eine Cookie/Basic-HTTP-Middleware ist das falsche
+  Gate für gRPC, da gRPC-Clients keine Cookies senden). Betraf HTTP+Auth nicht
+  (HTTP-Pfade werden als API-Pfade erkannt) und gRPC ohne Auth nicht
+  (Middleware-Passthrough bei `Enabled=false`).
+- **`/healthz` redirectete unter Auth auf die Login-Seite (302):** der
+  Health-Endpoint ist laut Kommentaren „immer anonymous", stand aber hinter der
+  Auth-Middleware und lieferte bei aktivem Auth ein 302 auf `/otel/login` —
+  was HTTP-basierte Probe-Checker fälschlich als „unhealthy" werten (Compose
+  nutzt `/dev/tcp`, daher nicht blockierend). Fix via `AnonymousPaths`
+  (s. o.); `/healthz` liefert jetzt 200 ohne Credentials bei intakter Auth
+  für alle anderen Pfade.
 
 ## [1.1.0] — 2026-08-24
 

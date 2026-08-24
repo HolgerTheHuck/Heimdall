@@ -91,6 +91,19 @@ public sealed class HeimdallAuthOptions
     public string LogoutPath { get; set; } = "/logout";
 
     /// <summary>
+    /// Pfade, die Auth völlig umgehen (anonymous), selbst bei
+    /// <see cref="Enabled"/>=true und innerhalb von <see cref="ProtectedPrefix"/>.
+    /// Gedacht für Health-/Readiness-Probes (z. B. <c>/healthz</c>), die von
+    /// Compose/Kubernetes ohne Credentials gerufen werden und ein 200/302-
+    /// Redirect auf die Login-Seite fälschlich als „unhealthy" werten würden.
+    /// Exakter Pfad-Vergleich (case-sensitive, wie <see cref="LoginPath"/>);
+    /// null/leer (Default) = keine Ausnahmen. Der Host trägt hier
+    /// <c>/healthz</c> ein; Embedded-Nutzer überlassen es der App-eigenen
+    /// Health-Route (die via <see cref="ProtectedPrefix"/> ohnehin frei ist).
+    /// </summary>
+    public string[]? AnonymousPaths { get; set; }
+
+    /// <summary>
     /// Validiert die Baseline: <see cref="Enabled"/>=true erfordert ein nicht-leeres
     /// <see cref="Password"/>. Wirft andernfalls <see cref="InvalidOperationException"/>.
     /// Host-spezifische Zusatz-Validierung (ApiKey-Pflicht) bleibt dem Host überlassen.

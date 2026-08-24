@@ -10,6 +10,12 @@
 FROM --platform=$BUILDPLATFORM mcr.microsoft.com/dotnet/sdk:10.0 AS build
 WORKDIR /src
 
+# Zentrales Directory.Build.props (Version, Nullable-as-Error, SourceLink, …) —
+# MSBuild sucht es vom Projektverzeichnis aufwärts, also hier nach /src/ legen.
+# global.json bewusst NICHT kopiert: sein SDK-Pin (10.0.400, latestPatch) könnte
+# zum sdk:10.0-Image (u. U. 10.0.500+) kollidieren; das Image-SDK ist passend.
+COPY Directory.Build.props ./
+
 # Quellen + Beispiel-Dashboard kopieren (Build-Context = Repo-Root).
 COPY src/ ./src/
 COPY grafana/ ./grafana/

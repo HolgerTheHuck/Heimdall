@@ -54,11 +54,43 @@ public sealed class HeimdallAuthMiddleware
         var path = context.Request.Path.Value ?? string.Empty;
         var req = context.Request;
 
+        // gRPC-Requests (Content-Type application/grpc*) direkt an den gRPC-
+        // Service durchreichen — dieser auth-gate SELBST via OtlpGrpcAuth
+        // (Header x-heimdall-key → RpcException(Unauthenticated)). Die HTTP-
+        // Middleware prüft nur HTTP-Pfade (OTLP/HTTP {prefix}/v1/*, Prom-API,
+        // UI per Cookie/Basic). Die proto-fixierten gRPC-Pfade
+        // (/opentelemetry.proto.collector.{signal}.v1.{Signal}Service/Export)
+        // sind keine HTTP-API-Pfade und würden sonst unten als „UI/Rest POST
+        // ohne Cookie" mit 401 abgewiesen — noch bevor der Service seine eigene
+        // Auth prüfen kann. Da gRPC-Clients keine Session-Cookies senden, ist
+        // eine Cookie/Basic-Middleware ohnehin das falsche Gate für gRPC; die
+        // Service-seitige Auth (OtlpGrpcAuth) ist die korrekte Stelle.
+        if (req.ContentType is not null &&
+            req.ContentType.StartsWith("application/grpc", StringComparison.OrdinalIgnoreCase))
+        {
+            await _next(context);
+            return;
+        }
+
         // Login/Logout-Endpoints selbst nie auth-gate (sonst Endlosschleife).
         if (path == _auth.LoginPath || path == _auth.LogoutPath)
         {
             await _next(context);
             return;
+        }
+
+        // Anonymous Ausnahmen (z. B. /healthz für Compose/K8s-Proben): exakter
+        // Pfad-Vergleich, dann unverändert durchreichen. Ohne das würde eine
+        // Health-Probe bei aktivem Auth ein 302-Redirect auf die Login-Seite
+        // erhalten (GET ohne Cookie) — was Probe-Checker fälschlich als
+        // „unhealthy" werten. Der Host trägt /healthz ein (siehe HeimdallAuthOptions).
+        var anon = _auth.AnonymousPaths;
+        if (anon is { Length: > 0 })
+        {
+            for (var i = 0; i < anon.Length; i++)
+            {
+                if (path == anon[i]) { await _next(context); return; }
+            }
         }
 
         // ProtectedPrefix gesetzt → nur dieser Subtree wird geschützt (Embedded).
