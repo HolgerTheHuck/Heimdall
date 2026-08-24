@@ -88,12 +88,15 @@ var resource = new HeimdallExporterOptions
 
 // Heimdall-Eigentelemetrie unterdrücken (Default, Heimdall:SelfTelemetry:Enabled=false):
 // verwirft Spans/Metriken der Dashboard-Routes (/otel/*) und Logs der Kategorie
-// Heimdall.*, damit das Bedienen des Heimdall-UIs die zu beobachtende App nicht
-// verrauscht. Enabled=true → nichts verworfen, um Heimdall selbst zu untersuchen.
+// Heimdall.Blazor.Alerts.* (AlertEvaluator + Kanäle — die einzigen Heimdall-
+// Bibliotheks-Logger), damit das Bedienen des Heimdall-UIs die zu beobachtende
+// App nicht verrauscht. Präzise statt pauschal "Heimdall.", damit eigene App-
+// Logs unter z. B. Heimdall.OtelSample.* nicht mitgefiltert werden.
+// Enabled=true → nichts verworfen, um Heimdall selbst zu untersuchen.
 if (!builder.Configuration.GetValue<bool>("Heimdall:SelfTelemetry:Enabled"))
 {
     resource.ExcludeRoutePrefixes = new[] { "/otel" };
-    resource.ExcludeLogCategoryPrefixes = new[] { "Heimdall." };
+    resource.ExcludeLogCategoryPrefixes = new[] { "Heimdall.Blazor.Alerts" };
 }
 
 // ILogger → OTel-Logs: formatierten Message-Body übernehmen + Scopes anreichern,
