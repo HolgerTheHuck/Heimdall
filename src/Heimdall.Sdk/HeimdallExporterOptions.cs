@@ -33,18 +33,26 @@ public sealed class HeimdallExporterOptions
 
     /// <summary>
     /// Pfad-Prefixe (z. B. <c>"/otel"</c>), deren Telemetrie der Exporter verwirft:
-    /// Spans mit <c>http.route</c>/<c>http.target</c>/<c>url.path</c>-Tag-Prefix und
-    /// Metrik-Punkte mit <c>http.route</c>-Tag-Prefix werden nicht in die Sink
-    /// geschrieben. Verhindert, dass das Bedienen des Heimdall-UIs (oder andere
-    /// eigene Pfade) als Verkehr der beobachteten App erfasst wird. Default null =
-    /// nichts verworfen. Zum Untersuchen von Heimdall selbst leer lassen.
+    /// Spans mit <c>http.route</c>/<c>http.target</c>/<c>url.path</c>/
+    /// <c>aspnetmvc.route</c>-Tag-Prefix und Metrik-Punkte mit <c>http.route</c>-
+    /// Tag-Prefix werden nicht in die Sink geschrieben. Verhindert, dass das
+    /// Bedienen des Heimdall-UIs (oder andere eigene Pfade) als Verkehr der
+    /// beobachteten App erfasst wird. <c>aspnetmvc.route</c> ist der Tag aus
+    /// Heimdalls eigener Enrichment-Middleware (<see cref="Heimdall.AspNetCore.HeimdallAspNetCoreMiddleware"/>)
+    /// und ein verlässlicher Fallback, falls die ASP.NET-Instrumentation
+    /// <c>http.route</c> nicht setzt. Default null = nichts verworfen. Zum
+    /// Untersuchen von Heimdall selbst leer lassen.
     /// </summary>
     public IReadOnlyList<string>? ExcludeRoutePrefixes { get; set; }
 
     /// <summary>
-    /// Logger-Kategorie-Prefixe (z. B. <c>"Heimdall."</c>), deren Logs der Exporter
-    /// verwirft, damit Heimdalls interne Diagnose-Logs (AlertEvaluator, Kanäle, …)
-    /// nicht im Dashboard auftauchen. Default null = keine Logs verworfen.
+    /// Logger-Kategorie-Prefixe (z. B. <c>"Heimdall.Blazor.Alerts"</c>), deren Logs
+    /// der Exporter verwirft, damit Heimdalls interne Diagnose-Logs (AlertEvaluator,
+    /// Kanäle) nicht im Dashboard auftauchen. Präzise statt pauschal
+    /// <c>"Heimdall."</c> wählen, damit App-eigene Logs unter einem
+    /// <c>Heimdall.*</c>-Namespace nicht mitgefiltert werden (sicherheitshalber alle
+    /// Heimdall-Logs herauswerfen → <c>"Heimdall."</c>, riskiert dann aber die
+    /// App-Kollision). Default null = keine Logs verworfen.
     /// </summary>
     public IReadOnlyList<string>? ExcludeLogCategoryPrefixes { get; set; }
 

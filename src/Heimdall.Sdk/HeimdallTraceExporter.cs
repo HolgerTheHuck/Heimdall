@@ -43,15 +43,26 @@ internal sealed class HeimdallTraceExporter : BaseExporter<Activity>
         return ExportResult.Success;
     }
 
-    /// <summary>true, wenn der Span einen http.route-/http.target-/url.path-Tag
-    /// trägt, der mit einem der Prefixe beginnt (Heimdall-eigene Routes).</summary>
+    /// <summary>true, wenn der Span einen Route-Tag trägt, der mit einem der Prefixe
+    /// beginnt (Heimdall-eigene Dashboard-Routes). Geprüft werden
+    /// <c>http.route</c>/<c>http.target</c>/<c>url.path</c> (OTel-Semantic-Conventions)
+    /// UND <c>aspnetmvc.route</c> (Heimdalls eigene Enrichment-Middleware, gesetzt
+    /// für jeden gematchten Endpunkt — verlässlicher Fallback, falls die
+    /// ASP.NET-Instrumentation <c>http.route</c> nicht oder erst spät setzt).
+    /// Wichtig: iteriert wird <see cref="Activity.TagObjects"/> (alle Tags), NICHT
+    /// <see cref="Activity.Tags"/> — letzteres liefert nur via string-Überladung
+    /// gesetzte Tags; die OTel-Instrumentation setzt <c>http.route</c> aber via
+    /// object-Überladung, sodass er nur in <c>TagObjects</c> (wie <c>ToSpan</c>)
+    /// sichtbar ist. Würde der Filter <c>Tags</c> lesen, sähe er <c>http.route</c>
+    /// nicht → der /otel-Span würde gespeichert statt verworfen.</summary>
     private static bool ExcludeRoute(Activity a, IReadOnlyList<string> prefixes)
     {
-        foreach (var kv in a.Tags)
+        foreach (var kv in a.TagObjects)
         {
-            if (kv.Value is null) continue;
-            if ((kv.Key == "http.route" || kv.Key == "http.target" || kv.Key == "url.path")
-                && SdkConvert.StartsWithAny(kv.Value, prefixes)) return true;
+            if (kv.Value is not string s) continue;
+            if ((kv.Key == "http.route" || kv.Key == "http.target" || kv.Key == "url.path"
+                 || kv.Key == "aspnetmvc.route")
+                && SdkConvert.StartsWithAny(s, prefixes)) return true;
         }
         return false;
     }

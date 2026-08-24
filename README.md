@@ -256,8 +256,8 @@ app.UseHeimdallAuth(auth);
 Betreibt man Heimdall eingebettet (Pfad A), erfasst das OTel-SDK der **umgebenden
 App** den ganzen Prozess — inklusive der Heimdall-Oberfläche selbst: jeder
 Dashboard-Aufruf (`/otel/*`) erzeugt Spans/Metriken, und Heimdalls interne
-Diagnose-Logs (AlertEvaluator, Alarm-Kanäle, …, Kategorie `Heimdall.*`) landen
-über den Logger-Exporter im Log-Store. Im Dashboard verrauscht das die
+Diagnose-Logs (AlertEvaluator, Alarm-Kanäle — Kategorie `Heimdall.Blazor.Alerts.*`)
+landen über den Logger-Exporter im Log-Store. Im Dashboard verrauscht das die
 eigentlich zu beobachtende App. Daher ist die Erfassung der
 **Heimdall-Eigentelemetrie per Default aus** — angeschaltet wird sie nur, wenn
 man Heimdall selbst untersuchen will. Konfiguriert in `appsettings.json`:
@@ -266,12 +266,20 @@ man Heimdall selbst untersuchen will. Konfiguriert in `appsettings.json`:
 "Heimdall": { "SelfTelemetry": { "Enabled": false } }
 ```
 
-- **`Enabled: false` (Default)** — der Heimdall-Exporter verwirft Spans und
-  Metrik-Punkte mit `http.route`/`http.target`/`url.path`-Prefix `/otel` sowie
-  Logs der Kategorie `Heimdall.*`. App-eigene Routes (`/api/…`) und
-  Runtime-Metriken (GC, ThreadPool, …) bleiben unangetastet.
+- **`Enabled: false` (Default)** — der Heimdall-Exporter verwirft Spans mit
+  `http.route`/`http.target`/`url.path`/`aspnetmvc.route`-Prefix `/otel` und
+  Metrik-Punkte mit `http.route`-Prefix `/otel` sowie Logs der Kategorie
+  `Heimdall.Blazor.Alerts.*`. App-eigene Routes (`/api/…`) und Runtime-Metriken
+  (GC, ThreadPool, …) bleiben unangetastet.
 - **`Enabled: true`** — nichts wird verworfen; alle Telemetrie inkl. Heimdalls
   eigener landet im Dashboard (für die Fehlersuche an Heimdall selbst).
+
+> **Warum `Heimdall.Blazor.Alerts` und nicht pauschal `Heimdall.`?** Die Heimdall-
+> Bibliotheken loggen nur unter `Heimdall.Blazor.Alerts.*` (AlertEvaluator +
+> Kanäle). Der präzise Prefix verhindert, dass App-eigene Logs unter einem
+> `Heimdall.*`-Namespace (z. B. `Heimdall.MyCompany.*`) mitgefiltert werden.
+> Wer *sicherheitshalber* alle Heimdall-Bibliotheks-Logs herauswerfen will, setzt
+> `"Heimdall."` — riskiert dann aber die App-Kollision.
 
 Die Schalter sitzen im Library-Exporter (`HeimdallExporterOptions`), nicht nur
 im Sample — jeder Embedded-Nutzer profitiert. Im Host der App:
@@ -280,8 +288,8 @@ im Sample — jeder Embedded-Nutzer profitiert. Im Host der App:
 var resource = new HeimdallExporterOptions { Sink = sink, ServiceName = "MyApi", … };
 if (!builder.Configuration.GetValue<bool>("Heimdall:SelfTelemetry:Enabled"))
 {
-    resource.ExcludeRoutePrefixes = new[] { "/otel" };       // Dashboard-Routes
-    resource.ExcludeLogCategoryPrefixes = new[] { "Heimdall." }; // Diagnose-Logs
+    resource.ExcludeRoutePrefixes = new[] { "/otel" };                 // Dashboard-Routes
+    resource.ExcludeLogCategoryPrefixes = new[] { "Heimdall.Blazor.Alerts" }; // Diagnose-Logs
 }
 builder.Services.AddOpenTelemetry()
     .WithTracing(t => t.UseHeimdallExporter(resource))

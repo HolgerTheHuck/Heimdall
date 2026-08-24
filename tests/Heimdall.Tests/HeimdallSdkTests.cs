@@ -128,4 +128,70 @@ public class HeimdallSdkTests
         Assert.NotNull(h.BucketCounts);
         Assert.True(h.BucketCounts!.Sum(x => x) >= h.Count);
     }
+
+    // --- SelfTelemetry-Route-Filter (ExcludeRoutePrefixes) -------------------
+    // Regressionstest für den Tags/TagObjects-Bug: die OTel-AspNetCore-
+    // Instrumentation setzt http.route via Activity.SetTag(key, object)-Überladung,
+    // wodurch der Tag nur in Activity.TagObjects (nicht in Activity.Tags) sichtbar
+    // ist. ToSpan liest TagObjects → der Span wird mitsamt http.route gespeichert;
+    // der Filter las früher aber Activity.Tags → sah http.route nicht → der /otel-
+    // Span slippte durch. Filter muss daher TagObjects durchlaufen (wie ToSpan).
+
+    private static TracerProvider BuildRouteProvider(CapturingSink sink, string[] exclude)
+        => OtelSdk.CreateTracerProviderBuilder()
+            .AddSource("heimdall.sdk.test")
+            .UseHeimdallExporter(new HeimdallExporterOptions
+            {
+                Sink = sink,
+                ServiceName = "svc",
+                ExcludeRoutePrefixes = exclude,
+            })
+            .Build()!;
+
+    private static void EmitRouteSpan(string tagKey, string route)
+    {
+        using var src = new ActivitySource("heimdall.sdk.test");
+        using var a = src.StartActivity("span-" + route)!;
+        // (object)-Cast erzwingt die object-Überladung von SetTag → Tag landet in
+        // TagObjects, nicht in Tags (reproduziert das OTel-Instrumentation-Verhalten).
+        a.SetTag(tagKey, (object)route);
+    }
+
+    [Fact]
+    public void Route_Exclude_Drops_Span_With_HttpRoute_In_Excluded_Prefix()
+    {
+        var sink = new CapturingSink();
+        using var provider = BuildRouteProvider(sink, new[] { "/otel" });
+        EmitRouteSpan("http.route", "/otel/logs");
+        Assert.True(provider.ForceFlush());
+
+        // /otel-Span wird verworfen — landet NICHT im Sink (SelfTelemetry-Filter).
+        Assert.Empty(DrainSpans(sink));
+    }
+
+    [Fact]
+    public void Route_Exclude_Keeps_Span_Outside_Excluded_Prefix()
+    {
+        var sink = new CapturingSink();
+        using var provider = BuildRouteProvider(sink, new[] { "/otel" });
+        EmitRouteSpan("http.route", "/api/products");
+        Assert.True(provider.ForceFlush());
+
+        // /api-Span liegt außerhalb des Prefix → wird gespeichert.
+        var span = Assert.Single(DrainSpans(sink));
+        Assert.Contains(span.Attributes, a => a.Key == "http.route" && Equals(a.Value, "/api/products"));
+    }
+
+    [Fact]
+    public void Route_Exclude_Also_Matches_AspnetMvcRoute_Tag()
+    {
+        // aspnetmvc.route = Heimdalls eigene Enrichment-Middleware (Fallback, falls
+        // die ASP.NET-Instrumentation http.route nicht setzt). Muss ebenfalls filtern.
+        var sink = new CapturingSink();
+        using var provider = BuildRouteProvider(sink, new[] { "/otel" });
+        EmitRouteSpan("aspnetmvc.route", "/otel/dashboards/{uid}/panel/{idx:int}");
+        Assert.True(provider.ForceFlush());
+
+        Assert.Empty(DrainSpans(sink));
+    }
 }
