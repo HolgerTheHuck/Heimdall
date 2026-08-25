@@ -199,6 +199,48 @@ public class SQLiteTelemetrySinkTests
         finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
     }
 
+    // === Hebel 4: Serien-Normalisierung ======================================
+
+    /// <summary>
+    /// Hebel 4: Punkte mit identischen Labels teilen sich EINE Zeile in
+    /// heim_metric_series (attrs/resource/scope nicht pro Punkt dupliziert);
+    /// Label-Discovery liefert weiterhin die korrekten Werte.
+    /// </summary>
+    [Fact]
+    public void MetricSeries_DedupliziertGleicheLabels_EineSerienZeile()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            var t0 = NowNs;
+            var attrs = new[] { new HAttribute("region", "eu"), new HAttribute("http.method", "GET") };
+            sink.WriteMetrics(new[]
+            {
+                new HMetricPoint("orders", "1", HMetricType.Sum, HTemporality.Cumulative, t0, 1, 1, null, null, null, null, null, attrs, Res("shop"), null),
+                new HMetricPoint("orders", "1", HMetricType.Sum, HTemporality.Cumulative, t0 + 1, 3, 3, null, null, null, null, null, attrs, Res("shop"), null),
+                // Andere Labels -> eigene Serie.
+                new HMetricPoint("orders", "1", HMetricType.Sum, HTemporality.Cumulative, t0 + 2, 5, 5, null, null, null, null, null,
+                    new[] { new HAttribute("region", "us") }, Res("shop"), null),
+            });
+
+            Assert.Equal(3, sink.CountMetrics());          // 3 Punkte
+            Assert.Equal(2, sink.CountMetricSeries());    // aber nur 2 Serien
+
+            // Label-Discovery liest weiterhin korrekt (aus der Serien-Tabelle).
+            var regions = sink.ListLabelValues("region", null, null, null);
+            Assert.Equal(new[] { "eu", "us" }, regions);
+            var methods = sink.ListLabelValues("http.method", null, null, null);
+            Assert.Equal(new[] { "GET" }, methods);
+
+            // Punkte tragen weiterhin ihre Labels (JOIN auf Serien-Tabelle).
+            var series = sink.MetricSeries("orders", null, null, 10);
+            Assert.Equal(3, series.Count);
+            Assert.All(series, r => Assert.Contains("region", r.AttrsJson));
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
     // === Sortierung (serverseitig, vor LIMIT/OFFSET) ========================
 
     /// <summary>Drei Traces mit klar unterschiedlicher Dauer und aufsteigenden

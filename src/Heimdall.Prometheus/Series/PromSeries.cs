@@ -34,19 +34,37 @@ public sealed class SeriesLabels : IReadOnlyDictionary<string, string>, IEquatab
         int i = 0;
         foreach (var kv in byKey) _pairs[i++] = kv;
         _lookup = new Dictionary<string, string>(byKey, StringComparer.Ordinal);
+        _fingerprint = BuildFingerprint(_pairs);
+        _hash = BuildHash(_pairs);
+    }
 
-        var sb = new StringBuilder(_pairs.Length * 16);
-        foreach (var kv in _pairs)
+    /// <summary>Vertrauens-Konstruktor fuer den Fast-Path in <see cref="With"/>:
+    /// uebernimmt bereits sortierte Paare + Lookup + Fingerprint + Hash ohne
+    /// Re-Sort/Re-Build (der Aufrufer garantiert die Invarianten).</summary>
+    private SeriesLabels(KeyValuePair<string, string>[] pairs, Dictionary<string, string> lookup,
+                         string fingerprint, int hash)
+    {
+        _pairs = pairs; _lookup = lookup; _fingerprint = fingerprint; _hash = hash;
+    }
+
+    private static string BuildFingerprint(KeyValuePair<string, string>[] pairs)
+    {
+        var sb = new StringBuilder(pairs.Length * 16);
+        foreach (var kv in pairs)
         {
             if (sb.Length > 0) sb.Append(',');
             sb.Append(kv.Key).Append("=\"").Append(Escape(kv.Value)).Append('"');
         }
-        _fingerprint = sb.ToString();
+        return sb.ToString();
+    }
+
+    private static int BuildHash(KeyValuePair<string, string>[] pairs)
+    {
         unchecked
         {
             int h = 17;
-            foreach (var kv in _pairs) h = h * 31 + (kv.Key.GetHashCode() ^ kv.Value.GetHashCode());
-            _hash = h;
+            foreach (var kv in pairs) h = h * 31 + (kv.Key.GetHashCode() ^ kv.Value.GetHashCode());
+            return h;
         }
     }
 
@@ -60,9 +78,30 @@ public sealed class SeriesLabels : IReadOnlyDictionary<string, string>, IEquatab
     /// <summary>Wert des <c>__name__</c>-Labels oder <c>null</c>.</summary>
     public string? Name => _lookup.TryGetValue("__name__", out var n) ? n : null;
 
-    /// <summary>Gibt ein neues Set zurueck, in dem <paramref name="key"/> auf <paramref name="value"/> gesetzt ist.</summary>
+    /// <summary>Gibt ein neues Set zurueck, in dem <paramref name="key"/> auf <paramref name="value"/> gesetzt ist.
+    /// Fast-Path fuer den haeufigsten Fall (Key nicht vorhanden, z. B. le-Bucket-Expansion oder
+    /// __name__-Anhaengen): fuegt den Key per Binaersuche in das sortierte Paar-Array ein, statt das
+    /// Dict neu zu sortieren. Bei unveraendertem Wert wird <c>this</c> zurueckgegeben (immutable).</summary>
     public SeriesLabels With(string key, string value)
     {
+        if (!_lookup.ContainsKey(key))
+        {
+            // Binaersuche: Einfuegeposition im sortierten Paar-Array.
+            int lo = 0, hi = _pairs.Length;
+            while (lo < hi)
+            {
+                int mid = (lo + hi) >> 1;
+                if (StringComparer.Ordinal.Compare(_pairs[mid].Key, key) < 0) lo = mid + 1; else hi = mid;
+            }
+            var pairs = new KeyValuePair<string, string>[_pairs.Length + 1];
+            Array.Copy(_pairs, 0, pairs, 0, lo);
+            pairs[lo] = new KeyValuePair<string, string>(key, value);
+            Array.Copy(_pairs, lo, pairs, lo + 1, _pairs.Length - lo);
+            var lookup = new Dictionary<string, string>(pairs.Length, StringComparer.Ordinal);
+            for (int i = 0; i < pairs.Length; i++) lookup[pairs[i].Key] = pairs[i].Value;
+            return new SeriesLabels(pairs, lookup, BuildFingerprint(pairs), BuildHash(pairs));
+        }
+        if (string.Equals(_lookup[key], value, StringComparison.Ordinal)) return this;
         var dict = new Dictionary<string, string>(_lookup, StringComparer.Ordinal) { [key] = value };
         return new SeriesLabels(dict);
     }

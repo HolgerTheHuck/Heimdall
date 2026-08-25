@@ -29,8 +29,8 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
 {
     private readonly SQLiteTelemetryOptions _options;
     private readonly SqliteConnection _conn;
-    private readonly SqliteCommand _insSpan, _insLog, _insMetric;
-    private readonly SqliteParameter[] _pSpan, _pLog, _pMetric;
+    private readonly SqliteCommand _insSpan, _insLog, _insMetric, _insSeries, _selSeriesId;
+    private readonly SqliteParameter[] _pSpan, _pLog, _pMetric, _pSeries;
     private readonly Timer? _retentionTimer;
     private readonly object _gate = new();
     private readonly Dictionary<string, Regex> _regexCache = new(StringComparer.Ordinal);
@@ -111,7 +111,16 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
 
         (_insSpan, _pSpan) = Prepare(SqlInsertSpan, 16);
         (_insLog, _pLog) = Prepare(SqlInsertLog, 10);
-        (_insMetric, _pMetric) = Prepare(SqlInsertMetric, 16);
+        (_insMetric, _pMetric) = Prepare(SqlInsertMetric, 17);
+        // Serie (Labels) je Punkt aufloesen: INSERT OR IGNORE + SELECT series_id.
+        (_insSeries, _pSeries) = Prepare(SqlInsertSeries, 5);
+        _selSeriesId = new SqliteCommand(SqlSelectSeriesId, _conn);
+        _selSeriesId.Parameters.Add(new SqliteParameter("@n", null));
+        _selSeriesId.Parameters.Add(new SqliteParameter("@a", null));
+        _selSeriesId.Parameters.Add(new SqliteParameter("@r", null));
+        _selSeriesId.Parameters.Add(new SqliteParameter("@sn", null));
+        _selSeriesId.Parameters.Add(new SqliteParameter("@sv", null));
+        _selSeriesId.Prepare();
 
         if (_options.SweepActive)
         {
@@ -194,9 +203,30 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1) return;   // C4: kein _conn-Zugriff nach Dispose
             using var tx = _conn.BeginTransaction();
             _insMetric.Transaction = tx;
+            _insSeries.Transaction = tx;
+            _selSeriesId.Transaction = tx;
             for (int i = 0; i < metrics.Count; i++)
             {
                 var m = metrics[i];
+                // Serie (Labels) einmal je Punkt aufloesen — attrs/resource/scope
+                // liegen jetzt in heim_metric_series, nicht mehr pro Punkt dupliziert.
+                string attrs = HeimdallJson.WriteAttributes(m.Attributes);
+                string resource = m.Resource is null ? "{}" : HeimdallJson.WriteAttributes(m.Resource.Attributes);
+                string scopeName = m.Scope?.Name ?? "";
+                string scopeVersion = m.Scope?.Version ?? "";
+                _pSeries[0].Value = m.Name;
+                _pSeries[1].Value = attrs;
+                _pSeries[2].Value = resource;
+                _pSeries[3].Value = scopeName;
+                _pSeries[4].Value = scopeVersion;
+                _insSeries.ExecuteNonQuery();
+                _selSeriesId.Parameters[0].Value = m.Name;
+                _selSeriesId.Parameters[1].Value = attrs;
+                _selSeriesId.Parameters[2].Value = resource;
+                _selSeriesId.Parameters[3].Value = scopeName;
+                _selSeriesId.Parameters[4].Value = scopeVersion;
+                long seriesId = (long)_selSeriesId.ExecuteScalar()!;
+
                 _pMetric[0].Value = m.Name;
                 _pMetric[1].Value = (object?)m.Unit ?? DBNull.Value;
                 _pMetric[2].Value = (int)m.Type;
@@ -209,10 +239,11 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 _pMetric[9].Value = (object?)m.Max ?? DBNull.Value;
                 _pMetric[10].Value = HeimdallJson.WriteLongs(m.BucketCounts);
                 _pMetric[11].Value = HeimdallJson.WriteDoubles(m.ExplicitBounds);
-                _pMetric[12].Value = HeimdallJson.WriteAttributes(m.Attributes);
-                _pMetric[13].Value = m.Resource is null ? "{}" : HeimdallJson.WriteAttributes(m.Resource.Attributes);
-                _pMetric[14].Value = (object?)m.Scope?.Name ?? DBNull.Value;
-                _pMetric[15].Value = (object?)m.Scope?.Version ?? DBNull.Value;
+                _pMetric[12].Value = DBNull.Value;   // attrs_json — in heim_metric_series
+                _pMetric[13].Value = DBNull.Value;   // resource_json — in heim_metric_series
+                _pMetric[14].Value = DBNull.Value;   // scope_name — in heim_metric_series
+                _pMetric[15].Value = DBNull.Value;   // scope_version — in heim_metric_series
+                _pMetric[16].Value = seriesId;
                 _insMetric.ExecuteNonQuery();
             }
             tx.Commit();
@@ -406,11 +437,14 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             return Array.Empty<MetricRow>();
 
         var sb = SqlBuilder();
-        sb.Append("SELECT name, unit, type, temporality, ts_unix_nano, value, count, sum, min, max, bucket_counts_json, explicit_bounds_json, attrs_json FROM heim_metrics WHERE name=@n");
+        // Hebel 4: attrs_json aus heim_metric_series (LEFT JOIN + COALESCE-Fallback
+        // fuer Legacy-Zeilen ohne series_id).
+        sb.Append("SELECT m.name, m.unit, m.type, m.temporality, m.ts_unix_nano, m.value, m.count, m.sum, m.min, m.max, m.bucket_counts_json, m.explicit_bounds_json, COALESCE(s.attrs_json, m.attrs_json) " +
+                  "FROM heim_metrics m LEFT JOIN heim_metric_series s ON s.series_id = m.series_id WHERE m.name=@n");
         var ps = new List<SqliteParameter> { Param("@n", name) };
-        if (fromUnixNano is not null) { sb.Append(" AND ts_unix_nano >= @from"); ps.Add(Param("@from", fromUnixNano.Value)); }
-        if (toUnixNano is not null) { sb.Append(" AND ts_unix_nano <= @to"); ps.Add(Param("@to", toUnixNano.Value)); }
-        sb.Append(" ORDER BY ts_unix_nano ASC LIMIT @lim");
+        if (fromUnixNano is not null) { sb.Append(" AND m.ts_unix_nano >= @from"); ps.Add(Param("@from", fromUnixNano.Value)); }
+        if (toUnixNano is not null) { sb.Append(" AND m.ts_unix_nano <= @to"); ps.Add(Param("@to", toUnixNano.Value)); }
+        sb.Append(" ORDER BY m.ts_unix_nano ASC LIMIT @lim");
         ps.Add(Param("@lim", limit));
 
         var list = new List<MetricRow>();
@@ -434,6 +468,8 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     public long CountMetrics() => Count("heim_metrics");
     // Workstream F — Rollup-Zeilenzahl (Test-Hook).
     internal long CountMetricsRollup() => Count("heim_metrics_rollup");
+    // Hebel 4 — Serien-Zeilenzahl (Test-Hook).
+    internal long CountMetricSeries() => Count("heim_metric_series");
 
     private long Count(string table)
     {
@@ -577,6 +613,13 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         Exec(SqlCreateMetricsRollup);
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_metrics_rollup_name_ts ON heim_metrics_rollup(name, bucket_start)");
 
+        // Serien-Tabelle (Hebel 4): attrs/resource/scope einmal je Serie statt pro
+        // Punkt. Additiv + Backfill — bestehende DBs migrieren, frische sind No-Op.
+        Exec(SqlCreateMetricSeries);
+        EnsureColumn("heim_metrics", "series_id");
+        EnsureColumn("heim_metrics_rollup", "series_id");
+        BackfillMetricSeries();
+
         Exec("CREATE VIRTUAL TABLE IF NOT EXISTS heim_spans_fts USING fts5(name, content='heim_spans', content_rowid='rowid')");
         Exec("CREATE TRIGGER IF NOT EXISTS heim_spans_ai AFTER INSERT ON heim_spans BEGIN " +
              "INSERT INTO heim_spans_fts(rowid, name) VALUES (new.rowid, new.name); END");
@@ -654,6 +697,57 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         cmd.ExecuteNonQuery();
     }
 
+    private bool HasColumn(string table, string column)
+    {
+        using var cmd = new SqliteCommand("PRAGMA table_info(" + table + ")", _conn);
+        using var r = cmd.ExecuteReader();
+        while (r.Read())
+            if (string.Equals(r.GetString(1), column, StringComparison.OrdinalIgnoreCase)) return true;
+        return false;
+    }
+
+    private void EnsureColumn(string table, string column)
+    {
+        if (!HasColumn(table, column))
+            Exec("ALTER TABLE " + table + " ADD COLUMN " + column + " INTEGER");
+    }
+
+    /// <summary>
+    /// Backfill der Serien-Tabelle (Hebel 4) fuer bestehende DBs: dedupliziert
+    /// attrs/resource/scope aus heim_metrics + heim_metrics_rollup in
+    /// heim_metric_series und setzt series_id auf den Metrik-Zeilen. Idempotent —
+    /// auf einer frischen DB (Write-Pfad schreibt series_id direkt) No-Op.
+    /// </summary>
+    private void BackfillMetricSeries()
+    {
+        try
+        {
+            Exec("INSERT OR IGNORE INTO heim_metric_series (name, attrs_json, resource_json, scope_name, scope_version) " +
+                 "SELECT DISTINCT name, COALESCE(attrs_json,'{}'), COALESCE(resource_json,'{}'), COALESCE(scope_name,''), COALESCE(scope_version,'') " +
+                 "FROM heim_metrics WHERE series_id IS NULL");
+            Exec("INSERT OR IGNORE INTO heim_metric_series (name, attrs_json, resource_json, scope_name, scope_version) " +
+                 "SELECT DISTINCT name, COALESCE(attrs_json,'{}'), COALESCE(resource_json,'{}'), COALESCE(scope_name,''), COALESCE(scope_version,'') " +
+                 "FROM heim_metrics_rollup WHERE series_id IS NULL");
+            Exec("UPDATE heim_metrics SET series_id = (SELECT s.series_id FROM heim_metric_series s " +
+                 "WHERE s.name = heim_metrics.name AND s.attrs_json = COALESCE(heim_metrics.attrs_json,'{}') " +
+                 "AND s.resource_json = COALESCE(heim_metrics.resource_json,'{}') " +
+                 "AND s.scope_name = COALESCE(heim_metrics.scope_name,'') AND s.scope_version = COALESCE(heim_metrics.scope_version,'')) " +
+                 "WHERE series_id IS NULL");
+            Exec("UPDATE heim_metrics_rollup SET series_id = (SELECT s.series_id FROM heim_metric_series s " +
+                 "WHERE s.name = heim_metrics_rollup.name AND s.attrs_json = COALESCE(heim_metrics_rollup.attrs_json,'{}') " +
+                 "AND s.resource_json = COALESCE(heim_metrics_rollup.resource_json,'{}') " +
+                 "AND s.scope_name = COALESCE(heim_metrics_rollup.scope_name,'') AND s.scope_version = COALESCE(heim_metrics_rollup.scope_version,'')) " +
+                 "WHERE series_id IS NULL");
+        }
+        catch
+        {
+            // Tolerant: Backfill ist rein additiv. Schlägt er fehl (z. B. sehr alte
+            // DB ohne attrs_json), bleibt die DB benutzbar — neue Writes setzen
+            // series_id, Discovery liest weiterhin die alten Spalten (JOIN fällt
+            // auf NULL-series_id-Zeilen auf attrs_json zurück, s. MetricSource).
+        }
+    }
+
     internal void SweepRetention()
     {
         // Guard by timer (SweepActive), aber doppelt-halten: auch ein manuell
@@ -692,6 +786,16 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
 
                 // 2. Größen-Cap mit signalübergreifender Eviction (A2).
                 if (_options.MaxBytes > 0) anyDeleted |= EvictByCap();
+
+                // 2.5. Verwaiste Serien (Hebel 4): nach Metrik-Loeschung (TTL oder
+                // Cap) aufraeumen. NOT IN auf der kleinen Serien-Tabelle ist billig;
+                // idempotent, laeuft nur wenn ueberhaupt geloescht wurde.
+                if (anyDeleted)
+                {
+                    Exec("DELETE FROM heim_metric_series WHERE series_id NOT IN " +
+                         "(SELECT DISTINCT series_id FROM heim_metrics) AND series_id NOT IN " +
+                         "(SELECT DISTINCT series_id FROM heim_metrics_rollup)");
+                }
 
                 // 3. Space-Reclaim (A3) — NUR wenn gelöscht wurde: FTS5-Shadow-
                 // Tabellen geben Seiten bei DELETE nicht frei (Tombstones bleiben
@@ -867,6 +971,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         lock (_gate)
         {
             _insSpan.Dispose(); _insLog.Dispose(); _insMetric.Dispose();
+            _insSeries.Dispose(); _selSeriesId.Dispose();
             _conn.Dispose();
         }
     }
@@ -895,7 +1000,26 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         "name TEXT NOT NULL, unit TEXT, type INTEGER NOT NULL, temporality INTEGER NOT NULL, ts_unix_nano INTEGER NOT NULL, " +
         "value REAL NOT NULL, count INTEGER, sum REAL, min REAL, max REAL, " +
         "bucket_counts_json TEXT, explicit_bounds_json TEXT, " +
-        "attrs_json TEXT, resource_json TEXT, scope_name TEXT, scope_version TEXT)";
+        "attrs_json TEXT, resource_json TEXT, scope_name TEXT, scope_version TEXT, " +
+        "series_id INTEGER)";
+
+    // Serien-Tabelle (Hebel 4): attrs/resource/scope einmal je Serie statt pro
+    // Metrik-Punkt. UNIQUE(name, attrs_json, resource_json, scope_name, scope_version)
+    // macht INSERT OR IGNORE idempotent; series_id ist der Fingerprint.
+    private const string SqlCreateMetricSeries =
+        "CREATE TABLE IF NOT EXISTS heim_metric_series (" +
+        "series_id INTEGER PRIMARY KEY AUTOINCREMENT, " +
+        "name TEXT NOT NULL, attrs_json TEXT NOT NULL, resource_json TEXT NOT NULL, " +
+        "scope_name TEXT NOT NULL DEFAULT '', scope_version TEXT NOT NULL DEFAULT '', " +
+        "UNIQUE(name, attrs_json, resource_json, scope_name, scope_version))";
+
+    private const string SqlInsertSeries =
+        "INSERT OR IGNORE INTO heim_metric_series (name, attrs_json, resource_json, scope_name, scope_version) " +
+        "VALUES (@p0,@p1,@p2,@p3,@p4)";
+
+    private const string SqlSelectSeriesId =
+        "SELECT series_id FROM heim_metric_series " +
+        "WHERE name=@n AND attrs_json=@a AND resource_json=@r AND scope_name=@sn AND scope_version=@sv";
 
     // Rollup-Tabelle (Workstream F): Spiegel von heim_metrics Wert-Spalten, aber
     // ts_unix_nano -> bucket_start + resolution_seconds. Eine Zeile pro
@@ -908,7 +1032,8 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         "bucket_start INTEGER NOT NULL, resolution_seconds INTEGER NOT NULL, " +
         "value REAL NOT NULL, count INTEGER, sum REAL, min REAL, max REAL, " +
         "bucket_counts_json TEXT, explicit_bounds_json TEXT, " +
-        "attrs_json TEXT, resource_json TEXT, scope_name TEXT, scope_version TEXT)";
+        "attrs_json TEXT, resource_json TEXT, scope_name TEXT, scope_version TEXT, " +
+        "series_id INTEGER)";
 
     private const string SqlInsertSpan =
         "INSERT OR IGNORE INTO heim_spans (trace_id, span_id, parent_id, name, kind, " +
@@ -924,6 +1049,6 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     private const string SqlInsertMetric =
         "INSERT INTO heim_metrics (name, unit, type, temporality, ts_unix_nano, " +
         "value, count, sum, min, max, bucket_counts_json, explicit_bounds_json, " +
-        "attrs_json, resource_json, scope_name, scope_version) " +
-        "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15)";
+        "attrs_json, resource_json, scope_name, scope_version, series_id) " +
+        "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16)";
 }

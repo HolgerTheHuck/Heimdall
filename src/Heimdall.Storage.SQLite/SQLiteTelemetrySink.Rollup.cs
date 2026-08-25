@@ -61,8 +61,7 @@ public sealed partial class SQLiteTelemetrySink
                 long bucket = (row.Ts / res) * res;
                 if (fullBatch && row.Name == lastName && bucket == lastBucket)
                     continue;   // unvollstaendige Gruppe ueberspringen
-                var key = new RollupKey(row.Name, row.Type, row.Temporality, row.Unit,
-                                        row.AttrsJson, row.ResourceJson, row.ScopeName, row.ScopeVersion, bucket);
+                var key = new RollupKey(row.SeriesId, row.Name, row.Type, row.Temporality, row.Unit, bucket);
                 if (!groups.TryGetValue(key, out var g))
                 {
                     g = (new RollupAcc(), new List<long>());
@@ -95,9 +94,12 @@ public sealed partial class SQLiteTelemetrySink
 
     private List<RollupRow> ReadRollupBatch(long boundary)
     {
+        // Hebel 4: series_id liegt direkt auf heim_metrics (kein Join noetig) —
+        // attrs/resource/scope werden fuer den Rollup nicht mehr gelesen, die
+        // Rollup-Zeile referenziert die Serie per series_id.
         const string sql =
             "SELECT rowid, name, unit, type, temporality, ts_unix_nano, value, count, sum, min, max, " +
-            "bucket_counts_json, explicit_bounds_json, attrs_json, resource_json, scope_name, scope_version " +
+            "bucket_counts_json, explicit_bounds_json, series_id " +
             "FROM heim_metrics WHERE ts_unix_nano < @b " +
             "ORDER BY name, ts_unix_nano ASC LIMIT @lim";
         var rows = new List<RollupRow>();
@@ -110,12 +112,11 @@ public sealed partial class SQLiteTelemetrySink
             while (r.Read())
             {
                 rows.Add(new RollupRow(
-                    r.GetInt64(0), r.GetString(1), NStr(r, 2),
+                    r.GetInt64(0), r.IsDBNull(13) ? 0 : r.GetInt64(13), r.GetString(1), NStr(r, 2),
                     (HMetricType)r.GetInt32(3), (HTemporality)r.GetInt32(4),
                     r.GetInt64(5), r.GetDouble(6),
                     NLong(r, 7), NDouble(r, 8), NDouble(r, 9), NDouble(r, 10),
-                    ParseLongs(NStr(r, 11)), ParseDoubles(NStr(r, 12)),
-                    NStr(r, 13), NStr(r, 14), NStr(r, 15), NStr(r, 16)));
+                    ParseLongs(NStr(r, 11)), ParseDoubles(NStr(r, 12))));
             }
         }
         return rows;
@@ -127,11 +128,13 @@ public sealed partial class SQLiteTelemetrySink
         List<KeyValuePair<RollupKey, (RollupAcc Acc, List<long> Rowids)>> committed,
         List<long> rowids)
     {
+        // Hebel 4: series_id direkt aus der Quell-Zeile (kein Re-Resolve); attrs/
+        // resource/scope liegen in heim_metric_series, nicht in der Rollup-Zeile.
         const string insertSql =
             "INSERT INTO heim_metrics_rollup (name, unit, type, temporality, bucket_start, resolution_seconds, " +
             "value, count, sum, min, max, bucket_counts_json, explicit_bounds_json, " +
-            "attrs_json, resource_json, scope_name, scope_version) " +
-            "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16)";
+            "attrs_json, resource_json, scope_name, scope_version, series_id) " +
+            "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15,@p16,@p17)";
         var idList = string.Join(',', rowids.Select(x => x.ToString(CultureInfo.InvariantCulture)));
         int resSec = _options.RollupResolutionSecondsEffective;
         lock (_gate)
@@ -155,10 +158,11 @@ public sealed partial class SQLiteTelemetrySink
                 cmd.Parameters.AddWithValue("@p10", (object?)a.Max ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@p11", a.BucketCountsJson ?? "[]");
                 cmd.Parameters.AddWithValue("@p12", a.ExplicitBoundsJson ?? "[]");
-                cmd.Parameters.AddWithValue("@p13", k.AttrsJson ?? "{}");
-                cmd.Parameters.AddWithValue("@p14", k.ResourceJson ?? "{}");
-                cmd.Parameters.AddWithValue("@p15", (object?)k.ScopeName ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@p16", (object?)k.ScopeVersion ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("@p13", DBNull.Value);   // attrs_json — in heim_metric_series
+                cmd.Parameters.AddWithValue("@p14", DBNull.Value);   // resource_json — in heim_metric_series
+                cmd.Parameters.AddWithValue("@p15", DBNull.Value);   // scope_name — in heim_metric_series
+                cmd.Parameters.AddWithValue("@p16", DBNull.Value);   // scope_version — in heim_metric_series
+                cmd.Parameters.AddWithValue("@p17", k.SeriesId);
                 cmd.ExecuteNonQuery();
             }
             using var del = new SqliteCommand(
@@ -170,14 +174,16 @@ public sealed partial class SQLiteTelemetrySink
 
     // --- Hilfstypen -------------------------------------------------------
 
+    // Hebel 4: Gruppierung ueber series_id (Fingerprint der Serie) statt der
+    // Label-JSONs — die Serie ist durch series_id eindeutig identifiziert.
     private readonly record struct RollupKey(
-        string Name, HMetricType Type, HTemporality Temporality, string? Unit,
-        string? AttrsJson, string? ResourceJson, string? ScopeName, string? ScopeVersion,
+        long SeriesId, string Name, HMetricType Type, HTemporality Temporality, string? Unit,
         long BucketStart);
 
     private sealed class RollupRow
     {
         public long Rowid;
+        public long SeriesId;
         public string Name;
         public string? Unit;
         public HMetricType Type;
@@ -188,17 +194,14 @@ public sealed partial class SQLiteTelemetrySink
         public double? Sum, Min, Max;
         public IReadOnlyList<long>? BucketCounts;
         public IReadOnlyList<double>? ExplicitBounds;
-        public string? AttrsJson, ResourceJson, ScopeName, ScopeVersion;
 
-        public RollupRow(long rowid, string name, string? unit, HMetricType type, HTemporality temp,
+        public RollupRow(long rowid, long seriesId, string name, string? unit, HMetricType type, HTemporality temp,
             long ts, double value, long? count, double? sum, double? min, double? max,
-            IReadOnlyList<long>? bucketCounts, IReadOnlyList<double>? explicitBounds,
-            string? attrsJson, string? resourceJson, string? scopeName, string? scopeVersion)
+            IReadOnlyList<long>? bucketCounts, IReadOnlyList<double>? explicitBounds)
         {
-            Rowid = rowid; Name = name; Unit = unit; Type = type; Temporality = temp;
+            Rowid = rowid; SeriesId = seriesId; Name = name; Unit = unit; Type = type; Temporality = temp;
             Ts = ts; Value = value; Count = count; Sum = sum; Min = min; Max = max;
             BucketCounts = bucketCounts; ExplicitBounds = explicitBounds;
-            AttrsJson = attrsJson; ResourceJson = resourceJson; ScopeName = scopeName; ScopeVersion = scopeVersion;
         }
     }
 

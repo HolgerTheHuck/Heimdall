@@ -33,6 +33,42 @@ public sealed class PromEngine
         _lookbackMs = lookbackMs;
     }
 
+    // --- Discovery-Cache (Hebel 2/3) ----------------------------------------
+    // Kurzer TTL-Cache (5 s) fuer die Discovery-Methoden, die pro Dashboard-View
+    // bzw. pro VectorSelector mehrfach aufgerufen werden (Template-Variablen,
+    // __name__-Werte, ResolveOtelNames). Nur Discovery wird gecacht — FetchPoints
+    // (PromQL-Auswertung) braucht frische Daten und bleibt ungecacht. Bei Hit wird
+    // eine Kopie zurueckgegeben (Schutz vor Caller-Mutation).
+    private const long DiscoveryCacheTtlMs = 5000;
+    private const int DiscoveryCacheMax = 256;
+    private readonly object _discoveryLock = new();
+    private readonly Dictionary<string, (object Value, long ExpiresAtMs)> _discoveryCache = new(StringComparer.Ordinal);
+
+    private IReadOnlyList<string> Cached(string key, Func<IReadOnlyList<string>> factory)
+    {
+        long now = Environment.TickCount64;
+        lock (_discoveryLock)
+        {
+            if (_discoveryCache.TryGetValue(key, out var e) && e.ExpiresAtMs > now)
+                return new List<string>((IReadOnlyList<string>)e.Value);
+        }
+        var value = factory();
+        lock (_discoveryLock)
+        {
+            if (_discoveryCache.Count >= DiscoveryCacheMax)
+            {
+                // Abgelaufene evicten; reicht das nicht, komplett leeren (einfach, selten).
+                var expired = _discoveryCache.Where(kv => kv.Value.ExpiresAtMs <= now).Select(kv => kv.Key).ToList();
+                foreach (var k in expired) _discoveryCache.Remove(k);
+                if (_discoveryCache.Count >= DiscoveryCacheMax) _discoveryCache.Clear();
+            }
+            _discoveryCache[key] = (value, now + DiscoveryCacheTtlMs);
+        }
+        // Auch beim Miss eine Kopie zurueckgeben — der Caller darf die gecachte
+        // Liste nicht mutieren (sonst korrumpiert er den naechsten Cache-Hit).
+        return new List<string>(value);
+    }
+
     // === Auswertung ========================================================
     /// <summary>Wertet <paramref name="query"/> an einem Zeitpunkt (ms) aus (Prom <c>/api/v1/query</c>).</summary>
     public PromResult EvalInstant(string query, long timeMs)
@@ -53,56 +89,59 @@ public sealed class PromEngine
     // === Discovery =========================================================
     /// <summary>Prom-Metriknamen im Fenster (Counter→_total, Histogramm→Familie, Gauge→name).</summary>
     public IReadOnlyList<string> ListMetricNames(long? fromUnixNano = null, long? toUnixNano = null)
-    {
-        var otelNames = _source.ListMetricNames(fromUnixNano, toUnixNano);
-        var prom = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (var otel in otelNames)
+        => Cached("names|" + fromUnixNano + "|" + toUnixNano, () =>
         {
-            var pts = _source.FetchPoints(new HMetricQuery(new[] { otel }, null, fromUnixNano, toUnixNano, 1));
-            if (pts.Count == 0) { prom.Add(_mapper.PromBase(otel, null)); continue; }
-            var p = pts[0];
-            switch (p.Type)
+            var otelNames = _source.ListMetricNames(fromUnixNano, toUnixNano);
+            var prom = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (var otel in otelNames)
             {
-                case HMetricType.Sum: foreach (var n in _mapper.CounterNames(otel, p.Unit)) prom.Add(n); break;
-                case HMetricType.Histogram:
-                    var (b, s, c) = _mapper.HistogramNames(otel, p.Unit);
-                    prom.Add(b); prom.Add(s); prom.Add(c); break;
-                default: foreach (var n in _mapper.GaugeNames(otel, p.Unit)) prom.Add(n); break;
+                var pts = _source.FetchPoints(new HMetricQuery(new[] { otel }, null, fromUnixNano, toUnixNano, 1));
+                if (pts.Count == 0) { prom.Add(_mapper.PromBase(otel, null)); continue; }
+                var p = pts[0];
+                switch (p.Type)
+                {
+                    case HMetricType.Sum: foreach (var n in _mapper.CounterNames(otel, p.Unit)) prom.Add(n); break;
+                    case HMetricType.Histogram:
+                        var (b, s, c) = _mapper.HistogramNames(otel, p.Unit);
+                        prom.Add(b); prom.Add(s); prom.Add(c); break;
+                    default: foreach (var n in _mapper.GaugeNames(otel, p.Unit)) prom.Add(n); break;
+                }
             }
-        }
-        return new List<string>(prom);
-    }
+            return new List<string>(prom);
+        });
 
     /// <summary>Prom-Label-Namen (service.name→job+service_name, '.'→'_'), roh aus dem Source gemappt.</summary>
     public IReadOnlyList<string> ListLabelNames(long? fromUnixNano = null, long? toUnixNano = null)
-    {
-        var raw = _source.ListLabelNames(null, fromUnixNano, toUnixNano);
-        var set = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (var k in raw)
-            foreach (var p in MetricNameMapper.MapLabelKeys(k)) set.Add(p);
-        return new List<string>(set);
-    }
+        => Cached("labelnames|" + fromUnixNano + "|" + toUnixNano, () =>
+        {
+            var raw = _source.ListLabelNames(null, fromUnixNano, toUnixNano);
+            var set = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (var k in raw)
+                foreach (var p in MetricNameMapper.MapLabelKeys(k)) set.Add(p);
+            return new List<string>(set);
+        });
 
     /// <summary>Werte eines Prom-Labels (reverse-map prom→OTel-Keys, Werte vereinigt).</summary>
     public IReadOnlyList<string> ListLabelValues(string promLabel, long? fromUnixNano = null, long? toUnixNano = null)
-    {
-        // __name__ ist ein Prom-Pseudo-Label: seine Werte sind die Metriknamen,
-        // nicht in OTel-Attribut-Keys gespeichert (kein OTel-Key mappt auf __name__,
-        // darum fiel es bisher durchs Raster und /label/__name__/values war leer).
-        // Prom-konform über ListMetricNames liefern — deckt echte OTel-Metriken
-        // UND die synthetisierten heimdall.*-Observability-Metriken (A4) ab.
-        if (promLabel == "__name__")
-            return ListMetricNames(fromUnixNano, toUnixNano);
+        => Cached("labelvalues|" + promLabel + "|" + fromUnixNano + "|" + toUnixNano, () =>
+        {
+            // __name__ ist ein Prom-Pseudo-Label: seine Werte sind die Metriknamen,
+            // nicht in OTel-Attribut-Keys gespeichert (kein OTel-Key mappt auf __name__,
+            // darum fiel es bisher durchs Raster und /label/__name__/values war leer).
+            // Prom-konform über ListMetricNames liefern — deckt echte OTel-Metriken
+            // UND die synthetisierten heimdall.*-Observability-Metriken (A4) ab.
+            if (promLabel == "__name__")
+                return ListMetricNames(fromUnixNano, toUnixNano);
 
-        var rawNames = _source.ListLabelNames(null, fromUnixNano, toUnixNano);
-        // Reverse-Map: ein Prom-Label kann aus mehreren OTel-Keys stammen (job/service_name
-        // beide aus service.name). Werte aller treffenden OTel-Keys werden vereinigt.
-        var otelKeys = rawNames.Where(k => MetricNameMapper.MapLabelKeys(k).Contains(promLabel)).ToList();
-        var values = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (var k in otelKeys)
-            foreach (var v in _source.ListLabelValues(k, null, fromUnixNano, toUnixNano)) values.Add(v);
-        return new List<string>(values);
-    }
+            var rawNames = _source.ListLabelNames(null, fromUnixNano, toUnixNano);
+            // Reverse-Map: ein Prom-Label kann aus mehreren OTel-Keys stammen (job/service_name
+            // beide aus service.name). Werte aller treffenden OTel-Keys werden vereinigt.
+            var otelKeys = rawNames.Where(k => MetricNameMapper.MapLabelKeys(k).Contains(promLabel)).ToList();
+            var values = new SortedSet<string>(StringComparer.Ordinal);
+            foreach (var k in otelKeys)
+                foreach (var v in _source.ListLabelValues(k, null, fromUnixNano, toUnixNano)) values.Add(v);
+            return new List<string>(values);
+        });
 
     /// <summary>Serien (Labelsets inkl. __name__) passend zu match[]-Selektoren im Fenster.</summary>
     public IReadOnlyList<SeriesLabels> ListSeries(IReadOnlyList<string> matchSelectors, long? fromUnixNano = null, long? toUnixNano = null)

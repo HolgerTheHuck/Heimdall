@@ -35,9 +35,28 @@ internal sealed class SeriesResolver
     private readonly IHeimdallMetricSource _source;
     private readonly MetricNameMapper _mapper;
 
+    // Kurzer TTL-Cache (5 s) fuer die OTel-Namensliste: ResolveOtelNames ruft
+    // _source.ListMetricNames() pro VectorSelector auf (mehrere Targets pro Panel,
+    // mehrere Panels pro Dashboard). Die Liste aendert sich nur mit neuen Metriken.
+    private const long NameCacheTtlMs = 5000;
+    private readonly object _nameCacheLock = new();
+    private (IReadOnlyList<string> Names, long ExpiresAtMs)? _nameCache;
+
     /// <summary>Erzeugt den Resolver ueber <paramref name="source"/> mit dem Namens-Mapper.</summary>
     public SeriesResolver(IHeimdallMetricSource source, MetricNameMapper mapper)
     { _source = source; _mapper = mapper; }
+
+    private IReadOnlyList<string> KnownNames()
+    {
+        long now = Environment.TickCount64;
+        lock (_nameCacheLock)
+        {
+            if (_nameCache is { } c && c.ExpiresAtMs > now) return c.Names;
+        }
+        var names = _source.ListMetricNames();
+        lock (_nameCacheLock) _nameCache = (names, now + NameCacheTtlMs);
+        return names;
+    }
 
     /// <summary>Instant-Vektor fuer einen VectorSelector bei evalTime (ms).</summary>
     /// <summary>Instant-Vektor fuer einen VectorSelector bei evalTime (ms).
@@ -206,14 +225,18 @@ internal sealed class SeriesResolver
                     if (counts is not null && counts.Count > 0)
                     {
                         long cum = 0;
+                        // __name__-Basis einmal pro Punkt statt pro Bucket — halbiert
+                        // die With-Calls im heissen Pfad (Fingerprint bleibt kanonisch
+                        // sortiert, Ergebnis identisch).
+                        var bucketBase = labels.With("__name__", bN);
                         for (int i = 0; i < counts.Count; i++)
                         {
                             cum += counts[i];
                             double le = i < (bounds?.Count ?? 0)
                                 ? MetricNameMapper.ScaleBound(p.Unit, bounds![i])
                                 : double.PositiveInfinity;
-                            var leLabels = labels.With("le", IsPosInf(le) ? "+Inf" : FormatDouble(le));
-                            samples.Add(Make(bN, leLabels, tsMs, cum, p.Temporality == HTemporality.Delta));
+                            var leLabels = bucketBase.With("le", IsPosInf(le) ? "+Inf" : FormatDouble(le));
+                            samples.Add(new PromSample(leLabels, tsMs, cum, p.Temporality == HTemporality.Delta));
                         }
                     }
                     double sum = MetricNameMapper.ScaleValue(p.Unit, p.Sum ?? 0);
@@ -280,7 +303,7 @@ internal sealed class SeriesResolver
 
     private List<string> ResolveOtelNames(VectorSelector vs)
     {
-        var known = _source.ListMetricNames();
+        var known = KnownNames();
         if (string.IsNullOrEmpty(vs.Name))
         {
             // __name__-Matcher? dann dessen Werte als Prom-Namen behandeln.

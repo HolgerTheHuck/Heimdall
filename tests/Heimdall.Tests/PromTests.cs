@@ -447,6 +447,28 @@ public class PromTests
     }
 
     [Fact]
+    public void Discovery_Cache_LiefertKopie_UndKonsistenteErgebnisse()
+    {
+        // Hebel 2/3: Discovery wird 5 s gecacht. Der Cache gibt eine Kopie
+        // zurueck — Caller-Mutation darf den naechsten Aufruf nicht korrumpieren.
+        var eng = Engine(CounterSource());
+
+        var first = eng.ListLabelValues("job");
+        Assert.Equal(new[] { "shop" }, first);
+
+        // Mutieren: der Cache darf davon nicht betroffen sein.
+        ((List<string>)first).Add("corrupted");
+
+        var second = eng.ListLabelValues("job");
+        Assert.Equal(new[] { "shop" }, second);
+
+        // Wiederholte Aufrufe liefern konsistente Ergebnisse (Cache-Hit).
+        var names1 = eng.ListMetricNames();
+        var names2 = eng.ListMetricNames();
+        Assert.Equal(names1, names2);
+    }
+
+    [Fact]
     public void Discovery_Metadata_TypCounter()
     {
         var eng = Engine(CounterSource());

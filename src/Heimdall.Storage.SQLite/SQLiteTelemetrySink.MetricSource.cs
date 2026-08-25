@@ -114,9 +114,14 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
     private IReadOnlyList<HMetricPointView> FetchRealPoints(IReadOnlyList<string> names, HMetricQuery query)
     {
         var sb = SqlBuilder();
-        sb.Append("SELECT name, unit, type, temporality, ts_unix_nano, value, count, sum, min, max, " +
-                  "bucket_counts_json, explicit_bounds_json, attrs_json, resource_json, scope_name " +
-                  "FROM heim_metrics WHERE name IN (");
+        // Hebel 4: attrs/resource/scope kommen aus heim_metric_series (einmal je
+        // Serie). LEFT JOIN + COALESCE-Fallback auf die Metrik-Zeile — robust
+        // gegen NULL-series_id (Legacy-Zeilen, falls Backfill nicht griff).
+        // Reader-Indizes 12/13/14 bleiben unverändert.
+        sb.Append("SELECT m.name, m.unit, m.type, m.temporality, m.ts_unix_nano, m.value, m.count, m.sum, m.min, m.max, " +
+                  "m.bucket_counts_json, m.explicit_bounds_json, " +
+                  "COALESCE(s.attrs_json, m.attrs_json), COALESCE(s.resource_json, m.resource_json), COALESCE(s.scope_name, m.scope_name) " +
+                  "FROM heim_metrics m LEFT JOIN heim_metric_series s ON s.series_id = m.series_id WHERE m.name IN (");
         var ps = new List<SqliteParameter>();
         for (int i = 0; i < names.Count; i++)
         {
@@ -126,13 +131,14 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
             ps.Add(Param(pname, names[i]));
         }
         sb.Append(')');
-        if (query.FromUnixNano is not null) { sb.Append(" AND ts_unix_nano >= @from"); ps.Add(Param("@from", query.FromUnixNano.Value)); }
-        if (query.ToUnixNano is not null) { sb.Append(" AND ts_unix_nano <= @to"); ps.Add(Param("@to", query.ToUnixNano.Value)); }
+        if (query.FromUnixNano is not null) { sb.Append(" AND m.ts_unix_nano >= @from"); ps.Add(Param("@from", query.FromUnixNano.Value)); }
+        if (query.ToUnixNano is not null) { sb.Append(" AND m.ts_unix_nano <= @to"); ps.Add(Param("@to", query.ToUnixNano.Value)); }
         if (_options.RollupEnabledEffective)
         {
-            sb.Append(" UNION ALL SELECT name, unit, type, temporality, bucket_start, value, count, sum, min, max, " +
-                      "bucket_counts_json, explicit_bounds_json, attrs_json, resource_json, scope_name " +
-                      "FROM heim_metrics_rollup WHERE name IN (");
+            sb.Append(" UNION ALL SELECT m.name, m.unit, m.type, m.temporality, m.bucket_start, m.value, m.count, m.sum, m.min, m.max, " +
+                      "m.bucket_counts_json, m.explicit_bounds_json, " +
+                      "COALESCE(s.attrs_json, m.attrs_json), COALESCE(s.resource_json, m.resource_json), COALESCE(s.scope_name, m.scope_name) " +
+                      "FROM heim_metrics_rollup m LEFT JOIN heim_metric_series s ON s.series_id = m.series_id WHERE m.name IN (");
             for (int i = 0; i < names.Count; i++)
             {
                 if (i > 0) sb.Append(',');
@@ -141,10 +147,10 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
                 ps.Add(Param(pname, names[i]));
             }
             sb.Append(')');
-            if (query.FromUnixNano is not null) { sb.Append(" AND bucket_start >= @from2"); ps.Add(Param("@from2", query.FromUnixNano.Value)); }
-            if (query.ToUnixNano is not null) { sb.Append(" AND bucket_start <= @to2"); ps.Add(Param("@to2", query.ToUnixNano.Value)); }
+            if (query.FromUnixNano is not null) { sb.Append(" AND m.bucket_start >= @from2"); ps.Add(Param("@from2", query.FromUnixNano.Value)); }
+            if (query.ToUnixNano is not null) { sb.Append(" AND m.bucket_start <= @to2"); ps.Add(Param("@to2", query.ToUnixNano.Value)); }
         }
-        sb.Append(" ORDER BY name, ts_unix_nano ASC LIMIT @lim");
+        sb.Append(" ORDER BY m.name, m.ts_unix_nano ASC LIMIT @lim");
         ps.Add(Param("@lim", Math.Max(1, query.Limit)));
 
         var list = new List<HMetricPointView>();
@@ -169,17 +175,22 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
     private IEnumerable<(string? attrs, string? res)> ScanLabelRows(long? fromUnixNano, long? toUnixNano)
     {
         var sb = SqlBuilder();
-        sb.Append("SELECT attrs_json, resource_json FROM heim_metrics WHERE 1=1");
+        // Hebel 4: DISTINCT ueber die Serien-Tabelle — Label-Discovery scannt die
+        // kleine Serien-Tabelle statt 50k Metrik-Zeilen. LEFT JOIN + COALESCE-
+        // Fallback fuer Legacy-Zeilen ohne series_id.
+        sb.Append("SELECT DISTINCT COALESCE(s.attrs_json, m.attrs_json), COALESCE(s.resource_json, m.resource_json) " +
+                  "FROM heim_metrics m LEFT JOIN heim_metric_series s ON s.series_id = m.series_id WHERE 1=1");
         var ps = new List<SqliteParameter>();
-        if (fromUnixNano is not null) { sb.Append(" AND ts_unix_nano >= @from"); ps.Add(Param("@from", fromUnixNano.Value)); }
-        if (toUnixNano is not null) { sb.Append(" AND ts_unix_nano <= @to"); ps.Add(Param("@to", toUnixNano.Value)); }
+        if (fromUnixNano is not null) { sb.Append(" AND m.ts_unix_nano >= @from"); ps.Add(Param("@from", fromUnixNano.Value)); }
+        if (toUnixNano is not null) { sb.Append(" AND m.ts_unix_nano <= @to"); ps.Add(Param("@to", toUnixNano.Value)); }
         // Workstream F: bei aktivem Rollup Labels beider Tabellen vereinigen —
         // Labels ueberleben fuer voll gealterte Metriken (Cap unverändert).
         if (_options.RollupEnabledEffective)
         {
-            sb.Append(" UNION ALL SELECT attrs_json, resource_json FROM heim_metrics_rollup WHERE 1=1");
-            if (fromUnixNano is not null) { sb.Append(" AND bucket_start >= @from2"); ps.Add(Param("@from2", fromUnixNano.Value)); }
-            if (toUnixNano is not null) { sb.Append(" AND bucket_start <= @to2"); ps.Add(Param("@to2", toUnixNano.Value)); }
+            sb.Append(" UNION ALL SELECT DISTINCT COALESCE(s.attrs_json, m.attrs_json), COALESCE(s.resource_json, m.resource_json) " +
+                      "FROM heim_metrics_rollup m LEFT JOIN heim_metric_series s ON s.series_id = m.series_id WHERE 1=1");
+            if (fromUnixNano is not null) { sb.Append(" AND m.bucket_start >= @from2"); ps.Add(Param("@from2", fromUnixNano.Value)); }
+            if (toUnixNano is not null) { sb.Append(" AND m.bucket_start <= @to2"); ps.Add(Param("@to2", toUnixNano.Value)); }
         }
         sb.Append(" LIMIT @cap");
         ps.Add(Param("@cap", SourceScanCap));
