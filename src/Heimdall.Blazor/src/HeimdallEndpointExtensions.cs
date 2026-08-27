@@ -35,15 +35,19 @@ public static class HeimdallEndpointExtensions
         // Auth deaktiviert und die Login-Seite ist nicht erreichbar (die
         // Middleware redirectet nicht). ReturnUrl wird nach Login wieder
         // aufgenommen. CSRF via CheckSameOrigin (wie die anderen POST-Endpoints).
+        // full = externer Prefix (Request.PathBase + prefix) — unter IIS-
+        // Unterverzeichnis/Proxy-Pfad-Strip schleppt er das Deployment-Verzeichnis
+        // mit (siehe HeimdallUiPaths); am Site-Root identisch mit prefix.
         group.MapGet("/login", (HttpContext ctx, string? returnUrl) =>
         {
             var auth = ctx.RequestServices.GetService<Heimdall.AspNetCore.HeimdallAuthOptions>();
             var err = ctx.Request.Query["err"].ToString();
             var lastUser = ctx.Request.Query["user"].ToString();
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
             return new RazorComponentResult<LoginPage>(new
             {
-                BasePath = prefix,
-                ReturnUrl = string.IsNullOrEmpty(returnUrl) ? prefix : returnUrl,
+                BasePath = full,
+                ReturnUrl = string.IsNullOrEmpty(returnUrl) ? full : returnUrl,
                 Error = string.IsNullOrEmpty(err) ? null : err,
                 LastUser = string.IsNullOrEmpty(lastUser) ? null : lastUser,
             });
@@ -52,19 +56,22 @@ public static class HeimdallEndpointExtensions
         group.MapPost("/login", async (HttpContext ctx) =>
         {
             if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
             var auth = ctx.RequestServices.GetService<Heimdall.AspNetCore.HeimdallAuthOptions>();
             if (auth is null || !auth.Enabled)
             {
                 var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
-                return Results.Redirect($"{prefix}/login?err=" + Uri.EscapeDataString(i18n.T("login.error.noauth")));
+                return Results.Redirect($"{full}/login?err=" + Uri.EscapeDataString(i18n.T("login.error.noauth")));
             }
 
             var form = await ctx.Request.ReadFormAsync();
             var username = form["username"].ToString();
             var password = form["password"].ToString();
             var returnUrl = form["returnUrl"].ToString();
-            if (string.IsNullOrEmpty(returnUrl) || !returnUrl.StartsWith(prefix, StringComparison.Ordinal))
-                returnUrl = prefix;
+            // Open-Redirect-Schutz gegen den externen Prefix (returnUrl kommt aus
+            // dem Auth-Redirect bzw. dem Login-Formular und trägt die PathBase).
+            if (string.IsNullOrEmpty(returnUrl) || !returnUrl.StartsWith(full, StringComparison.Ordinal))
+                returnUrl = full;
 
             if (string.IsNullOrEmpty(username) || string.IsNullOrEmpty(password) ||
                 !Heimdall.AspNetCore.HeimdallSessionCookie.CheckCredentials(username, password, auth))
@@ -72,7 +79,7 @@ public static class HeimdallEndpointExtensions
                 var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
                 var err = Uri.EscapeDataString(i18n.T("login.error.badcreds"));
                 var user = Uri.EscapeDataString(username ?? string.Empty);
-                return Results.Redirect($"{prefix}/login?err={err}&user={user}");
+                return Results.Redirect($"{full}/login?err={err}&user={user}");
             }
 
             Heimdall.AspNetCore.HeimdallSessionCookie.Issue(ctx.Response, auth, username);
@@ -84,21 +91,21 @@ public static class HeimdallEndpointExtensions
             if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
             var auth = ctx.RequestServices.GetService<Heimdall.AspNetCore.HeimdallAuthOptions>();
             if (auth is not null) Heimdall.AspNetCore.HeimdallSessionCookie.Clear(ctx.Response, auth);
-            return Results.Redirect($"{prefix}/login");
+            return Results.Redirect(HeimdallUiPaths.FullPrefix(ctx, prefix) + "/login");
         });
 
         // Landing / Übersicht (Health-KPIs, neueste Fehler-Traces/Logs, Quick-Nav).
-        group.MapGet("/", () =>
-            new RazorComponentResult<HomePage>(new { BasePath = prefix }));
+        group.MapGet("/", (HttpContext ctx) =>
+            new RazorComponentResult<HomePage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix) }));
 
         // Drilldown-Sprungseite zu Traces/Logs/Metriken (wie Grafana „Drilldown").
-        group.MapGet("/drilldown", () =>
-            new RazorComponentResult<DrilldownPage>(new { BasePath = prefix }));
+        group.MapGet("/drilldown", (HttpContext ctx) =>
+            new RazorComponentResult<DrilldownPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix) }));
 
-        group.MapGet("/traces", (string? name, string? svc, string? err, string? limit, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
+        group.MapGet("/traces", (HttpContext ctx, string? name, string? svc, string? err, string? limit, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
             new RazorComponentResult<TracesPage>(new
             {
-                BasePath = prefix,
+                BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 NameContains = name,
                 ServiceName = svc,
                 HasError = ParseErr(err),
@@ -111,13 +118,13 @@ public static class HeimdallEndpointExtensions
                 To = ParseNs(to),
             }));
 
-        group.MapGet("/trace/{tid}", (string tid) =>
-            new RazorComponentResult<TraceDetailPage>(new { BasePath = prefix, TraceId = tid }));
+        group.MapGet("/trace/{tid}", (HttpContext ctx, string tid) =>
+            new RazorComponentResult<TraceDetailPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), TraceId = tid }));
 
-        group.MapGet("/logs", (string? text, string? q, string? sev, string? limit, string? expand, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
+        group.MapGet("/logs", (HttpContext ctx, string? text, string? q, string? sev, string? limit, string? expand, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
             new RazorComponentResult<LogsPage>(new
             {
-                BasePath = prefix,
+                BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 Text = text,
                 Query1 = q,
                 MinSeverity = ParseInt(sev),
@@ -131,10 +138,10 @@ public static class HeimdallEndpointExtensions
                 To = ParseNs(to),
             }));
 
-        group.MapGet("/metrics", (string? name, string? limit, string? preset, string? from, string? to) =>
+        group.MapGet("/metrics", (HttpContext ctx, string? name, string? limit, string? preset, string? from, string? to) =>
             new RazorComponentResult<MetricsPage>(new
             {
-                BasePath = prefix,
+                BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 Name = name,
                 Limit = ParseInt(limit) ?? 500,
                 Preset = preset,
@@ -146,10 +153,10 @@ public static class HeimdallEndpointExtensions
         // http.server.request.duration-Histogramm), Errorrate, Uptime, Spitzenlast,
         // plus „Logs im Zeitraum" und „Traces im Zeitraum" — alles über den
         // konfigurierbaren Zeitraum. Default-Preset 24h.
-        group.MapGet("/dashboard", (string? requests, string? errors, string? duration, string? limit, string? preset, string? from, string? to) =>
+        group.MapGet("/dashboard", (HttpContext ctx, string? requests, string? errors, string? duration, string? limit, string? preset, string? from, string? to) =>
             new RazorComponentResult<DashboardPage>(new
             {
-                BasePath = prefix,
+                BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 Requests = requests,
                 Errors = errors,
                 // Duration ist die OTel-Semantik (http.server.request.duration) — kein
@@ -166,10 +173,10 @@ public static class HeimdallEndpointExtensions
         // /endpoints = Overview (Controller-Tabelle), /endpoints/{controller} =
         // Endpoints dieses Controllers. Dimensions-Attribute (Defaults vom
         // Heimdall.AspNetCore-Plugin) sind per Query-Param überschreibbar.
-        group.MapGet("/endpoints", (string? controllerAttr, string? actionAttr, string? routeAttr, string? limit, string? preset, string? from, string? to) =>
+        group.MapGet("/endpoints", (HttpContext ctx, string? controllerAttr, string? actionAttr, string? routeAttr, string? limit, string? preset, string? from, string? to) =>
             new RazorComponentResult<EndpointsPage>(new
             {
-                BasePath = prefix,
+                BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 Controller = (string?)null,
                 ControllerAttr = string.IsNullOrWhiteSpace(controllerAttr) ? "aspnetmvc.controller" : controllerAttr,
                 ActionAttr = string.IsNullOrWhiteSpace(actionAttr) ? "aspnetmvc.action" : actionAttr,
@@ -180,10 +187,10 @@ public static class HeimdallEndpointExtensions
                 To = ParseNs(to),
             }));
 
-        group.MapGet("/endpoints/{controller}", (string controller, string? controllerAttr, string? actionAttr, string? routeAttr, string? limit, string? preset, string? from, string? to) =>
+        group.MapGet("/endpoints/{controller}", (HttpContext ctx, string controller, string? controllerAttr, string? actionAttr, string? routeAttr, string? limit, string? preset, string? from, string? to) =>
             new RazorComponentResult<EndpointsPage>(new
             {
-                BasePath = prefix,
+                BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 Controller = controller,
                 ControllerAttr = string.IsNullOrWhiteSpace(controllerAttr) ? "aspnetmvc.controller" : controllerAttr,
                 ActionAttr = string.IsNullOrWhiteSpace(actionAttr) ? "aspnetmvc.action" : actionAttr,
@@ -197,11 +204,11 @@ public static class HeimdallEndpointExtensions
         // === Importierte Grafana-Dashboards (selbststaendig in Heimdall gerendert) ===
         // Liste + Import + Detailansicht. Template-Variablen kommen als var-* Query-
         // Parameter (GET-Form, kein JS) und werden im Handler in ein Dict gehoben.
-        group.MapGet("/dashboards", () =>
-            new RazorComponentResult<GrafanaDashboardsPage>(new { BasePath = prefix }));
+        group.MapGet("/dashboards", (HttpContext ctx) =>
+            new RazorComponentResult<GrafanaDashboardsPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix) }));
 
-        group.MapGet("/dashboards/import", (string? err) =>
-            new RazorComponentResult<GrafanaImportPage>(new { BasePath = prefix, Error = err }));
+        group.MapGet("/dashboards/import", (HttpContext ctx, string? err) =>
+            new RazorComponentResult<GrafanaImportPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), Error = err }));
 
         group.MapPost("/dashboards/import", async (HttpContext ctx, IGrafanaDashboardStore store) =>
         {
@@ -236,7 +243,8 @@ public static class HeimdallEndpointExtensions
 
             return new RazorComponentResult<GrafanaDashboardViewPage>(new
             {
-                BasePath = prefix, Uid = uid, Preset = preset, From = ParseNs(from), To = ParseNs(to), Vars = vars,
+                BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
+                Uid = uid, Preset = preset, From = ParseNs(from), To = ParseNs(to), Vars = vars,
                 BackUrl = backUrl,
             });
         });
@@ -268,24 +276,24 @@ public static class HeimdallEndpointExtensions
 
             var slot = slots[idx];
             var titled = slot.Panel with { Title = slot.Title };
-            var rp = GrafanaPanelRenderer.Render(titled, engine, prep.FromMs, prep.ToMs, prep.StepMs, slot.Vars, query, i18n.Lang, prefix);
-            return new RazorComponentResult<GrafanaPanelFragment>(new { Panel = rp, BasePath = prefix });
+            var rp = GrafanaPanelRenderer.Render(titled, engine, prep.FromMs, prep.ToMs, prep.StepMs, slot.Vars, query, i18n.Lang, HeimdallUiPaths.FullPrefix(ctx, prefix));
+            return new RazorComponentResult<GrafanaPanelFragment>(new { Panel = rp, BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix) });
         });
 
         group.MapPost("/dashboards/{uid}/delete", (HttpContext ctx, string uid, IGrafanaDashboardStore store) =>
         {
             if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
             store.Delete(uid);
-            return Results.Redirect($"{prefix}/dashboards");
+            return Results.Redirect(HeimdallUiPaths.FullPrefix(ctx, prefix) + "/dashboards");
         });
 
         // === Alarm-Subsystem (Regeln ueber Logs/Metriken/Traces) ===
         // Liste + Editor + Detail. Store/UI immer verfuegbar (auch ohne aktiven Evaluator);
         // Auth-Abdeckung erbt der Host via Prefix-Middleware.
-        group.MapGet("/alerts", (string? state, string? limit, string? preset, string? from, string? to) =>
+        group.MapGet("/alerts", (HttpContext ctx, string? state, string? limit, string? preset, string? from, string? to) =>
             new RazorComponentResult<AlertsPage>(new
             {
-                BasePath = prefix,
+                BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 StateFilter = state,
                 Limit = ParseInt(limit) ?? 100,
                 Preset = preset,
@@ -293,25 +301,26 @@ public static class HeimdallEndpointExtensions
                 To = ParseNs(to),
             }));
 
-        group.MapGet("/alerts/new", (string? err) =>
-            new RazorComponentResult<AlertRuleEditPage>(new { BasePath = prefix, Id = (string?)null, Error = err }));
+        group.MapGet("/alerts/new", (HttpContext ctx, string? err) =>
+            new RazorComponentResult<AlertRuleEditPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), Id = (string?)null, Error = err }));
 
-        group.MapGet("/alerts/{id}/edit", (string id, string? err) =>
-            new RazorComponentResult<AlertRuleEditPage>(new { BasePath = prefix, Id = id, Error = err }));
+        group.MapGet("/alerts/{id}/edit", (HttpContext ctx, string id, string? err) =>
+            new RazorComponentResult<AlertRuleEditPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), Id = id, Error = err }));
 
-        group.MapGet("/alerts/{id}", (string id) =>
-            new RazorComponentResult<AlertDetailPage>(new { BasePath = prefix, Id = id }));
+        group.MapGet("/alerts/{id}", (HttpContext ctx, string id) =>
+            new RazorComponentResult<AlertDetailPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), Id = id }));
 
         group.MapPost("/alerts/save", async (HttpContext ctx, IAlertRuleStore store) =>
         {
             if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
             var form = await ctx.Request.ReadFormAsync();
             var id = form["id"].ToString();
             var name = form["name"].ToString();
             if (string.IsNullOrWhiteSpace(name))
             {
                 var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
-                return Results.Redirect($"{prefix}/alerts/new?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.rulename")));
+                return Results.Redirect($"{full}/alerts/new?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.rulename")));
             }
             if (!Enum.TryParse<AlertSignal>(form["signal"].ToString(), true, out var signal))
                 signal = AlertSignal.Metric;
@@ -336,11 +345,11 @@ public static class HeimdallEndpointExtensions
             try
             {
                 var savedId = store.Save(rule);
-                return Results.Redirect($"{prefix}/alerts/{savedId}");
+                return Results.Redirect($"{full}/alerts/{savedId}");
             }
             catch (Exception ex)
             {
-                var back = string.IsNullOrEmpty(id) ? $"{prefix}/alerts/new" : $"{prefix}/alerts/{id}/edit";
+                var back = string.IsNullOrEmpty(id) ? $"{full}/alerts/new" : $"{full}/alerts/{id}/edit";
                 return Results.Redirect(back + "?err=" + Uri.EscapeDataString(ex.Message));
             }
         });
@@ -350,7 +359,7 @@ public static class HeimdallEndpointExtensions
             if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
             store.Delete(id);
             stateStore.Remove(id);
-            return Results.Redirect($"{prefix}/alerts");
+            return Results.Redirect(HeimdallUiPaths.FullPrefix(ctx, prefix) + "/alerts");
         });
 
         // Sprache umschalten (de/en/fr): setzt den `heimdall-lang`-Cookie und
@@ -363,11 +372,14 @@ public static class HeimdallEndpointExtensions
             if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
             // Form-Body lesen (wie die anderen POST-Handler hier): Minimal-APIs binden
             // einfache Parameter sonst aus dem Query-String, nicht dem Form-Body.
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
             var form = await ctx.Request.ReadFormAsync();
             var set = form["set"].ToString();
             var ret = form["ret"].ToString();
             var lang = set is "de" or "en" or "fr" ? set : HeimdallI18n.DefaultLang;
-            var retUrl = string.IsNullOrEmpty(ret) || !ret.StartsWith(prefix, StringComparison.Ordinal) ? prefix : ret;
+            // ret kommt vom Nav-Formular und trägt den externen Prefix (BasePath);
+            // Open-Redirect-Grenze ist folgerichtig full, nicht der In-App-Prefix.
+            var retUrl = string.IsNullOrEmpty(ret) || !ret.StartsWith(full, StringComparison.Ordinal) ? full : ret;
             ctx.Response.Cookies.Append("heimdall-lang", lang, new CookieOptions
             {
                 MaxAge = TimeSpan.FromDays(365),

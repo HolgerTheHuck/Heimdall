@@ -131,7 +131,12 @@ if (opts.Dashboard.Enabled) app.MapHeimdallDashboard(opts.Dashboard.Prefix);
 if (opts.Otlp.Http.Enabled) app.MapHeimdallOtlp(opts.Otlp.Http.Prefix);
 if (opts.Prometheus.Enabled) app.MapHeimdallPrometheus(opts.Prometheus.Prefix);
 if (opts.Otlp.Grpc.Enabled) app.MapHeimdallOtlpGrpc();   // gRPC-Wire-Path ist proto-fixiert (kein Prefix)
-app.MapGet("/", () => Results.Redirect(opts.Dashboard.Enabled ? opts.Dashboard.Prefix : "/otel", permanent: false));
+// Root-Redirect PathBase-bewusst: unter IIS-Unterverzeichnis/Proxy-Pfad-Strip muss
+// die Location das Deployment-Verzeichnis mitschleppen — sonst looped sie (externe
+// {PathBase}/ → interne / → Location {Prefix} → externer Site-Root → interne / …).
+app.MapGet("/", (HttpContext ctx) => Results.Redirect(
+    Heimdall.Blazor.HeimdallUiPaths.FullPrefix(ctx, opts.Dashboard.Enabled ? opts.Dashboard.Prefix : "/otel"),
+    permanent: false));
 
 // Demo-Daten rein additiv seeden (DB bleibt erhalten).
 if (opts.SeedDemoData) HeimdallSeeder.SeedDemoData(sink);

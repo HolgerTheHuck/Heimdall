@@ -3,10 +3,12 @@
    Panel auch bei Direct-Nav/No-JS stylt; in die Host-Page injiziert wird sie
    vom Browser deduped. Der Lazy-Loader tauscht einen Platzhalter per
    outerHTML gegen dieses Fragment aus — danach greift das bestehende
-   Chart-Enhancement per Event-Delegation automatisch (kein Re-Init). *@
+   Chart-Enhancement per Event-Delegation automatisch (kein Re-Init). Asset-
+   URL mit Request-PathBase (IIS-Unterverzeichnis/Proxy-Pfad-Strip). *@
 @using Heimdall.Blazor.Grafana
+@inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
 
-<link rel="stylesheet" href="/_content/Heimdall.Blazor/css/heimdall.css" />
+<link rel="stylesheet" href="@AssetPath" />
 <GrafanaPanelView Panel="@Panel" BasePath="@BasePath" />
 
 @code {
@@ -14,4 +16,7 @@
 
     /// <summary>Mount-Pfad des Dashboards (für Trace-Links in Log-Zeilen).</summary>
     [Parameter] public string BasePath { get; set; } = "/otel";
+
+    private string AssetPath =>
+        HeimdallUiPaths.AssetBase(Http.HttpContext) + "/_content/Heimdall.Blazor/css/heimdall.css";
 }

@@ -137,12 +137,16 @@ public sealed class HeimdallAuthMiddleware
             return;
         }
 
-        // Browser-Nutzer: Redirect auf Login-Seite.
+        // Browser-Nutzer: Redirect auf Login-Seite. Location + returnUrl tragen
+        // die Request-PathBase (IIS-Unterverzeichnis/Proxy-Pfad-Strip): der Browser
+        // löst relative Locations gegen das Domain-Root auf — ohne PathBase würde
+        // der Redirect am Site-Root landen (404) bzw. loopen.
         if (req.Method.Equals("GET", StringComparison.OrdinalIgnoreCase) ||
             req.Method.Equals("HEAD", StringComparison.OrdinalIgnoreCase))
         {
-            var returnUrl = path + req.QueryString.Value;
-            var loginUrl = _auth.LoginPath + "?returnUrl=" + Uri.EscapeDataString(returnUrl);
+            var pb = context.Request.PathBase.Value ?? string.Empty;
+            var returnUrl = pb + path + req.QueryString.Value;
+            var loginUrl = pb + _auth.LoginPath + "?returnUrl=" + Uri.EscapeDataString(returnUrl);
             context.Response.Redirect(loginUrl);
             return;
         }

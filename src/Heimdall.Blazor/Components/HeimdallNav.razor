@@ -44,13 +44,28 @@
     public Microsoft.AspNetCore.Http.HttpContext? HttpContext { get; set; }
 
     private string? _path;
+    private string _inAppBase = "/otel";
 
     protected override void OnInitialized()
-        => _path = HttpContext?.Request.Path.Value ?? null;
+    {
+        _path = HttpContext?.Request.Path.Value ?? null;
+        // BasePath trägt den externen Prefix (PathBase + Prefix, HeimdallUiPaths).
+        // Der Request-Pfad ist in-app (ohne PathBase) — für die aktive-Markierung
+        // und die Tab-Vergleiche deshalb den In-App-Anteil rekonstruieren.
+        var pb = HttpContext?.Request.PathBase.Value ?? "";
+        _inAppBase = pb.Length > 0 && BasePath.StartsWith(pb, StringComparison.Ordinal)
+            ? BasePath[pb.Length..] : BasePath;
+        if (_inAppBase.Length == 0) _inAppBase = "/";
+    }
 
-    /// <summary>Aktuelle Request-URL (Pfad + Query) als Return-Ziel für /lang.</summary>
+    /// <summary>Aktuelle Request-URL (PathBase + Pfad + Query) als Return-Ziel für /lang
+    /// — extern auflösbar, damit der /lang-Redirect beim Deployment unter einem
+    /// Pfad-Prefix nicht am Site-Root landet.</summary>
     private string CurrentUrl
-        => (HttpContext?.Request.Path.Value ?? BasePath) + (HttpContext?.Request.QueryString.Value ?? "");
+        => (HttpContext is null
+                ? BasePath
+                : HttpContext.Request.PathBase.Value + HttpContext.Request.Path.Value)
+           + (HttpContext?.Request.QueryString.Value ?? "");
 
     /// <summary>
     /// Liefert "page", wenn der Tab-Pfad der aktuelle Request-Pfad ist (Root-Tab:
@@ -59,9 +74,9 @@
     private string? Active(string tabSuffix)
     {
         if (string.IsNullOrEmpty(_path)) return null;
-        var tabPath = BasePath + tabSuffix;
+        var tabPath = _inAppBase + tabSuffix;
         if (tabSuffix.Length == 0)
-            return _path == BasePath || _path == BasePath + "/" ? "page" : null;
+            return _path == _inAppBase || _path == _inAppBase + "/" ? "page" : null;
         return _path.StartsWith(tabPath + "/", StringComparison.Ordinal) || _path == tabPath ? "page" : null;
     }
 

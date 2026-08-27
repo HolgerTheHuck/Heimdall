@@ -66,8 +66,30 @@ public abstract class HostBootTestBase : IDisposable
         if (!_envKeys.Contains(key)) _envKeys.Add(key);
     }
 
+    /// <summary>
+    /// Simuliert ein Deployment hinter einem Pfad-Prefix (IIS-Sub-Application /
+    /// Reverse-Proxy mit Pfad-Strip): setzt <c>TestServer.BaseAddress</c> — dessen
+    /// Pfadkomponente wird auf allen Requests als <c>Request.PathBase</c> gesetzt,
+    /// exakt wie das ASP.NET Core Module es bei einer IIS-Sub-Application tut. Muss
+    /// vor dem ersten Client-Zugriff (lazily Host-Boot) aufgerufen werden.
+    /// </summary>
+    protected void UsePathBase(string pathBase) =>
+        _factory.Server.BaseAddress = new Uri("http://localhost" + pathBase + "/");
+
     /// <summary>HTTP-Client auf den TestServer-Host (löst den Host-Boot lazily aus).</summary>
     protected HttpClient Client => _factory.CreateClient();
+
+    /// <summary>
+    /// HTTP-Client mit eigener BaseAddress: der TestServer setzt den Basis-Pfad als
+    /// <c>Request.PathBase</c> — genau das, was ANCM bei einer IIS-Sub-Application
+    /// tut. Basis für die PathBase-Deployment-Tests (<see cref="HostPathBaseTests"/>).
+    /// </summary>
+    protected HttpClient CreateClient(Uri baseAddress, bool allowAutoRedirect = true) =>
+        _factory.CreateClient(new WebApplicationFactoryClientOptions
+        {
+            BaseAddress = baseAddress,
+            AllowAutoRedirect = allowAutoRedirect,
+        });
 
     /// <summary>HTTP-Client OHNE Auto-Redirect (für 302-Assertions).</summary>
     protected HttpClient ClientNoRedirect =>

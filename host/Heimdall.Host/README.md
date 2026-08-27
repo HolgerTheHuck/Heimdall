@@ -77,6 +77,19 @@ Trimming explizit **aus** (gRPC-Codegen + Protobuf-Reflection + Razor-Discovery 
 trim-unfreundlich). Single-File ist unkritisch. Ohne `--self-contained` ergibt ein
 framework-dependent Deployment ein kleineres Paket (benötigt die .NET-10-Runtime auf dem Ziel).
 
+## Deployment unter Pfad-Prefix (IIS-Unterverzeichnis / Reverse-Proxy)
+
+Das Deployment als IIS-Sub-Application (z. B. Site `/` → App `/otel`) oder hinter einem
+Reverse-Proxy mit Pfad-Strip funktioniert ohne Zusatzkonfiguration: alle generierten
+UI-URLs tragen die `Request.PathBase` (`HeimdallUiPaths`). Konfig-Prefixe (`Otlp:Http`,
+`Prometheus`, `Dashboard`, `Auth`) bleiben **in-app-relativ** — bei Sub-App `/otel` und
+Prefix `/otel` liegt das Dashboard extern unter `/otel/otel`, die UI-Links und Assets
+passen automatisch. Exporter/Grafana zeigen auf die externen URLs
+(`http://host/otel/v1/…`, `http://host/otel/api/v1/…`).
+
+Einschränkungen unter IIS/ANCM: gRPC (h2c, Port 4317) ist hinter IIS nicht erreichbar —
+`Otlp:Grpc:Enabled=false` setzen und via OTLP/HTTP exportieren.
+
 ## Docker (SQLite-only)
 
 Der Walhalla-Backend-Zweig liegt als Cross-Repo-Referenz außerhalb des Build-Contexts und

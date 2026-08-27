@@ -56,3 +56,5 @@ artifacts/
 
 ## Session- & Arbeitsnotizen (lokal, nicht ins Repo)
 SESSION_STATUS.md
+## Publish-Output (lokales IIS-Deployment)
+publish/
