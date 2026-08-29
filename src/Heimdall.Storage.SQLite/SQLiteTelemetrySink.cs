@@ -264,12 +264,21 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         sb.Append("FROM heim_spans WHERE 1=1");
         var ps = new List<SqliteParameter>();
         AddRange(sb, ps, filter);
-        if (filter.ServiceName is not null)
+        if (filter.ServiceName is not null || filter.ServiceVersion is not null)
         {
-            // ESCAPE '\' aktiviert das EscJson-Escaping (vorher wirkungslos, da
-            // SQLite ohne ESCAPE-Klausel Backslash als normales Zeichen behandelt).
-            sb.Append(" AND trace_id IN (SELECT trace_id FROM heim_spans WHERE resource_json LIKE @svc ESCAPE '\\')");
-            ps.Add(Param("@svc", "%" + EscJson(filter.ServiceName) + "%"));
+            // Service-/Version-Filter index-gestuetzt ueber heim_span_attrs (statt
+            // frueherem resource_json LIKE — Full-Scan mit Substring-Semantik).
+            // INTERSECT erzwingt Paar-Semantik auf DEMSELBEN Span (Name+Version
+            // zusammen), nicht „irgendein Span hat den Namen, irgendein die Version".
+            // Semantik-Aenderung: exakter Match statt Substring — alte Bookmarks
+            // mit Teil-Strings filtern strenger.
+            sb.Append(" AND trace_id IN (SELECT trace_id FROM heim_spans WHERE rowid IN (" +
+                      "SELECT span_rowid FROM heim_span_attrs WHERE key IN ('service.name','service_name') AND value = @svc");
+            if (filter.ServiceVersion is not null)
+                sb.Append(" INTERSECT SELECT span_rowid FROM heim_span_attrs WHERE key IN ('service.version','service_version') AND value = @svcver");
+            sb.Append("))");
+            if (filter.ServiceName is not null) ps.Add(Param("@svc", filter.ServiceName));
+            if (filter.ServiceVersion is not null) ps.Add(Param("@svcver", filter.ServiceVersion));
         }
         if (filter.NameContains is not null)
         {
@@ -358,6 +367,19 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     public IReadOnlyList<LogRow> SearchLogs(LogSearch search)
     {
         search ??= new LogSearch();
+        // Dedizierte Service-/Version-Felder (Dropdown der UI) intern auf AttrFilter
+        // abbilden -> derselbe index-gestuetzte Pfad, UND-verknuepft mit den
+        // LogQL-Feldfiltern aus AttrFilters (Konfliktfall, z. B. q={service.name="a"}
+        // + Dropdown "b", liefert leer — vorhersagbar, keine Merge-Magie).
+        if (search.ServiceName is not null || search.ServiceVersion is not null)
+        {
+            var filters = new List<AttrFilter>(search.AttrFilters ?? (IReadOnlyList<AttrFilter>)Array.Empty<AttrFilter>());
+            if (search.ServiceName is not null)
+                filters.Add(new AttrFilter("service.name", "=", search.ServiceName));
+            if (search.ServiceVersion is not null)
+                filters.Add(new AttrFilter("service.version", "=", search.ServiceVersion));
+            search = search with { AttrFilters = filters };
+        }
         var sb = SqlBuilder();
         sb.Append("SELECT ts_unix_nano, trace_id, span_id, severity, severity_text, body, attrs_json, scope_name FROM heim_logs WHERE 1=1");
         var ps = new List<SqliteParameter>();
@@ -547,9 +569,6 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
 
     private static SqliteParameter Param(string name, object value) => new SqliteParameter(name, value);
 
-    // Escapen fuer LIKE-basierte JSON-Suche (Backslash/Percent/Underscore; JSON-Quotes bleiben unveraendert).
-    private static string EscJson(string s) => s.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_");
-
     /// <summary>
     /// Sanitisiert FTS5-MATCH-User-Input. FTS5 wirft bei unbalancierten
     /// doppelten Quotes, ungeschlossenen Phrasen oder ungültigen Token-Syntax
@@ -665,6 +684,64 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
              "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.attrs_json) e " +
              "UNION ALL " +
              "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.resource_json) e; END");
+
+        // Span-Attr-Index: exaktes Pendant zu heim_log_attrs, expandiert Span- UND
+        // Resource-Attribute (service.name/service.version sitzen in resource_json)
+        // in eine Zeile pro (span_rowid, key, value). Basis fuer Service-/Version-
+        // Filter und -Discovery auf Traces. Additiv (CREATE IF NOT EXISTS, kein
+        // user_version-Bump); Bestands-DBs fuellt BackfillSpanAttrs() nach.
+        Exec("CREATE TABLE IF NOT EXISTS heim_span_attrs (" +
+             "span_rowid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, " +
+             "PRIMARY KEY (span_rowid, key, value))");
+        Exec("CREATE INDEX IF NOT EXISTS idx_heim_span_attrs_kv ON heim_span_attrs(key, value)");
+        Exec("CREATE INDEX IF NOT EXISTS idx_heim_span_attrs_span ON heim_span_attrs(span_rowid)");
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_span_attrs_ai AFTER INSERT ON heim_spans BEGIN " +
+             "INSERT OR IGNORE INTO heim_span_attrs(span_rowid, key, value) " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.attrs_json) e " +
+             "UNION ALL " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.resource_json) e; END");
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_span_attrs_ad AFTER DELETE ON heim_spans BEGIN " +
+             "DELETE FROM heim_span_attrs WHERE span_rowid = old.rowid; END");
+        Exec("CREATE TRIGGER IF NOT EXISTS heim_span_attrs_au AFTER UPDATE ON heim_spans BEGIN " +
+             "DELETE FROM heim_span_attrs WHERE span_rowid = old.rowid; " +
+             "INSERT OR IGNORE INTO heim_span_attrs(span_rowid, key, value) " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.attrs_json) e " +
+             "UNION ALL " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.resource_json) e; END");
+        BackfillSpanAttrs();
+    }
+
+    /// <summary>
+    /// Backfill der Span-Attr-Tabelle fuer Bestands-DBs, die vor Anlage von
+    /// heim_span_attrs Span-Telemetrie geschrieben haben (Trigger gab es dort
+    /// noch nicht). Guard: nur wenn die Attr-Tabelle LEER ist und Spans
+    /// existieren — danach halten die Trigger synchron, Retention-Loeschungen
+    /// kaskadieren ueber den ad-Trigger. Idempotent dank INSERT OR IGNORE;
+    /// auf frischen DBs No-Op.
+    /// </summary>
+    private void BackfillSpanAttrs()
+    {
+        try
+        {
+            // Guard einmalig in C# pruefen (nicht per SQL-WHERE im INSERT): der erste
+            // INSERT-Zweig fuellt die Tabelle bereits, ein zweiter WHERE-NOT-EXISTS-
+            // Zweig wuerde deshalb nie laufen. Leer -> beide JSON-Spalten nachfuellen.
+            long hasAttrs;
+            using (var cmd = new SqliteCommand("SELECT EXISTS (SELECT 1 FROM heim_span_attrs LIMIT 1)", _conn))
+                hasAttrs = (long)cmd.ExecuteScalar()!;
+            if (hasAttrs != 0) return;
+
+            Exec("INSERT OR IGNORE INTO heim_span_attrs(span_rowid, key, value) " +
+                 "SELECT s.rowid, e.key, CAST(e.value AS TEXT) FROM heim_spans s, json_each(s.attrs_json) e " +
+                 "UNION ALL " +
+                 "SELECT s.rowid, e.key, CAST(e.value AS TEXT) FROM heim_spans s, json_each(s.resource_json) e");
+        }
+        catch
+        {
+            // Tolerant (Muster BackfillMetricSeries): ein fehlgeschlagener Backfill
+            // darf den Bootstrap nicht sprengen — neue Zeilen expandieren die Trigger
+            // ab jetzt selbst, nur der Alt-Bestand bliebe unindiziert.
+        }
     }
 
     /// <summary>

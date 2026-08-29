@@ -8,7 +8,36 @@
 
     <form class="hmd-filters" method="get" action="@(BasePath + "/traces")">
         <label>@I18n.T("traces.filter.name") <input type="search" name="name" value="@NameContains" placeholder="checkout" /></label>
-        <label>@I18n.T("traces.filter.service") <input type="search" name="svc" value="@ServiceName" placeholder="shop" /></label>
+        @* Service-/Version-Dropdown (Discovery aus Logs ∪ Spans im Zeitraum, siehe
+           OnInitialized). Param-Name svc bleibt (alte Bookmarks funktionieren — nur
+           mit exakter statt frueherer Substring-Semantik). Version haengt am
+           Service: ohne Service disabled, mit Service nur dessen Versionen;
+           Abhaengigkeit wirkt beim naechsten Submit (kein JS). *@
+        <label>@I18n.T("traces.filter.service")
+            <select name="svc">
+                <option value="" selected="@(ServiceName is null)">@I18n.T("traces.status.all")</option>
+                @foreach (var s in _services)
+                {
+                    <option value="@s" selected="@(s == ServiceName)">@s</option>
+                }
+            </select>
+        </label>
+        <label>@I18n.T("traces.filter.version")
+            <select name="ver" disabled="@(ServiceName is null)">
+                @if (ServiceName is null)
+                {
+                    <option value="">—</option>
+                }
+                else
+                {
+                    <option value="" selected="@(ServiceVersion is null)">@I18n.T("traces.status.all")</option>
+                    @foreach (var v in _versions)
+                    {
+                        <option value="@v" selected="@(v == ServiceVersion)">@v</option>
+                    }
+                }
+            </select>
+        </label>
         <label>@I18n.T("traces.filter.status")
             <select name="err">
                 <option value="" selected="@(HasError is null)">@I18n.T("traces.status.all")</option>
@@ -77,6 +106,8 @@
     [Parameter] public string BasePath { get; set; } = "/otel";
     [Parameter] public string? NameContains { get; set; }
     [Parameter] public string? ServiceName { get; set; }
+    // Version-Dropdown (abhaengig vom Service — nur dessen Versionen).
+    [Parameter] public string? ServiceVersion { get; set; }
     [Parameter] public bool? HasError { get; set; }
     [Parameter] public int Limit { get; set; } = 100;
     [Parameter] public int Offset { get; set; } = 0;
@@ -87,6 +118,8 @@
     [Parameter] public string? Dir { get; set; }
 
     private System.Collections.Generic.List<Heimdall.TraceSummary> _traces = new();
+    private System.Collections.Generic.List<string> _services = new();
+    private System.Collections.Generic.List<string> _versions = new();
     private int _pageSize;
     private bool _hasMore;
     // Effektive Sortierung (normalisiert): Langläufer zuerst als Default.
@@ -99,12 +132,26 @@
         _pageSize = Limit < 1 ? 100 : Limit;
         _sort = Sort switch { "start" or "duration" or "spans" or "status" => Sort, _ => "duration" };
         _dir = string.Equals(Dir, "asc", System.StringComparison.OrdinalIgnoreCase) ? "asc" : "desc";
+
+        // Dropdown-Wertemengen + Sanitierung (Werte ausserhalb der Discovery-Liste
+        // fallen auf „alle" zurueck — alte Bookmarks, Tippfehler, stale ver nach
+        // Service-Wechsel im noch nicht neu geladenen DOM).
+        _services = new System.Collections.Generic.List<string>(Query.ListServiceNames(range.From, range.To));
+        if (ServiceName is not null && !_services.Contains(ServiceName)) ServiceName = null;
+        if (ServiceName is null) ServiceVersion = null;
+        else
+        {
+            _versions = new System.Collections.Generic.List<string>(Query.ListServiceVersions(ServiceName, range.From, range.To));
+            if (ServiceVersion is not null && !_versions.Contains(ServiceVersion)) ServiceVersion = null;
+        }
+
         var f = new Heimdall.TraceFilter
         {
             FromUnixNano = range.From,
             ToUnixNano = range.To,
             NameContains = string.IsNullOrWhiteSpace(NameContains) ? null : NameContains,
-            ServiceName = string.IsNullOrWhiteSpace(ServiceName) ? null : ServiceName,
+            ServiceName = ServiceName,
+            ServiceVersion = ServiceVersion,
             HasError = HasError,
             Limit = _pageSize,
             Offset = Offset < 0 ? 0 : Offset,
@@ -152,6 +199,7 @@
         var parts = new System.Collections.Generic.List<string>();
         if (!string.IsNullOrEmpty(NameContains)) parts.Add("name=" + System.Uri.EscapeDataString(NameContains));
         if (!string.IsNullOrEmpty(ServiceName)) parts.Add("svc=" + System.Uri.EscapeDataString(ServiceName));
+        if (!string.IsNullOrEmpty(ServiceVersion)) parts.Add("ver=" + System.Uri.EscapeDataString(ServiceVersion));
         if (HasError is bool h) parts.Add("err=" + (h ? "1" : "0"));
         parts.Add("limit=" + _pageSize.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (o > 0) parts.Add("offset=" + o.ToString(System.Globalization.CultureInfo.InvariantCulture));

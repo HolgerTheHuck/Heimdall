@@ -188,7 +188,9 @@ public class HeimdallUiTests : HostBootTestBase
     [Theory]
     [InlineData("/otel/logs?sev=&limit=&from=&to=&preset=1h")]      // User-Repro: Zeit-Button auf /logs
     [InlineData("/otel/logs?sev=&limit=200&text=&q=")]
+    [InlineData("/otel/logs?svc=&ver=&limit=&from=&to=&preset=1h")] // Selects schicken „alle" als Leerstring mit
     [InlineData("/otel/traces?limit=&offset=&from=&to=&preset=24h")]
+    [InlineData("/otel/traces?svc=&ver=&limit=&from=&to=&preset=24h")]
     [InlineData("/otel/metrics?limit=&from=&to=&name=orders")]
     [InlineData("/otel/endpoints?limit=&from=&to=&preset=1h")]
     [InlineData("/otel/alerts?limit=&from=&to=&preset=1h")]
@@ -291,6 +293,155 @@ public class HeimdallUiTests : HostBootTestBase
         var body = await (await Client.GetAsync("/otel/logs?q=" + System.Uri.EscapeDataString("{http.route=~\"^/api/.*\"} |= \"timeout\""))).Content.ReadAsStringAsync();
         Assert.Contains("db timeout in query", body);
         Assert.DoesNotContain("order placed", body);
+    }
+
+    // === Service-/Version-Dropdowns (Logs + Traces) =======================
+
+    /// <summary>
+    /// Seed-Helfer: Logs + Spans mit service.name (+ optional service.version).
+    /// Zeitstempel 60s in der Vergangenheit (NowUnixNano() trunkiert auf
+    /// Sekunden — sicher im 1h-Default-Fenster, Muster der Tests oben).
+    /// </summary>
+    private static long SeedNowNs() =>
+        System.DateTimeOffset.UtcNow.ToUnixTimeMilliseconds() * 1_000_000L - 60_000_000_000L;
+
+    private static HLogRecord SeedLog(long t, string body, string svc, string? ver = null) =>
+        new(t, HSeverity.Info, "INFO", body, null, null, System.Array.Empty<HAttribute>(),
+            ver is null
+                ? new HResource(new[] { new HAttribute("service.name", svc) })
+                : new HResource(new[] { new HAttribute("service.name", svc), new HAttribute("service.version", ver) }),
+            null);
+
+    private static HSpan SeedSpan(byte[] tid, byte[] sid, string svc, string? ver = null) =>
+        new(tid, sid, null, "op", HSpanKind.Server,
+            SeedNowNs(), SeedNowNs() + 1_000_000, HStatusCode.Ok, null,
+            System.Array.Empty<HAttribute>(), System.Array.Empty<HSpanEvent>(), System.Array.Empty<HSpanLink>(),
+            ver is null
+                ? new HResource(new[] { new HAttribute("service.name", svc) })
+                : new HResource(new[] { new HAttribute("service.name", svc), new HAttribute("service.version", ver) }),
+            null);
+
+    /// <summary>
+    /// Das Service-Dropdown listet die Discovery-Menge aus Logs UND Spans —
+    /// ein Service, der nur Traces schickt („traceonly"), taucht ebenfalls auf.
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_ServiceDropdown_ListetServicesAusLogsUndSpans()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var t = SeedNowNs();
+        sink.WriteLogs(new[] { SeedLog(t, "msg-shop", "shop") });
+        sink.WriteSpans(new[] { SeedSpan(TraceId, RootSpanId, "traceonly") });
+
+        var body = await (await Client.GetAsync("/otel/logs")).Content.ReadAsStringAsync();
+        Assert.Contains("<select name=\"svc\"", body);
+        Assert.Contains("value=\"shop\"", body);            // Log-seitiger Discovery-Zweig
+        Assert.Contains("value=\"traceonly\"", body);       // Span-seitiger Discovery-Zweig
+    }
+
+    /// <summary>
+    /// Das Version-Dropdown ist abhängig vom Service: ohne svc disabled mit
+    /// Platzhalter, mit svc=shop nur die Versionen von shop (v1/v2 — nicht
+    /// die billing-Version v9).
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_VersionDropdown_AbhaengigVomService()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var t = SeedNowNs();
+        sink.WriteLogs(new[]
+        {
+            SeedLog(t,     "msg-shop-v1", "shop",    "v1"),
+            SeedLog(t + 1, "msg-shop-v2", "shop",    "v2"),
+            SeedLog(t + 2, "msg-bill-v9", "billing", "v9"),
+        });
+
+        var ohneSvc = await (await Client.GetAsync("/otel/logs")).Content.ReadAsStringAsync();
+        Assert.Contains("<select name=\"ver\" disabled", ohneSvc);   // kein Service -> keine Version
+
+        var mitSvc = await (await Client.GetAsync("/otel/logs?svc=shop")).Content.ReadAsStringAsync();
+        Assert.Contains("value=\"v1\"", mitSvc);
+        Assert.Contains("value=\"v2\"", mitSvc);
+        Assert.DoesNotContain("value=\"v9\"", mitSvc);               // nur Versionen DES Service
+    }
+
+    /// <summary>
+    /// Filter-Wirkung: <c>?svc=shop&ver=v2</c> zeigt nur das shop/v2-Log;
+    /// <c>?svc=shop</c> alle shop-Logs. UND mit dem LogQL-Feldfilter bleibt
+    /// erhalten (Konflikt = leere Menge, keine Merge-Magie).
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_FiltertAufServiceUndVersion()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var t = SeedNowNs();
+        sink.WriteLogs(new[]
+        {
+            SeedLog(t,     "msg-shop-v1", "shop",    "v1"),
+            SeedLog(t + 1, "msg-shop-v2", "shop",    "v2"),
+            SeedLog(t + 2, "msg-bill-v1", "billing", "v1"),
+        });
+
+        var pair = await (await Client.GetAsync("/otel/logs?svc=shop&ver=v2")).Content.ReadAsStringAsync();
+        Assert.Contains("msg-shop-v2", pair);
+        Assert.DoesNotContain("msg-shop-v1", pair);
+        Assert.DoesNotContain("msg-bill-v1", pair);   // gleiches v1, aber anderer Service
+
+        var svc = await (await Client.GetAsync("/otel/logs?svc=shop")).Content.ReadAsStringAsync();
+        Assert.Contains("msg-shop-v1", svc);
+        Assert.Contains("msg-shop-v2", svc);
+        Assert.DoesNotContain("msg-bill-v1", svc);
+    }
+
+    /// <summary>
+    /// Sanitierung: eine Version, die es beim gewählten Service nicht gibt
+    /// (stale DOM: Service gewechselt, altes ver mit submittet; oder alter
+    /// Bookmark), wird auf „alle" zurückgesetzt — die Seite bleibt 200 und
+    /// zeigt die Service-Logs ohne Versions-Filter.
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_StaleVersionWirdSanitiert()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var t = SeedNowNs();
+        sink.WriteLogs(new[]
+        {
+            SeedLog(t,     "msg-shop-v1", "shop",    "v1"),
+            SeedLog(t + 1, "msg-bill-v2", "billing", "v2"),
+        });
+
+        var resp = await Client.GetAsync("/otel/logs?svc=shop&ver=v2");   // v2 nur bei billing
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("msg-shop-v1", body);          // Versions-Filter fiel weg, Service blieb
+    }
+
+    /// <summary>
+    /// Traces-Seite: Service-Dropdown filtert exakt (kein Substring mehr) —
+    /// der Billing-Trace verschwindet, der Shop-Trace bleibt.
+    /// </summary>
+    [Fact]
+    public async Task TracesSeite_ServiceDropdownFiltert()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var billingTid = new byte[] { 0xb2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+        sink.WriteSpans(new[]
+        {
+            SeedSpan(TraceId, RootSpanId, "shop"),
+            SeedSpan(billingTid, RootSpanId, "billing"),
+        });
+
+        var body = await (await Client.GetAsync("/otel/traces?svc=billing")).Content.ReadAsStringAsync();
+        Assert.Contains("b201020304050607", body);      // Billing-Trace (Href + Truncate)
+        Assert.DoesNotContain("b101020304050607", body); // Shop-Trace gefiltert
+
+        // Unbekannter/Teil-Service ("bil") wird von der Sanitierung auf „alle"
+        // zurueckgesetzt (Bookmarks/Tippfehler) — alle Traces sichtbar. Die
+        // exakt-statt-Substring-Semantik beweist der Storage-Test
+        // (ListTraces_ServiceName_ExaktStattSubstring).
+        var exakt = await (await Client.GetAsync("/otel/traces?svc=bil")).Content.ReadAsStringAsync();
+        Assert.Contains("b201020304050607", exakt);
+        Assert.Contains("b101020304050607", exakt);
     }
 
     private static HMetricPoint MetricPoint(string name, long tNs, double value) =>

@@ -66,12 +66,15 @@ public sealed record MetricRow(
 /// Paging (damit z. B. die Langläufer-Top über alle Seiten sichtbar werden,
 /// nicht nur innerhalb einer Seite). <c>Sort</c> ∈ start/duration/spans/status
 /// (Allowlist im SQLite-Backend), <c>Dir</c> ∈ asc/desc; null = bisher
-/// (neueste zuerst, first_start DESC).</summary>
+/// (neueste zuerst, first_start DESC). <c>ServiceName</c>/<c>ServiceVersion</c>
+/// greifen auf die Resource-Attribute zu (Paar-Semantik auf demselben Span);
+/// der SQLite-Backend filtert sie indexgestuetzt exakt (kein Substring).</summary>
 public sealed record TraceFilter(
     long? FromUnixNano = null,
     long? ToUnixNano = null,
     bool? HasError = null,
     string? ServiceName = null,
+    string? ServiceVersion = null,
     string? NameContains = null,
     int Limit = 100,
     int Offset = 0,
@@ -101,7 +104,11 @@ public sealed record AttrFilter(string Key, string Op, string Value);
 /// <summary>Filter fuer Log-Suche (text = Freitext via FTS).
 /// <c>AttrFilters</c> (optional, default null = kein Feldfilter = heutiges
 /// Verhalten) erlaubt index-gestuetzte Feldsuche in den OTel-Attributen
-/// (Loki/LogQL-Stream-Selector-Semantik); additiv, kein Vertragsbruch.</summary>
+/// (Loki/LogQL-Stream-Selector-Semantik); additiv, kein Vertragsbruch.
+/// <c>ServiceName</c>/<c>ServiceVersion</c> sind dedizierte Feldfilter auf den
+/// Resource-Attribute (Paar-Semantik auf derselben Log-Zeile) — das Backend
+/// bildet sie intern auf <see cref="AttrFilter"/> ab, d. h. UND-verknuepft
+/// mit <c>AttrFilters</c> und allem anderen.</summary>
 public sealed record LogSearch(
     string? Text = null,
     int? MinSeverity = null,
@@ -109,6 +116,8 @@ public sealed record LogSearch(
     long? ToUnixNano = null,
     string? TraceId = null,
     IReadOnlyList<AttrFilter>? AttrFilters = null,
+    string? ServiceName = null,
+    string? ServiceVersion = null,
     int Limit = 200,
     int Offset = 0,
     string? Sort = null,
@@ -132,5 +141,20 @@ public interface IHeimdallQuery
     /// bedient dies über seine vorhandene <see cref="Heimdall.IHeimdallMetricSource"/>-Logik.
     /// Additiv als Default-Interface-Method -> nicht-brechend für bestehende Implementierer.</summary>
     IReadOnlyList<string> ListMetricNames(long? fromUnixNano = null, long? toUnixNano = null)
+        => System.Array.Empty<string>();
+
+    /// <summary>Alle distinkten <c>service.name</c>-Werte (Logs UND Spans) im
+    /// Zeitfenster (null = global). Default-Implementierung leer (für Backends
+    /// ohne Discovery) -> additiv, nicht-brechend für bestehende Implementierer.
+    /// Basis für das Service-Dropdown der UI.</summary>
+    IReadOnlyList<string> ListServiceNames(long? fromUnixNano = null, long? toUnixNano = null)
+        => System.Array.Empty<string>();
+
+    /// <summary>Alle <c>service.version</c>-Werte, die für genau diesen
+    /// <c>service.name</c> vorkommen (Paar-Semantik: beide Keys auf derselben
+    /// Log-/Span-Zeile). Leerer/null-Service -> leere Liste. Default-Implementierung
+    /// leer -> additiv, nicht-brechend. Basis für das abhängige Versions-Dropdown.</summary>
+    IReadOnlyList<string> ListServiceVersions(string serviceName,
+        long? fromUnixNano = null, long? toUnixNano = null)
         => System.Array.Empty<string>();
 }

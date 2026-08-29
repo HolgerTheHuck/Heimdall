@@ -179,6 +179,7 @@ public static class HeimdallI18n
         // --- Traces-Seite ----------------------------------------------------
         ["traces.filter.name"]    = Lang("Name enthält", "Name contains", "Le nom contient"),
         ["traces.filter.service"] = Lang("Service", "Service", "Service"),
+        ["traces.filter.version"] = Lang("Version", "Version", "Version"),
         ["traces.filter.status"]  = Lang("Status", "Status", "Statut"),
         ["traces.filter.limit"]   = Lang("Limit", "Limit", "Limite"),
         ["traces.filter.submit"]  = Lang("Filtern", "Filter", "Filtrer"),
@@ -272,6 +273,8 @@ public static class HeimdallI18n
         ["logs.filter.search"]    = Lang("Suche", "Search", "Recherche"),
         ["logs.filter.text"]      = Lang("Text", "Text", "Texte"),
         ["logs.filter.severity"]  = Lang("Min. Severity", "Min. severity", "Sév. min."),
+        ["logs.filter.service"]   = Lang("Service", "Service", "Service"),
+        ["logs.filter.version"]   = Lang("Version", "Version", "Version"),
         ["logs.filter.submit"]    = Lang("Suchen", "Search", "Rechercher"),
         ["logs.expand"]           = Lang("alle aufklappen", "expand all", "tout déplier"),
         ["logs.syntax.prefix"]    = Lang("Syntax:", "Syntax:", "Syntaxe :"),

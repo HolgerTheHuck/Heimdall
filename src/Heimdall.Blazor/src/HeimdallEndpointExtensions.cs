@@ -102,12 +102,14 @@ public static class HeimdallEndpointExtensions
         group.MapGet("/drilldown", (HttpContext ctx) =>
             new RazorComponentResult<DrilldownPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix) }));
 
-        group.MapGet("/traces", (HttpContext ctx, string? name, string? svc, string? err, string? limit, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
+        group.MapGet("/traces", (HttpContext ctx, string? name, string? svc, string? ver, string? err, string? limit, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
             new RazorComponentResult<TracesPage>(new
             {
                 BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 NameContains = name,
-                ServiceName = svc,
+                // Selects schicken bei „alle" leere Values mit -> null.
+                ServiceName = NullIfEmpty(svc ?? ""),
+                ServiceVersion = NullIfEmpty(ver ?? ""),
                 HasError = ParseErr(err),
                 Limit = ParseInt(limit) ?? 100,
                 Offset = ParseInt(offset) ?? 0,
@@ -121,13 +123,17 @@ public static class HeimdallEndpointExtensions
         group.MapGet("/trace/{tid}", (HttpContext ctx, string tid) =>
             new RazorComponentResult<TraceDetailPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), TraceId = tid }));
 
-        group.MapGet("/logs", (HttpContext ctx, string? text, string? q, string? sev, string? limit, string? expand, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
+        group.MapGet("/logs", (HttpContext ctx, string? text, string? q, string? sev, string? svc, string? ver, string? limit, string? expand, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
             new RazorComponentResult<LogsPage>(new
             {
                 BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 Text = text,
                 Query1 = q,
                 MinSeverity = ParseInt(sev),
+                // Selects schicken bei „alle" leere Values mit -> null, sonst
+                // wuerde ein leerer String als Filterwert interpretiert.
+                ServiceName = NullIfEmpty(svc ?? ""),
+                ServiceVersion = NullIfEmpty(ver ?? ""),
                 Limit = ParseInt(limit) ?? 200,
                 Expand = expand == "1",
                 Offset = ParseInt(offset) ?? 0,

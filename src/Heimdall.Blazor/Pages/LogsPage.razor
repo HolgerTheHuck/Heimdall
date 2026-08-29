@@ -25,6 +25,36 @@
                 <option value="21" selected="@(MinSeverity == 21)">FATAL</option>
             </select>
         </label>
+        @* Service-/Version-Dropdown (Discovery, siehe OnInitialized). Version haengt
+           am Service: ohne Service disabled (kein Wert), mit Service nur die
+           Versionen DIESES Service. Abhaengigkeit ohne JS: der Service-Wechsel
+           wirkt beim naechsten Submit (Zeit-Preset oder „Suchen"), der Server
+           rendert dann die Versionsliste des neuen Service. *@
+        <label>@I18n.T("logs.filter.service")
+            <select name="svc">
+                <option value="" selected="@(ServiceName is null)">@I18n.T("traces.status.all")</option>
+                @foreach (var s in _services)
+                {
+                    <option value="@s" selected="@(s == ServiceName)">@s</option>
+                }
+            </select>
+        </label>
+        <label>@I18n.T("logs.filter.version")
+            <select name="ver" disabled="@(ServiceName is null)">
+                @if (ServiceName is null)
+                {
+                    <option value="">—</option>
+                }
+                else
+                {
+                    <option value="" selected="@(ServiceVersion is null)">@I18n.T("traces.status.all")</option>
+                    @foreach (var v in _versions)
+                    {
+                        <option value="@v" selected="@(v == ServiceVersion)">@v</option>
+                    }
+                }
+            </select>
+        </label>
         <label>@I18n.T("metrics.filter.limit") <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
         <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
         <button type="submit">@I18n.T("logs.filter.submit")</button>
@@ -99,6 +129,9 @@
     // LogQL-Suchfeld (Vorrang vor Text): {k=v} |= "t" -> AttrFilters + Body-Text.
     [Parameter] public string? Query1 { get; set; }
     [Parameter] public int? MinSeverity { get; set; }
+    // Service-/Version-Dropdown (Discovery aus Logs ∪ Spans im Zeitraum).
+    [Parameter] public string? ServiceName { get; set; }
+    [Parameter] public string? ServiceVersion { get; set; }
     [Parameter] public int Limit { get; set; } = 200;
     [Parameter] public int Offset { get; set; } = 0;
     [Parameter] public bool Expand { get; set; }
@@ -109,6 +142,8 @@
     [Parameter] public string? Dir { get; set; }
 
     private List<Heimdall.LogRow> _logs = new();
+    private List<string> _services = new();
+    private List<string> _versions = new();
     private int _offset;
     private int _pageSize;
     private bool _hasMore;
@@ -119,6 +154,19 @@
     protected override void OnInitialized()
     {
         var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano());
+
+        // Dropdown-Wertemengen (Logs ∪ Spans, im aufgeloesten Zeitraum). Sanitierung:
+        // Werte ausserhalb der Discovery-Liste (alte Bookmarks, Tippfehler, stale
+        // ver nach Service-Wechsel im noch nicht neu geladenen DOM) fallen auf
+        // „alle" zurueck — sonst irritiert ein stummer Filter mit leerem Ergebnis.
+        _services = new List<string>(Query.ListServiceNames(range.From, range.To));
+        if (ServiceName is not null && !_services.Contains(ServiceName)) ServiceName = null;
+        if (ServiceName is null) ServiceVersion = null;
+        else
+        {
+            _versions = new List<string>(Query.ListServiceVersions(ServiceName, range.From, range.To));
+            if (ServiceVersion is not null && !_versions.Contains(ServiceVersion)) ServiceVersion = null;
+        }
 
         string? body = string.IsNullOrWhiteSpace(Text) ? null : Text;
         List<Heimdall.AttrFilter>? attrFilters = null;
@@ -150,6 +198,10 @@
             FromUnixNano = range.From,
             ToUnixNano = range.To,
             AttrFilters = attrFilters,
+            // UND-verknuepft mit den LogQL-Feldfiltern (Backend bildet beide auf
+            // denselben Attr-Filter-Pfad ab; Konflikt = leere Menge, keine Merge).
+            ServiceName = ServiceName,
+            ServiceVersion = ServiceVersion,
             Limit = _pageSize,
             Offset = _offset,
             Sort = _sort,
@@ -195,6 +247,8 @@
         var parts = new List<string>();
         if (!string.IsNullOrEmpty(Query1)) parts.Add("q=" + System.Uri.EscapeDataString(Query1));
         if (!string.IsNullOrEmpty(Text)) parts.Add("text=" + System.Uri.EscapeDataString(Text));
+        if (!string.IsNullOrEmpty(ServiceName)) parts.Add("svc=" + System.Uri.EscapeDataString(ServiceName));
+        if (!string.IsNullOrEmpty(ServiceVersion)) parts.Add("ver=" + System.Uri.EscapeDataString(ServiceVersion));
         if (MinSeverity is int sev) parts.Add("sev=" + sev.ToString(System.Globalization.CultureInfo.InvariantCulture));
         parts.Add("limit=" + _pageSize.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (o > 0) parts.Add("offset=" + o.ToString(System.Globalization.CultureInfo.InvariantCulture));
