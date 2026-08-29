@@ -627,8 +627,9 @@ a:hover { text-decoration: underline; }
 /* --- Login-Seite -------------------------------------------------------- */
 /* Eigenständiger Static-SSR-Body (ohne .hmd-nav/.hmd-main): zentrierte Karte
    im selben dunklen Design-System wie Panels/Empty-States — Panel-Hintergrund,
-   Border, Akzent-Kante oben, Schatten. Formular-Felder analog .hmd-form,
-   Primary-Button analog .hmd-filters button, Fehlerhinweis analog .hmd-err-msg. */
+   Border, Akzent-Kante oben, Schatten. Brand-Zeile analog der Nav (.hmd-brand),
+   Formular-Felder analog .hmd-filters, Primary-Button analog .hmd-filters
+   button, Fehlerhinweis analog .hmd-err-msg. */
 .hmd-login-body {
     display: flex;
     min-height: 100vh;
@@ -645,7 +646,12 @@ a:hover { text-decoration: underline; }
     padding: 1.6rem 1.5rem 1.4rem;
     box-shadow: var(--hmd-shadow);
 }
-.hmd-login-brand { font-weight: 700; font-size: 1.1rem; color: var(--hmd-fg); margin-bottom: .8rem; }
+.hmd-login-brand {
+    display: flex; align-items: center; gap: var(--hmd-sp-1);
+    font-weight: 700; font-size: 1.1rem; color: var(--hmd-fg);
+    margin-bottom: .8rem;
+}
+.hmd-login-brand span { color: var(--hmd-accent); }
 .hmd-login-card h1 { font-size: 1.25rem; margin: 0 0 1rem; color: var(--hmd-fg); }
 .hmd-login-err {
     color: var(--hmd-err); background: rgba(248, 81, 73, .1);
@@ -660,11 +666,13 @@ a:hover { text-decoration: underline; }
     padding: .45rem .5rem; font-size: .9rem;
     transition: border-color var(--hmd-tx), box-shadow var(--hmd-tx);
 }
+.hmd-login-field input:hover { border-color: var(--hmd-dim); }
 .hmd-login-field input:focus-visible {
     outline: none;
     border-color: var(--hmd-accent);
     box-shadow: 0 0 0 3px var(--hmd-accent-dim);
 }
+.hmd-login-field input::placeholder { color: var(--hmd-dim); opacity: .6; }
 .hmd-login-btn {
     background: var(--hmd-accent); color: #04121f;
     border: none; border-radius: var(--hmd-radius-sm);

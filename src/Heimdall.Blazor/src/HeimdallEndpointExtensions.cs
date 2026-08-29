@@ -453,14 +453,14 @@ public static class HeimdallEndpointExtensions
     }
 
     /// <summary>
-    /// CSRF-Schutz für die zustandsändernden POST-Endpoints (Dashboard-Import/Delete,
-    /// Alert-Save/Delete). Bei Basic-Auth werden Credentials cross-site automatisch
-    /// mitgesendet — der Angreifer kann die Response zwar nicht lesen (SOP), aber
-    /// zustandsändernde POSTs wären ohne diesen Check möglich. Origin/Referer-Check
-    /// ist der OWASP-empfohlene, JavaScript-freie Schutz für nicht-Cookie-Auth-UIs:
-    /// ein Cross-Site-Form-POST setzt einen anderen Origin-Header (oder keinen),
-    /// den der Browser nicht fälschen kann. Same-Site-Requests (leerer Origin bei
-    /// GET-Form-Navigation, gleicher Host bei POST) werden akzeptiert.
+    /// CSRF-Schutz für die zustandsändernden POST-Endpoints (Login/Logout,
+    /// Dashboard-Import/Delete, Alert-Save/Delete). Bei Basic-Auth werden Credentials
+    /// cross-site automatisch mitgesendet — der Angreifer kann die Response zwar nicht
+    /// lesen (SOP), aber zustandsändernde POSTs wären ohne diesen Check möglich.
+    /// Origin/Referer-Check ist der OWASP-empfohlene, JavaScript-freie Schutz für
+    /// nicht-Cookie-Auth-UIs: ein Cross-Site-Form-POST setzt einen anderen Origin-Header
+    /// (oder keinen), den der Browser nicht fälschen kann. Same-Site-Requests (leerer
+    /// Origin bei GET-Form-Navigation, gleicher Host bei POST) werden akzeptiert.
     /// </summary>
     private static bool CheckSameOrigin(HttpContext ctx, string prefix)
     {
@@ -471,11 +471,41 @@ public static class HeimdallEndpointExtensions
             var referer = ctx.Request.Headers["Referer"].ToString();
             if (string.IsNullOrEmpty(referer)) return true;   // kein Header → SameSite
             if (!Uri.TryCreate(referer, UriKind.Absolute, out var refUri)) return true;
-            return StringComparer.OrdinalIgnoreCase.Equals(refUri.Host, ctx.Request.Host.Host) &&
-                   refUri.Port == ctx.Request.Host.Port;
+            return SameAuthority(refUri, ctx);
         }
         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
-        return StringComparer.OrdinalIgnoreCase.Equals(uri.Host, ctx.Request.Host.Host) &&
-               uri.Port == ctx.Request.Host.Port;
+        return SameAuthority(uri, ctx);
     }
+
+    /// <summary>
+    /// Authority-Vergleich (Host + Port) zwischen dem externen Origin/Referer-URI und
+    /// dem Request — mit Port-Normalisierung: Der Browser lässt Default-Ports (80/443)
+    /// im Origin/Referer weg, und der Host-Header trägt den Port bei Default-Ports
+    /// ebenfalls nicht (<c>HostString.Port == null</c>). Ein roher Port-Vergleich
+    /// (443 vs. null) würde legitime Same-Origin-POSTs fälschlich als Cross-Origin
+    /// zurückweisen — z. B. den Login unter IIS auf Default-Port. Hinter
+    /// TLS-terminierendem Proxy/IIS-ARR gilt X-Forwarded-Host/-Proto als externe
+    /// Authority; null-Ports (beidseitig Default des jeweiligen Schemas) gelten als
+    /// gleich.
+    /// </summary>
+    private static bool SameAuthority(Uri external, HttpContext ctx)
+    {
+        var fwdHost = ctx.Request.Headers["X-Forwarded-Host"].ToString();
+        var first = fwdHost.Split(',')[0].Trim();
+        var authority = first.Length > 0 ? new HostString(first) : ctx.Request.Host;
+        if (!string.Equals(external.Host, authority.Host, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        int? externalPort = external.IsDefaultPort ? null : external.Port;
+        int? requestPort = authority.Port;
+        var fwdProto = ctx.Request.Headers["X-Forwarded-Proto"].ToString();
+        var scheme = fwdProto.Split(',')[0].Trim();
+        if (scheme.Length == 0) scheme = ctx.Request.Scheme;
+        if (requestPort is int rp && IsDefaultPort(scheme, rp)) requestPort = null;
+        return Nullable.Equals(externalPort, requestPort);
+    }
+
+    private static bool IsDefaultPort(string scheme, int port) =>
+        (scheme.Equals("http", StringComparison.OrdinalIgnoreCase) && port == 80) ||
+        (scheme.Equals("https", StringComparison.OrdinalIgnoreCase) && port == 443);
 }

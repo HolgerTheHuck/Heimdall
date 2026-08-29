@@ -104,6 +104,21 @@ public sealed class HeimdallAuthOptions
     public string[]? AnonymousPaths { get; set; }
 
     /// <summary>
+    /// Pfad-Prefixe, die Auth völlig umgehen (anonymous), auch bei
+    /// <see cref="Enabled"/>=true — im Gegensatz zu <see cref="AnonymousPaths"/>
+    /// als <c>StartsWith</c>-Match auf dem in-app Pfad (ohne PathBase), inkl.
+    /// abschließendem Slash. Gedacht für statische Web-Assets, die die
+    /// Login-Seite selbst benötigt: das Stylesheet
+    /// <c>/_content/Heimdall.Blazor/css/heimdall.css</c> lädt beim Redirect auf
+    /// den Login-Screen gerade <b>ohne</b> Session-Cookie — steht es hinter der
+    /// Auth, rendert die Login-Seite unstyled. Der Host trägt hier
+    /// <c>/_content/Heimdall.Blazor/</c> ein (nur Heimdalls eigene Assets —
+    /// keine app-fremden <c>/_content</c>-Pfade werden geöffnet).
+    /// null/leer (Default) = keine Prefix-Ausnahmen.
+    /// </summary>
+    public string[]? AnonymousPrefixes { get; set; }
+
+    /// <summary>
     /// Validiert die Baseline: <see cref="Enabled"/>=true erfordert ein nicht-leeres
     /// <see cref="Password"/>. Wirft andernfalls <see cref="InvalidOperationException"/>.
     /// Host-spezifische Zusatz-Validierung (ApiKey-Pflicht) bleibt dem Host überlassen.

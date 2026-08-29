@@ -1,4 +1,4 @@
-# Heimdall.Host — Stand-alone-Backend
+﻿# Heimdall.Host — Stand-alone-Backend
 
 Config-getriebener, persistenter Heimdall-Host (Grafana-Stack-Äquivalent): Dashboard
 (Blazor), OTLP-Empfänger (HTTP + gRPC), Prometheus-API und dateibasierter Dashboard-Store —
@@ -35,7 +35,7 @@ erhält den Bestand.
 | `Prometheus:Enabled` / `:Prefix` | `true` / `/otel` | PromQL-Engine + Prom-HTTP-API |
 | `Dashboard:Enabled` / `:Prefix` | `true` / `/otel` | Blazor-Dashboard |
 | `DashboardsStore:Dir` / `:SeedExample` | `var/heimdall/dashboards` / `false` | dateibasierter Grafana-Store |
-| `Auth:Enabled` | `false` | Minimal-Auth (siehe unten) |
+| `Auth:Enabled` | `true` (`appsettings.Development.json`: `false`) | Minimal-Auth + Login-Screen (siehe unten) |
 | `SeedDemoData` | `false` | Demo-Daten + MVC-Drilldown-Saat (rein additiv) |
 
 Kestrel-Endpunkte (`Kestrel:Endpoints`): `http-ui` (5099, `Http1AndHttp2`) und `grpc-otlp`
@@ -45,26 +45,44 @@ möglich (nicht via `ASPNETCORE_URLS`).
 Env-Vars überschreiben (Docker/CI): `Heimdall__Storage__DataPath=/data/otel.db`,
 `Heimdall__Auth__ApiKey=…` usw. (`__` → `:`).
 
-## Minimal-Auth
+## Minimal-Auth + Login-Screen
 
-`Auth:Enabled=true` schaltet zwei Mechanismen scharf (Auth-Middleware in
+`Auth:Enabled=true` (Default im Host) schaltet scharf (Auth-Middleware in
 `Heimdall.AspNetCore`, vom Host hier nur konfiguriert — dieselbe nutzt auch der
 Embedded-Pfad):
 
+- **UI / Login-Screen**: Alle Seiten außer Login/Logout verlangen eine Session.
+  Unauthentifizierte Browser-Requests landen auf der **Login-Seite** (`/otel/login`,
+  eigener Screen ohne Nav/Footer); nach erfolgreichem Login geht es zur ursprünglich
+  angefragten Seite (`returnUrl`) bzw. zur Startseite. Logout: `POST /otel/logout`.
+  Die Session steckt im Cookie `heimdall-auth` (HMAC-signiert, HttpOnly, SameSite=Lax,
+  `Secure` bei HTTPS, gültig 12 h — `Auth:SessionTimeoutHours`).
+- **Credentials** via `Auth:Username` / `Auth:Password` / `Auth:ApiKey`
+  (IIS: alternativ Env-Vars `Heimdall__Auth__Username=…`, `Heimdall__Auth__Password=…`).
+  `Username: null` = beliebiger Name gegen ein Shared-Password.
+  Die appsettings-Defaults sind Platzhalter (`admin` / `change-me`) für die erste
+  Inbetriebnahme — der Host warnt beim Start, solange sie gesetzt sind. Ein
+  Passwortwechsel invalidiert alle laufenden Sessions (das HMAC-Secret des Cookies
+  leitet sich vom Passwort ab).
 - **OTLP/HTTP + Prom-API** (`{Prefix}/v1/*`, `{Prefix}/api/v1/*`): Shared API-Key via
   Header `x-heimdall-key` (**Header only — kein Query-Fallback**, da Query-Strings in
   Access-Logs/Proxies landen). OTel-SDKs: `OTEL_EXPORTER_OTLP_HEADERS="x-heimdall-key=…"`.
   Grafana-Prometheus-Datasource: Custom-Header `x-heimdall-key: …`.
-- **UI / Rest**: Basic-Auth gegen `Auth:Username` (optional; null = beliebiger Name,
-  Shared-Password) + `Auth:Password`.
 - **gRPC**: Inline-Check in den Service-Implementierungen (Header `x-heimdall-key`), bei
   Fehlen `RpcException(Unauthenticated)`.
+- **Basic-Auth-Fallback**: Skripte/Clients können statt des Cookies HTTP-Basic mit
+  `Username`/`Password` mitschicken (autorisiert pro Request, es wird kein Cookie gesetzt).
+- **`/healthz`** bleibt anonym (Compose/K8s-Proben ohne Credentials → 200).
+- **Statische Web-Assets** (`/_content/Heimdall.Blazor/*`) bleiben anonym
+  (`Auth:AnonymousPrefixes`) — die Login-Seite lädt ihr Stylesheet gerade ohne
+  Session; app-fremde `/_content`-Pfade bleiben geschützt.
 
 Vergleiche sind **zeitkonstant** (`SecretComparer`/`CryptographicOperations.FixedTimeEquals`).
 Admission Control (C1) greift nach bestandenem Auth: über dem Cap liegende Requests
 werden sofort abgewiesen (HTTP 429 / gRPC `ResourceExhausted`, retrybar).
 
-`Auth:Enabled=false` (Default) = Zero-Overhead-Passthrough (Demo/Embedded unverändert).
+`Auth:Enabled=false` = Zero-Overhead-Passthrough (`appsettings.Development.json` setzt das
+für lokale `dotnet run`-Entwicklung; Docker-Compose aktiviert Auth per Default).
 
 ## Publish (ohne Docker)
 
@@ -89,6 +107,11 @@ passen automatisch. Exporter/Grafana zeigen auf die externen URLs
 
 Einschränkungen unter IIS/ANCM: gRPC (h2c, Port 4317) ist hinter IIS nicht erreichbar —
 `Otlp:Grpc:Enabled=false` setzen und via OTLP/HTTP exportieren.
+
+Der Login-Screen ist unter IIS automatisch aktiv: IIS startet die App im Production-
+Environment (das Development-Override `Auth:Enabled=false` greift dort nicht). Wer die
+Credentials nicht in die appsettings schreibt, setzt sie per Umgebungsvariable
+(`Heimdall__Auth__Username` / `Heimdall__Auth__Password` / `Heimdall__Auth__ApiKey`).
 
 ## Docker (SQLite-only)
 

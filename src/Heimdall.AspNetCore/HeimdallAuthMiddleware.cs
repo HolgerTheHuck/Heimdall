@@ -93,6 +93,22 @@ public sealed class HeimdallAuthMiddleware
             }
         }
 
+        // Anonymous Präfix-Ausnahmen (z. B. /_content/Heimdall.Blazor/ für das
+        // Login-Screen-Stylesheet — das lädt gerade ohne Cookie, siehe Options).
+        // StartsWith mit Slash-Suffix: /_content/Heimdall.BlazorX bleibt geschützt.
+        var anonPrefixes = _auth.AnonymousPrefixes;
+        if (anonPrefixes is { Length: > 0 })
+        {
+            for (var i = 0; i < anonPrefixes.Length; i++)
+            {
+                if (!string.IsNullOrEmpty(anonPrefixes[i]) &&
+                    path.StartsWith(anonPrefixes[i], StringComparison.OrdinalIgnoreCase))
+                {
+                    await _next(context); return;
+                }
+            }
+        }
+
         // ProtectedPrefix gesetzt → nur dieser Subtree wird geschützt (Embedded).
         // null = global (Host). Vergleich wie die API-Pfad-Prüfung unten (OID).
         var prefix = _auth.ProtectedPrefix;

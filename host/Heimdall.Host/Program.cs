@@ -32,15 +32,25 @@ ValidateOptions(opts);
 // auf allen Interfaces. Ohne Auth ist das in Produktion ein Risiko. Der Host
 // warnt beim Start deutlich; Compose-Default aktiviert Auth (siehe docker-compose.yml).
 // Ein harter Secure-by-Default-Schalter wäre 1.0-breaking und bleibt 1.x vorbehalten.
+var logger = builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; }).Services
+    .BuildServiceProvider().GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
 if (!opts.Auth.Enabled)
 {
-    var logger = builder.Logging.AddSimpleConsole(o => { o.SingleLine = true; }).Services
-        .BuildServiceProvider().GetService<Microsoft.Extensions.Logging.ILogger<Program>>();
     logger?.LogWarning(
         "⚠ Heimdall:Auth:Enabled=false — UI, OTLP/HTTP+gRPC, Prom-API, Dashboard-Import/Delete " +
         "und Alert-Save/Delete sind UNGESCHÜTZT. Für Produktion Auth aktivieren " +
         "(Heimdall:Auth:Enabled=true + Password + ApiKey). Development/Demo ist das OK, " +
         "aber nicht an 0.0.0.0 in Produktion binden.");
+}
+// Platzhalter-Warnung: appsettings-Default sind Inbetriebnahme-Credentials
+// (admin/change-me, analog Compose). Wer sie nicht ändert, betreibt den Host
+// mit bekannten Credentials — deutlich anmahnen.
+if (opts.Auth.Enabled && (opts.Auth.Password == "change-me" || opts.Auth.ApiKey == "change-me"))
+{
+    logger?.LogWarning(
+        "⚠ Heimdall:Auth ist aktiv, aber Password/ApiKey stehen noch auf dem Platzhalter " +
+        "'change-me' — vor Produktion zwingend ändern (appsettings.json oder Env-Vars " +
+        "Heimdall__Auth__Password / Heimdall__Auth__ApiKey).");
 }
 
 // Persistente Verzeichnisse anlegen — die DB-Datei wird NICHT gelöscht (Gegensatz zum alten SelfHost).
@@ -104,6 +114,12 @@ opts.Auth.LogoutPath = opts.Dashboard.Prefix.TrimEnd('/') + "/logout";
 // und müssen 200 bekommen (sonst 302-Redirect auf Login = fälschlich „unhealthy").
 // Der Health-Endpoint ist ohnehin absichtlich ohne DB-Ping (nur Bereit-Signal).
 opts.Auth.AnonymousPaths = new[] { "/healthz" };
+// Statische Web-Assets von Heimdall.Blazor ebenfalls anonymous: die Login-Seite
+// lädt ihr Stylesheet (/_content/…/css/heimdall.css) gerade OHNE Session-Cookie.
+// Steht das CSS hinter der Auth, rendert der Login-Screen unstyled (302 auf den
+// eigenen Redirect statt 200 text/css). Nur Heimdalls eigener Prefix — app-fremde
+// /_content-Pfade bleiben geschützt.
+opts.Auth.AnonymousPrefixes = new[] { "/_content/Heimdall.Blazor/" };
 if (opts.Auth.Enabled) builder.Services.AddHeimdallAuth(opts.Auth);
 builder.Services.AddSingleton(opts);   // HostShutdownTest + ggf. weitere DI-Konsumenten
 
