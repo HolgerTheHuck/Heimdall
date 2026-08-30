@@ -12,9 +12,9 @@
     </div>
 
     <div class="hmd-navcards">
-        <a class="hmd-navcard" href="@(BasePath + "/traces")"><span class="hmd-navcard-ico" aria-hidden="true">⛓</span><span class="hmd-navcard-t">@I18n.T("navcard.traces.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.traces.sub")</span></a>
-        <a class="hmd-navcard" href="@(BasePath + "/logs")"><span class="hmd-navcard-ico" aria-hidden="true">📜</span><span class="hmd-navcard-t">@I18n.T("navcard.logs.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.logs.sub")</span></a>
-        <a class="hmd-navcard" href="@(BasePath + "/metrics")"><span class="hmd-navcard-ico" aria-hidden="true">📈</span><span class="hmd-navcard-t">@I18n.T("navcard.metrics.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.metrics.sub")</span></a>
+        <a class="hmd-navcard" href="@(BasePath + "/traces")"><span class="hmd-navcard-ico" aria-hidden="true">@Heimdall.Blazor.HeimdallMark.Navcard("traces")</span><span class="hmd-navcard-t">@I18n.T("navcard.traces.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.traces.sub")</span></a>
+        <a class="hmd-navcard" href="@(BasePath + "/logs")"><span class="hmd-navcard-ico" aria-hidden="true">@Heimdall.Blazor.HeimdallMark.Navcard("logs")</span><span class="hmd-navcard-t">@I18n.T("navcard.logs.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.logs.sub")</span></a>
+        <a class="hmd-navcard" href="@(BasePath + "/metrics")"><span class="hmd-navcard-ico" aria-hidden="true">@Heimdall.Blazor.HeimdallMark.Navcard("metrics")</span><span class="hmd-navcard-t">@I18n.T("navcard.metrics.t")</span><span class="hmd-navcard-s">@I18n.T("navcard.metrics.sub")</span></a>
     </div>
 </HeimdallDocument>
 

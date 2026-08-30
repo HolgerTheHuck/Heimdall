@@ -444,6 +444,55 @@ public class HeimdallUiTests : HostBootTestBase
         Assert.Contains("b101020304050607", exakt);
     }
 
+    // === Signal-Band / Wachtband (Übersicht) =============================
+
+    /// <summary>
+    /// Das Wachtband-Hero auf der Übersicht: mit Daten rendert es drei Lanes
+    /// (Spans/Logs/Metrik-Punkte) über dem festen 1h-Fenster — jede Lane mit
+    /// Meta-Block (Name, letzter Bucket, ∅/s), SVG (Linie/Fläche/Endpunkt-Dot)
+    /// und Hover-Payload (data-vals) sowie Achsen-Text. Die Lane-Werte sind
+    /// ohne JS vollständig; die Achse ist reiner Text.
+    /// </summary>
+    [Fact]
+    public async Task Uebersicht_Wachtband_RendertDreiLanes()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var t = SeedNowNs();                          // sicher im festen 1h-Fenster
+        sink.WriteSpans(new[] { SeedSpan(TraceId, RootSpanId, "shop") });
+        sink.WriteLogs(new[] { SeedLog(t, "msg-shop", "shop") });
+        sink.WriteMetrics(new[] { MetricPoint("orders", t, 1) });
+
+        var resp = await Client.GetAsync("/otel");
+        Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
+        var body = await resp.Content.ReadAsStringAsync();
+        Assert.Contains("hmd-band", body);                            // Band-Section
+        Assert.Equal(3, CountOccurrences(body, "hmd-band-lane--"));    // Spans/Logs/Metriken
+        Assert.Contains("hmd-band-lane--spans", body);
+        Assert.Contains("hmd-band-lane--logs", body);
+        Assert.Contains("hmd-band-lane--metrics", body);
+        Assert.Equal(3, CountOccurrences(body, "hmd-band-enddot"));   // Endpunkt-Dot je Lane
+        Assert.Equal(3, CountOccurrences(body, "data-vals="));        // Hover-Payload je Lane
+        Assert.Equal(3, CountOccurrences(body, "data-max=\"1\""));    // Null-Basis: max >= 1
+
+        var decoded = System.Net.WebUtility.HtmlDecode(body);
+        Assert.Contains("Signale · letzte Stunde", decoded);          // Band-Titel
+        Assert.Contains("vor 60 min", decoded);                        // Achse links
+        Assert.Contains("jetzt", decoded);                            // Achse rechts
+    }
+
+    /// <summary>
+    /// Ohne Daten bleibt es beim geführten Empty-State — das Band (und seine
+    /// drei Null-Lanes) taucht nicht auf; das Onboarding steht allein.
+    /// </summary>
+    [Fact]
+    public async Task Uebersicht_LeereDB_KeinBand()
+    {
+        var body = await (await Client.GetAsync("/otel")).Content.ReadAsStringAsync();
+        Assert.Contains("hmd-empty-state", body);
+        Assert.DoesNotContain("hmd-band", body);
+        Assert.DoesNotContain("hmd-band-lane", body);
+    }
+
     private static HMetricPoint MetricPoint(string name, long tNs, double value) =>
         new(name, "1", HMetricType.Gauge, HTemporality.Unspecified, tNs, value,
             null, null, null, null, null, null,

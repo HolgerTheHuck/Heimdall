@@ -8,7 +8,7 @@
    inline SVG. Kein JS. *@
 @inject Heimdall.Blazor.IHeimdallI18n I18n
 <header class="hmd-nav">
-    <a class="hmd-brand" href="@BasePath"><span aria-hidden="true">⌖</span> Heimdall</a>
+    <a class="hmd-brand" href="@BasePath">@Heimdall.Blazor.HeimdallMark.Brand("hmd-bif-nav") Heimdall</a>
     <nav class="hmd-tabs" aria-label="@I18n.T("nav.aria.label")">
         <a href="@BasePath" aria-current="@Active("")">@I18n.T("nav.overview")</a>
         <a href="@(BasePath + "/dashboard")" aria-current="@Active("/dashboard")">@I18n.T("nav.monitoring")</a>

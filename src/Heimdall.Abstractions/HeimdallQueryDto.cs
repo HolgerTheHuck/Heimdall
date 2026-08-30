@@ -123,6 +123,15 @@ public sealed record LogSearch(
     string? Sort = null,
     string? Dir = null);
 
+/// <summary>Signal-Volumen pro Zeit-Bucket (z. B. pro Minute) für die
+/// Übersichts-Seite: Spans/Logs/Metrik-Punkte, die in den Bucket fallen.
+/// Sparse — nur Buckets mit Vorkommen, aufsteigend nach Bucket-Start.</summary>
+public sealed record SignalVolumePoint(
+    long BucketUnixNano,
+    long Spans,
+    long Logs,
+    long Metrics);
+
 /// <summary>Leseseite; pro Backend eine Implementierung.</summary>
 public interface IHeimdallQuery
 {
@@ -157,4 +166,12 @@ public interface IHeimdallQuery
     IReadOnlyList<string> ListServiceVersions(string serviceName,
         long? fromUnixNano = null, long? toUnixNano = null)
         => System.Array.Empty<string>();
+
+    /// <summary>Anzahl Spans/Logs/Metrik-Punkte je Zeit-Bucket im Fenster
+    /// [<c>fromUnixNano</c>, <c>toUnixNano</c>] (Buckets via Ganzzahl-Division
+    /// <c>ts / bucketUnixNano</c>). Sparse, aufsteigend. Default-Implementierung
+    /// leer -> additiv, nicht-brechend. Basis für das Signal-Band der Übersicht.</summary>
+    IReadOnlyList<SignalVolumePoint> ListSignalVolume(
+        long fromUnixNano, long toUnixNano, long bucketUnixNano)
+        => System.Array.Empty<SignalVolumePoint>();
 }

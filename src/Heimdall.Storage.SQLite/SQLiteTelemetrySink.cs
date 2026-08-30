@@ -622,6 +622,10 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         // der größten Tabelle. Kostenfrei via IF NOT EXISTS (alte DBs migrieren).
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_logs_trace ON heim_logs(trace_id)");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_metrics_name_ts ON heim_metrics(name, ts_unix_nano)");
+        // Zeit-Index auf Metrics: das Signal-Band der Übersicht zaehlt Metrik-Punkte
+        // pro Minute im Fenster (GROUP BY ts/Bucket) — ohne diesen Index waere das
+        // ein Full-Scan ueber die groesste Tabelle. Additiv via IF NOT EXISTS.
+        Exec("CREATE INDEX IF NOT EXISTS idx_heim_metrics_ts ON heim_metrics(ts_unix_nano)");
         // Unique auf (trace_id, span_id): Retries/Re-Exports erzeugen sonst
         // Duplikatzeilen. Tolerante Migration: vorhandene Duplikate dedup vor
         // Index-Anlage (älteste rowid behalten, jüngere verwerfen — Retry-Semantik:

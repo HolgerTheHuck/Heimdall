@@ -1,13 +1,71 @@
+/* ==========================================================================
+   HEIMDALL — Identität „Nachtwacht“
+   Kalte Nachtblau-Basis, Paneele wie Felsvorsprünge (Himinbjörg), Nebelgrau
+   für Sekundärtext und MESSING als einziger Akzent (Gjallarhorn). Signatur
+   ist die Bifröst-Linie: 2px-Spektralverlauf (blau→grün→gold→rot) an aktiver
+   Navigation, Kopf des Signal-Bandes und Login-Karte.
+   Theme: dunkel ist der Grundzustand (Nachtwacht), das helle „Tagwacht“-
+   Gegenstück folgt der OS-Vorgabe (prefers-color-scheme) — ohne JS.
+   Schriften selbst gehostet (wwwroot/fonts, OFL): Familjen Grotesk (Text,
+   Variable 400–700) + IBM Plex Mono (Daten, tabellarische Ziffern).
+   ========================================================================== */
+
+/* --- Selbst gehostete Schriften (kein CDN — Heimdall läuft in Intranets) -- */
+@font-face {
+    font-family: 'Familjen Grotesk';
+    font-style: normal;
+    font-weight: 400 700;              /* Variable Font: eine Datei, alle Gewichte */
+    font-display: swap;
+    src: url('../fonts/familjen-grotesk-var.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'IBM Plex Mono';
+    font-style: normal;
+    font-weight: 400;
+    font-display: swap;
+    src: url('../fonts/ibm-plex-mono-400.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'IBM Plex Mono';
+    font-style: normal;
+    font-weight: 500;
+    font-display: swap;
+    src: url('../fonts/ibm-plex-mono-500.woff2') format('woff2');
+}
+@font-face {
+    font-family: 'IBM Plex Mono';
+    font-style: normal;
+    font-weight: 600;
+    font-display: swap;
+    src: url('../fonts/ibm-plex-mono-600.woff2') format('woff2');
+}
+
 :root {
-    --hmd-bg: #0d1117;
-    --hmd-panel: #161b22;
-    --hmd-border: #30363d;
-    --hmd-fg: #e6edf3;
-    --hmd-dim: #8b949e;
-    --hmd-accent: #58a6ff;
-    --hmd-err: #f85149;
-    --hmd-ok: #3fb950;
-    --hmd-warn: #d29922;
+    --hmd-bg: #0B0F1A;            /* Nacht */
+    --hmd-panel: #141B2C;         /* Felspaneel */
+    --hmd-panel-2: #1B2438;       /* erhöhte Fläche (Hover, thead, Badges) */
+    --hmd-border: #28324B;
+    --hmd-line-soft: #1F2740;     /* Haarlinien innerhalb von Panels */
+    --hmd-fg: #E8EDF7;
+    --hmd-dim: #93A0BC;           /* Nebel */
+    --hmd-accent: #E7C46A;        /* Messing — der EINZIGE Akzent */
+    --hmd-on-accent: #10141F;     /* Text auf Messing-Flächen */
+    --hmd-err: #E8604C;
+    --hmd-ok: #3AA37C;
+    --hmd-warn: #D9A94F;
+    --hmd-info: #5B8DEF;
+    --hmd-on-ok: #10141F;
+    --hmd-on-warn: #10141F;
+    --hmd-chart-ink: #10141F;     /* Text auf Chart-Balken (Wasserfall) */
+    /* Kategoriale Chart-Farben, feste Reihenfolge (CVD-validiert) */
+    --hmd-c1: #5B8DEF;
+    --hmd-c2: #3AA37C;
+    --hmd-c3: #8F6BD8;
+    /* Bifröst-Spektrum (Signaturlinie) */
+    --hmd-bifrost-1: #5B8DEF;
+    --hmd-bifrost-2: #3AA37C;
+    --hmd-bifrost-3: #E7C46A;
+    --hmd-bifrost-4: #E8604C;
     /* Design-Tokens (Block 1) */
     --hmd-radius: 8px;
     --hmd-radius-sm: 4px;
@@ -17,22 +75,63 @@
     --hmd-sp-4: 1rem;
     --hmd-sp-5: 1.5rem;
     --hmd-sp-6: 2rem;
-    --hmd-shadow-sm: 0 1px 2px rgba(0,0,0,.25);
-    --hmd-shadow: 0 6px 20px rgba(0,0,0,.35);
+    --hmd-shadow-sm: 0 1px 2px rgba(3, 6, 14, .4);
+    --hmd-shadow: 0 8px 28px rgba(3, 6, 14, .5);
     --hmd-tx: .12s ease;
-    --hmd-accent-dim: rgba(88, 166, 255, .14);
-    --hmd-row-hover: rgba(110, 118, 129, .12);
+    --hmd-accent-dim: rgba(231, 196, 106, .13);
+    --hmd-row-hover: rgba(147, 160, 188, .1);
+    --hmd-zebra: rgba(147, 160, 188, .045);
+    --hmd-err-tint: rgba(232, 96, 76, .08);
     --hmd-nav-h: 3.2rem;
+    --hmd-mono: 'IBM Plex Mono', 'Cascadia Mono', Consolas, ui-monospace, monospace;
+    --hmd-bifrost: linear-gradient(90deg,
+        var(--hmd-bifrost-1) 0%, var(--hmd-bifrost-2) 34%,
+        var(--hmd-bifrost-3) 67%, var(--hmd-bifrost-4) 100%);
 }
+/* --- Tagwacht (helles Gegenstück, folgt der OS-Vorgabe) ------------------ */
+@media (prefers-color-scheme: light) {
+    :root {
+        --hmd-bg: #F3F5F9;
+        --hmd-panel: #FFFFFF;
+        --hmd-panel-2: #EDF1F8;
+        --hmd-border: #D5DCEA;
+        --hmd-line-soft: #E3E9F3;
+        --hmd-fg: #1A2233;
+        --hmd-dim: #5A677E;
+        --hmd-accent: #A87A1B;        /* Messing abgedunkelt für hellen Grund */
+        --hmd-on-accent: #FFFFFF;
+        --hmd-err: #C74433;
+        --hmd-ok: #1F8A66;
+        --hmd-warn: #9A6F14;
+        --hmd-info: #3E6FD9;
+        --hmd-on-ok: #FFFFFF;
+        --hmd-on-warn: #FFFFFF;
+        --hmd-chart-ink: #FFFFFF;
+        --hmd-c1: #3E6FD9;
+        --hmd-c2: #1F8A66;
+        --hmd-c3: #8257C9;
+        --hmd-bifrost-1: #3E6FD9;
+        --hmd-bifrost-2: #1F8A66;
+        --hmd-bifrost-3: #B98A1E;
+        --hmd-bifrost-4: #C74433;
+        --hmd-shadow-sm: 0 1px 2px rgba(26, 34, 51, .08);
+        --hmd-shadow: 0 6px 20px rgba(26, 34, 51, .1);
+        --hmd-accent-dim: rgba(168, 122, 27, .12);
+        --hmd-row-hover: rgba(26, 34, 51, .05);
+        --hmd-zebra: rgba(26, 34, 51, .025);
+        --hmd-err-tint: rgba(199, 68, 51, .06);
+    }
+}
+
 * { box-sizing: border-box; }
 html { scroll-behavior: smooth; }
 body {
     margin: 0;
-    font-family: -apple-system, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+    font-family: 'Familjen Grotesk', 'Segoe UI', -apple-system, Roboto, sans-serif;
     background: var(--hmd-bg);
     color: var(--hmd-fg);
     font-size: 14px;
-    line-height: 1.45;
+    line-height: 1.55;
     -webkit-font-smoothing: antialiased;
 }
 a { color: var(--hmd-accent); text-decoration: none; }
@@ -51,7 +150,9 @@ a:hover { text-decoration: underline; }
     z-index: 20;
     box-shadow: var(--hmd-shadow-sm);
 }
-.hmd-brand { font-weight: 700; font-size: 1.1rem; color: var(--hmd-fg); white-space: nowrap; }
+.hmd-brand { font-weight: 700; font-size: 1.05rem; letter-spacing: .12em; color: var(--hmd-fg); white-space: nowrap; display: inline-flex; align-items: center; gap: .5rem; }
+.hmd-brand svg { display: block; width: 24px; height: 24px; }
+.hmd-brand:hover { text-decoration: none; }
 .hmd-tabs { display: flex; gap: var(--hmd-sp-2); overflow-x: auto; scrollbar-width: thin; }
 .hmd-tabs a {
     padding: .3rem .6rem;
@@ -61,11 +162,12 @@ a:hover { text-decoration: underline; }
     border-bottom: 2px solid transparent;
     transition: color var(--hmd-tx), background var(--hmd-tx);
 }
-.hmd-tabs a:hover { background: var(--hmd-bg); color: var(--hmd-fg); text-decoration: none; }
+.hmd-tabs a:hover { background: var(--hmd-panel-2); color: var(--hmd-fg); text-decoration: none; }
+/* Aktiver Tab: Tinte + Bifröst-Unterstreichung (Signatur, 2px am unteren Rand) */
 .hmd-tabs a[aria-current="page"] {
     color: var(--hmd-fg);
-    border-bottom-color: var(--hmd-accent);
-    background: var(--hmd-accent-dim);
+    font-weight: 600;
+    background: var(--hmd-bifrost) left bottom / 100% 2px no-repeat;
 }
 @media (max-width: 640px) {
     .hmd-nav { gap: var(--hmd-sp-3); padding: .5rem .7rem; }
@@ -73,7 +175,7 @@ a:hover { text-decoration: underline; }
 }
 
 .hmd-main { max-width: 1600px; margin: 0 auto; padding: 1.1rem 1.5rem; }
-.hmd-main h1 { font-size: 1.25rem; margin: .2rem 0 1rem; }
+.hmd-main h1 { font-size: 1.4rem; letter-spacing: -.01em; margin: .2rem 0 1rem; }
 /* Volle Breite (z. B. Logs-Liste): keine Ränder, Tabellen nutzen den ganzen Viewport. */
 .hmd-main-wide { max-width: none; margin: 0; padding: .5rem .75rem; }
 
@@ -97,7 +199,7 @@ a:hover { text-decoration: underline; }
     border-radius: 6px;
     margin-bottom: 1rem;
 }
-.hmd-filters label { display: flex; flex-direction: column; gap: .2rem; color: var(--hmd-dim); font-size: .8rem; }
+.hmd-filters label { display: flex; flex-direction: column; gap: .2rem; color: var(--hmd-dim); font-size: .72rem; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
 .hmd-filters input, .hmd-filters select {
     background: var(--hmd-bg);
     color: var(--hmd-fg);
@@ -106,17 +208,24 @@ a:hover { text-decoration: underline; }
     padding: .3rem .4rem;
     font-size: .85rem;
     min-width: 8rem;
+    text-transform: none;          /* Label-UpperStyle greift nicht im Control */
+    letter-spacing: normal;
+    font-weight: 400;
+}
+.hmd-filters input:focus-visible, .hmd-filters select:focus-visible {
+    border-color: var(--hmd-accent);
+    box-shadow: 0 0 0 2px var(--hmd-accent-dim);
 }
 .hmd-filters button {
     background: var(--hmd-accent);
-    color: #04121f;
+    color: var(--hmd-on-accent);
     border: none;
     border-radius: 4px;
     padding: .4rem .9rem;
     font-weight: 600;
     cursor: pointer;
 }
-.hmd-filters button:hover { filter: brightness(1.1); }
+.hmd-filters button:hover { filter: brightness(1.08); }
 
 /* border-collapse:separate (statt collapse+overflow:hidden), damit der Sticky-
    Header gegen das Viewport arbeitet: overflow:hidden würde die Tabelle selbst
@@ -131,11 +240,12 @@ a:hover { text-decoration: underline; }
     border: 1px solid var(--hmd-border);
     border-radius: var(--hmd-radius);
     box-shadow: var(--hmd-shadow-sm);
+    font-variant-numeric: tabular-nums;
 }
-.hmd-table th, .hmd-table td { padding: .45rem .65rem; text-align: left; border-bottom: 1px solid var(--hmd-border); vertical-align: top; }
+.hmd-table th, .hmd-table td { padding: .45rem .65rem; text-align: left; border-bottom: 1px solid var(--hmd-line-soft); vertical-align: top; }
 .hmd-table thead th {
-    background: #1c2128; color: var(--hmd-dim); font-weight: 600;
-    font-size: .78rem; text-transform: uppercase; letter-spacing: .03em;
+    background: var(--hmd-panel-2); color: var(--hmd-dim); font-weight: 600;
+    font-size: .74rem; text-transform: uppercase; letter-spacing: .08em;
     position: sticky; top: var(--hmd-nav-h); z-index: 2;
 }
 /* abgerundete Außen-Ecken über die Eck-Zellen (overflow:hidden entfallen). */
@@ -158,7 +268,6 @@ a:hover { text-decoration: underline; }
     min-height: 10rem;
     overflow: auto;
     border-radius: var(--hmd-radius);
-    /* Theme-Scrollbar: duenn, rund, dezent (Firefox). */
     scrollbar-width: thin;
     scrollbar-color: var(--hmd-border) transparent;
 }
@@ -166,8 +275,7 @@ a:hover { text-decoration: underline; }
 .hmd-list-scroll .hmd-table thead th { top: 0; }
 
 /* Theme-Scrollbar (WebKit/Blink): Thumb in Rahmen-Farbe, bei Hover heller
-   (--hmd-dim); transparenter Track, rund mit padding-box-Rahmen → optisch
-   etwas schmaler als die Schiene. Passt zum dunklen GitHub-artigen UI. */
+   (--hmd-dim); transparenter Track, rund mit padding-box-Rahmen. */
 .hmd-list-scroll::-webkit-scrollbar { width: .6rem; height: .6rem; }
 .hmd-list-scroll::-webkit-scrollbar-track { background: transparent; }
 .hmd-list-scroll::-webkit-scrollbar-thumb {
@@ -178,19 +286,28 @@ a:hover { text-decoration: underline; }
 }
 .hmd-list-scroll::-webkit-scrollbar-thumb:hover { background: var(--hmd-dim); }
 .hmd-list-scroll::-webkit-scrollbar-corner { background: transparent; }
-.hmd-table tbody tr:nth-child(even) { background: rgba(110, 118, 129, .05); }
+.hmd-table tbody tr:nth-child(even) { background: var(--hmd-zebra); }
 .hmd-table tbody tr { transition: background var(--hmd-tx); }
 .hmd-table tbody tr:hover { background: var(--hmd-row-hover); }
-.hmd-table tr.hmd-err { background: rgba(248, 81, 73, .08); }
-.hmd-table tr.hmd-err:hover { background: rgba(248, 81, 73, .14); }
-.hmd-mono { font-family: ui-monospace, "SFMono-Regular", "Cascadia Code", Consolas, monospace; font-size: .82rem; }
-.hmd-dim { color: var(--hmd-dim); }
-.hmd-json { color: var(--hmd-dim); font-family: ui-monospace, Consolas, monospace; font-size: .78rem; max-width: 26rem; word-break: break-word; }
+.hmd-table tr.hmd-err { background: var(--hmd-err-tint); }
+.hmd-table tr.hmd-err:hover { background: var(--hmd-err-tint); }
+.hmd-table tr.hmd-err td:first-child { box-shadow: inset 2px 0 0 var(--hmd-err); }
 
-.hmd-badge { font-family: ui-monospace, Consolas, monospace; font-size: .72rem; padding: .1rem .35rem; border-radius: 3px; background: var(--hmd-bg); border: 1px solid var(--hmd-border); }
+.hmd-mono { font-family: var(--hmd-mono); font-size: .82rem; font-variant-numeric: tabular-nums; }
+.hmd-dim { color: var(--hmd-dim); }
+.hmd-json { color: var(--hmd-dim); font-family: var(--hmd-mono); font-size: .78rem; max-width: 26rem; word-break: break-word; }
+
+.hmd-badge { font-family: var(--hmd-mono); font-size: .7rem; font-weight: 600; letter-spacing: .05em;
+    padding: .08rem .4rem; border-radius: 3px; background: var(--hmd-panel-2); border: 1px solid var(--hmd-border); }
+/* Severity: farbige Text-Pille + Haarlinie links an der Zeile — nie nur Farbe
+   (Klassen sitzen auf dem <tr>, das Badge ist die sichtbare Benennung). */
+.hmd-sev-error, .hmd-sev-fatal { box-shadow: inset 2px 0 0 var(--hmd-err); }
+.hmd-sev-warn { box-shadow: inset 2px 0 0 var(--hmd-warn); }
+.hmd-sev-info { box-shadow: inset 2px 0 0 var(--hmd-info); }
+.hmd-sev-debug, .hmd-sev-trace { box-shadow: inset 2px 0 0 var(--hmd-border); }
 .hmd-sev-error .hmd-badge, .hmd-sev-fatal .hmd-badge { color: var(--hmd-err); border-color: var(--hmd-err); }
 .hmd-sev-warn .hmd-badge { color: var(--hmd-warn); border-color: var(--hmd-warn); }
-.hmd-sev-info .hmd-badge { color: var(--hmd-accent); }
+.hmd-sev-info .hmd-badge { color: var(--hmd-info); border-color: var(--hmd-info); }
 .hmd-sev-debug .hmd-badge, .hmd-sev-trace .hmd-badge { color: var(--hmd-dim); }
 
 .hmd-empty { color: var(--hmd-dim); padding: 1.5rem 0; }
@@ -207,7 +324,7 @@ a:hover { text-decoration: underline; }
 
 /* --- Unterüberschriften, Inline-Checkbox, Roh-Tabelle ------------------- */
 .hmd-subhead { font-size: 1rem; margin: 1rem 0 .4rem; color: var(--hmd-fg); }
-.hmd-subhead-sm { font-size: .85rem; margin: 1.2rem 0 .3rem; color: var(--hmd-dim); text-transform: uppercase; letter-spacing: .04em; }
+.hmd-subhead-sm { font-size: .85rem; margin: 1.2rem 0 .3rem; color: var(--hmd-dim); text-transform: uppercase; letter-spacing: .06em; }
 .hmd-inline-chk { flex-direction: row !important; align-items: center; gap: .35rem !important; }
 .hmd-inline-chk input { min-width: auto !important; margin: 0; }
 .hmd-raw { margin: 1rem 0; }
@@ -227,7 +344,7 @@ a:hover { text-decoration: underline; }
 .hmd-chart-pt { opacity: .85; transition: opacity .1s ease; cursor: pointer; }
 .hmd-chart-pt:hover { opacity: 1; }
 .hmd-chart-label {
-    font-family: ui-monospace, Consolas, monospace; font-size: 9px; fill: var(--hmd-dim);
+    font-family: var(--hmd-mono); font-size: 9px; fill: var(--hmd-dim);
 }
 .hmd-chart-xlabel { fill: var(--hmd-dim); }
 .hmd-chart-ylabel { fill: var(--hmd-dim); }
@@ -260,8 +377,8 @@ a:hover { text-decoration: underline; }
     display: grid; grid-template-columns: max-content 1fr; gap: .15rem .8rem;
     margin: 0 0 .4rem; font-size: .8rem;
 }
-.hmd-attr-list dt { color: var(--hmd-dim); font-family: ui-monospace, Consolas, monospace; }
-.hmd-attr-list dd { margin: 0; font-family: ui-monospace, Consolas, monospace; word-break: break-word; }
+.hmd-attr-list dt { color: var(--hmd-dim); font-family: var(--hmd-mono); }
+.hmd-attr-list dd { margin: 0; font-family: var(--hmd-mono); word-break: break-word; }
 .hmd-attr-ids dt { color: var(--hmd-dim); }
 /* --- Log-Tabelle: Seq-style — ein kompakter Einzeiler pro Log, aufklappbar ----
    table-layout:fixed + th-Breiten fixieren Zeit/Sev/Trace; Body bekommt den Rest.
@@ -297,7 +414,7 @@ a:hover { text-decoration: underline; }
 .hmd-pre {
     margin: .2rem 0 0; padding: .4rem; background: var(--hmd-bg);
     border: 1px solid var(--hmd-border); border-radius: 4px;
-    font-family: ui-monospace, Consolas, monospace; font-size: .74rem; color: var(--hmd-fg);
+    font-family: var(--hmd-mono); font-size: .74rem; color: var(--hmd-fg);
     white-space: pre-wrap; word-break: break-word; max-height: 14rem; overflow: auto;
 }
 
@@ -317,17 +434,18 @@ a:hover { text-decoration: underline; }
     box-shadow: var(--hmd-shadow-sm);
 }
 .hmd-kpi-value {
-    font-family: ui-monospace, Consolas, monospace;
-    font-size: 1.9rem;
+    font-family: var(--hmd-mono);
+    font-size: 1.8rem;
     line-height: 1.1;
     color: var(--hmd-fg);
 }
 .hmd-kpi-label {
     color: var(--hmd-dim);
-    font-size: .72rem;
+    font-size: .7rem;
     text-transform: uppercase;
-    letter-spacing: .04em;
+    letter-spacing: .09em;
     margin-top: .2rem;
+    font-weight: 600;
 }
 .hmd-kpi-sub { color: var(--hmd-dim); font-size: .78rem; margin-top: .15rem; }
 .hmd-kpi--ok      { border-left-color: var(--hmd-ok); }
@@ -338,6 +456,69 @@ a:hover { text-decoration: underline; }
 .hmd-kpi--err     .hmd-kpi-value { color: var(--hmd-err); }
 .hmd-kpi--accent  { border-left-color: var(--hmd-accent); }
 .hmd-kpi--accent  .hmd-kpi-value { color: var(--hmd-accent); }
+
+/* --- Signal-Band (Übersicht: drei Sparkline-Lanes, Signatur-Hero) -------- */
+.hmd-band {
+    position: relative;
+    background: var(--hmd-panel);
+    border: 1px solid var(--hmd-border);
+    border-radius: var(--hmd-radius);
+    padding: .9rem 1.1rem .6rem;
+    margin: .4rem 0 1rem;
+    box-shadow: var(--hmd-shadow-sm);
+}
+/* Bifröst-Kopfkante (Signatur, 2px) */
+.hmd-band::before {
+    content: ""; position: absolute; top: 0; left: 12px; right: 12px; height: 2px;
+    background: var(--hmd-bifrost); border-radius: 2px;
+}
+.hmd-band-head { display: flex; align-items: baseline; justify-content: space-between; gap: .8rem; margin-bottom: .4rem; }
+.hmd-band-title { font-size: .7rem; font-weight: 600; letter-spacing: .12em; text-transform: uppercase; color: var(--hmd-dim); }
+.hmd-band-lane { display: grid; grid-template-columns: 11rem 1fr; gap: .9rem; align-items: center; padding: .45rem 0; }
+.hmd-band-lane + .hmd-band-lane { border-top: 1px solid var(--hmd-line-soft); }
+.hmd-band-meta { display: grid; gap: .1rem; }
+.hmd-band-name { font-size: .7rem; font-weight: 600; letter-spacing: .11em; text-transform: uppercase; color: var(--hmd-dim); }
+.hmd-band-val { font-family: var(--hmd-mono); font-size: 1.35rem; font-weight: 600; line-height: 1.15; font-variant-numeric: tabular-nums; }
+.hmd-band-sub { font-size: .74rem; color: var(--hmd-dim); font-family: var(--hmd-mono); font-variant-numeric: tabular-nums; }
+.hmd-band-chart { position: relative; }
+.hmd-band-chart svg { display: block; width: 100%; height: 56px; }
+.hmd-band-grid line { stroke: var(--hmd-line-soft); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.hmd-band-line { fill: none; stroke-width: 2; vector-effect: non-scaling-stroke; stroke-linejoin: round; stroke-linecap: round; }
+.hmd-band-area { stroke: none; fill-opacity: .12; }
+.hmd-band-lane--spans   .hmd-band-line { stroke: var(--hmd-c1); }
+.hmd-band-lane--spans   .hmd-band-area { fill: var(--hmd-c1); }
+.hmd-band-lane--logs    .hmd-band-line { stroke: var(--hmd-c2); }
+.hmd-band-lane--logs    .hmd-band-area { fill: var(--hmd-c2); }
+.hmd-band-lane--metrics .hmd-band-line { stroke: var(--hmd-c3); }
+.hmd-band-lane--metrics .hmd-band-area { fill: var(--hmd-c3); }
+.hmd-band-xhair { stroke: var(--hmd-dim); stroke-width: 1; stroke-dasharray: 3 3; vector-effect: non-scaling-stroke; visibility: hidden; }
+/* Endpunkt- und Hover-Dot als HTML-Spans (kreisrund trotz preserveAspectRatio-
+   none): Server setzt top% inline, JS ergänzt Hover-Position. */
+.hmd-band-enddot, .hmd-band-hoverdot {
+    position: absolute; width: 6px; height: 6px; border-radius: 50%;
+    border: 2px solid var(--hmd-panel); transform: translate(-50%, -50%);
+    pointer-events: none; visibility: hidden;
+}
+.hmd-band-enddot { visibility: visible; left: 100%; }
+.hmd-band-lane--spans   .hmd-band-enddot, .hmd-band-lane--spans   .hmd-band-hoverdot { background: var(--hmd-c1); }
+.hmd-band-lane--logs    .hmd-band-enddot, .hmd-band-lane--logs    .hmd-band-hoverdot { background: var(--hmd-c2); }
+.hmd-band-lane--metrics .hmd-band-enddot, .hmd-band-lane--metrics .hmd-band-hoverdot { background: var(--hmd-c3); }
+.hmd-band-tip {
+    position: absolute; top: 2px; transform: translateX(-50%); visibility: hidden;
+    background: var(--hmd-panel-2); border: 1px solid var(--hmd-border); border-radius: 4px;
+    padding: .15rem .45rem; font-size: .72rem; white-space: nowrap; pointer-events: none;
+    font-family: var(--hmd-mono); font-variant-numeric: tabular-nums; color: var(--hmd-dim);
+    box-shadow: var(--hmd-shadow-sm);
+}
+.hmd-band-tip b { color: var(--hmd-fg); font-weight: 600; }
+.hmd-band-axis { display: flex; justify-content: space-between; padding-left: calc(11rem + .9rem); margin-top: .2rem;
+    color: var(--hmd-dim); font-size: .7rem; font-family: var(--hmd-mono); }
+@media (max-width: 720px) {
+    .hmd-band-lane { grid-template-columns: 1fr; gap: .4rem; }
+    .hmd-band-meta { grid-template-columns: auto auto; column-gap: .6rem; align-items: baseline; }
+    .hmd-band-sub { grid-column: 2; grid-row: 2; }
+    .hmd-band-axis { padding-left: 0; }
+}
 
 /* --- Multi-Serien-stat (Grafana stat graphMode=area, wideLayout) --------- */
 .hmd-stat-grid { display: flex; flex-wrap: wrap; gap: .5rem; }
@@ -451,11 +632,12 @@ a:hover { text-decoration: underline; }
     box-shadow: var(--hmd-shadow-sm);
 }
 .hmd-gpanel-title {
-    font-size: .82rem;
+    font-size: .74rem;
     color: var(--hmd-dim);
     margin: 0 0 .4rem;
     text-transform: uppercase;
-    letter-spacing: .03em;
+    letter-spacing: .08em;
+    font-weight: 600;
 }
 .hmd-gpanel-body { flex: 1 1 auto; min-width: 0; }
 .hmd-gpanel-body svg { width: 100%; height: auto; }
@@ -471,7 +653,7 @@ a:hover { text-decoration: underline; }
 /* Logs-Panel in Grafana-Dashboards (Loki → Heimdall-Log-Store): kompakte
    Tabelle im Panel-Body, scrollbar ab vielen Zeilen, Mono-Body. */
 .hmd-logs-panel { font-size: .82rem; }
-.hmd-logs-panel .hmd-log-summary { font-family: var(--hmd-mono, ui-monospace, monospace); }
+.hmd-logs-panel .hmd-log-summary { font-family: var(--hmd-mono); }
 .hmd-logs-panel-wrap { max-height: 26rem; overflow-y: auto; }
 .hmd-logs-more { margin: .35rem 0 0; font-size: .8rem; }
 
@@ -501,10 +683,10 @@ a:hover { text-decoration: underline; }
 }
 .hmd-btn:hover { border-color: var(--hmd-accent); text-decoration: none; }
 .hmd-btn-danger { color: var(--hmd-err); border-color: var(--hmd-err); }
-.hmd-filters textarea { width: 100%; font-family: ui-monospace, "SF Mono", Consolas, monospace; font-size: .78rem; }
+.hmd-filters textarea { width: 100%; font-family: var(--hmd-mono); font-size: .78rem; }
 
 /* --- LogQL-Suchfeld (Logs-Seite): breit, Monospace für {k=v} |= "t" -------- */
-.hmd-logq input { min-width: 22rem; font-family: ui-monospace, "SF Mono", Consolas, monospace; }
+.hmd-logq input { min-width: 22rem; font-family: var(--hmd-mono); }
 .hmd-logq-hint { margin: .5rem .2rem 0; font-size: .78rem; line-height: 1.4; }
 .hmd-logq-hint code { background: var(--hmd-bg); padding: .05rem .3rem; border-radius: 3px; border: 1px solid var(--hmd-border); }
 
@@ -516,22 +698,29 @@ a:hover { text-decoration: underline; }
     margin: .4rem 0 1.2rem;
 }
 .hmd-navcard {
-    display: flex; flex-direction: column; gap: .15rem;
+    display: flex; flex-direction: column; gap: .3rem;
     background: var(--hmd-panel);
     border: 1px solid var(--hmd-border);
     border-radius: var(--hmd-radius);
     padding: .8rem .9rem;
     color: var(--hmd-fg);
     box-shadow: var(--hmd-shadow-sm);
-    transition: border-color var(--hmd-tx), transform var(--hmd-tx), box-shadow var(--hmd-tx);
+    transition: border-color var(--hmd-tx), background var(--hmd-tx), transform var(--hmd-tx), box-shadow var(--hmd-tx);
 }
 .hmd-navcard:hover {
+    background: var(--hmd-panel-2);
     border-color: var(--hmd-accent);
     transform: translateY(-2px);
     box-shadow: var(--hmd-shadow);
     text-decoration: none;
 }
-.hmd-navcard-ico { font-size: 1.4rem; line-height: 1; }
+.hmd-navcard-ico {
+    display: inline-grid; place-items: center;
+    width: 34px; height: 34px; border-radius: var(--hmd-radius);
+    background: var(--hmd-panel-2); color: var(--hmd-accent);
+}
+.hmd-navcard:hover .hmd-navcard-ico { background: var(--hmd-bg); }
+.hmd-navcard-ico svg { width: 18px; height: 18px; display: block; }
 .hmd-navcard-t { font-weight: 600; font-size: .95rem; }
 .hmd-navcard-s { color: var(--hmd-dim); font-size: .78rem; }
 
@@ -561,7 +750,8 @@ a:hover { text-decoration: underline; }
     color: var(--hmd-dim); font-size: .76rem;
 }
 .hmd-footer strong { color: var(--hmd-fg); font-weight: 600; }
-.hmd-footer-brand { font-weight: 700; color: var(--hmd-fg); }
+.hmd-footer-brand { font-weight: 700; color: var(--hmd-fg); display: inline-flex; align-items: center; gap: .4rem; }
+.hmd-footer-brand svg { width: 16px; height: 16px; display: block; }
 .hmd-footer-sep { opacity: .5; }
 
 /* --- Chart-Interaktion (Crosshair + Brushing, JS) ---------------------- */
@@ -579,7 +769,7 @@ a:hover { text-decoration: underline; }
 /* --- Trace-Wasserfall -------------------------------------------------- */
 .hmd-waterfall { background: var(--hmd-panel); border: 1px solid var(--hmd-border); box-shadow: var(--hmd-shadow-sm); }
 .hmd-waterfall-name { fill: var(--hmd-fg); font-size: 10px; }
-.hmd-waterfall-dur { fill: #04121f; font-size: 9px; font-weight: 600; }
+.hmd-waterfall-dur { fill: var(--hmd-chart-ink); font-size: 9px; font-weight: 600; }
 .hmd-waterfall-bar { transition: opacity var(--hmd-tx); }
 .hmd-waterfall-bar:hover { opacity: .8; }
 
@@ -594,12 +784,12 @@ a:hover { text-decoration: underline; }
 .hmd-refresh-badge .hmd-btn { padding: .15rem .45rem; font-size: .72rem; }
 
 /* --- Alarm-Subsystem --------------------------------------------------- */
-.hmd-alert-state { font-family: ui-monospace, Consolas, monospace; font-size: .72rem;
+.hmd-alert-state { font-family: var(--hmd-mono); font-size: .72rem;
     padding: .12rem .4rem; border-radius: 3px; border: 1px solid var(--hmd-border);
     background: var(--hmd-bg); color: var(--hmd-dim); white-space: nowrap; }
 .hmd-alert-state--firing  { background: var(--hmd-err);  color: #fff; border-color: var(--hmd-err); }
-.hmd-alert-state--pending { background: var(--hmd-warn); color: #0d1117; border-color: var(--hmd-warn); }
-.hmd-alert-state--resolved{ background: var(--hmd-ok);   color: #0d1117; border-color: var(--hmd-ok); }
+.hmd-alert-state--pending { background: var(--hmd-warn); color: var(--hmd-on-warn); border-color: var(--hmd-warn); }
+.hmd-alert-state--resolved{ background: var(--hmd-ok);   color: var(--hmd-on-ok); border-color: var(--hmd-ok); }
 .hmd-alert-state--ok      { background: var(--hmd-bg);   color: var(--hmd-dim); }
 .hmd-alert-hint { color: var(--hmd-warn); }
 
@@ -607,12 +797,12 @@ a:hover { text-decoration: underline; }
 .hmd-form fieldset { border: 1px solid var(--hmd-border); border-radius: var(--hmd-radius-sm);
     padding: .8rem 1rem; display: flex; flex-direction: column; gap: .6rem; }
 .hmd-form legend { color: var(--hmd-dim); font-size: .8rem; text-transform: uppercase;
-    letter-spacing: .04em; padding: 0 .35rem; }
+    letter-spacing: .06em; padding: 0 .35rem; }
 .hmd-form label { display: flex; flex-direction: column; gap: .2rem; color: var(--hmd-dim); font-size: .82rem; }
 .hmd-form input[type="text"], .hmd-form input[type="number"], .hmd-form textarea, .hmd-form select {
     background: var(--hmd-bg); border: 1px solid var(--hmd-border); border-radius: var(--hmd-radius-sm);
     color: var(--hmd-fg); padding: .35rem .5rem; font-size: .9rem; }
-.hmd-form textarea { font-family: ui-monospace, Consolas, monospace; }
+.hmd-form textarea { font-family: var(--hmd-mono); }
 .hmd-check { flex-direction: row; align-items: center; gap: .4rem; }
 .hmd-check input { margin: 0; }
 .hmd-check-row { display: flex; flex-wrap: wrap; gap: 1rem; }
@@ -621,15 +811,14 @@ a:hover { text-decoration: underline; }
 .hmd-btn-ghost:hover { color: var(--hmd-fg); border-color: var(--hmd-border); }
 
 .hmd-kv th { width: 11rem; color: var(--hmd-dim); white-space: nowrap; }
-.hmd-err-msg { color: var(--hmd-err); background: rgba(248,81,73,.1);
+.hmd-err-msg { color: var(--hmd-err); background: var(--hmd-err-tint);
     border: 1px solid var(--hmd-err); border-radius: var(--hmd-radius-sm); padding: .5rem .7rem; }
 
 /* --- Login-Seite -------------------------------------------------------- */
 /* Eigenständiger Static-SSR-Body (ohne .hmd-nav/.hmd-main): zentrierte Karte
-   im selben dunklen Design-System wie Panels/Empty-States — Panel-Hintergrund,
-   Border, Akzent-Kante oben, Schatten. Brand-Zeile analog der Nav (.hmd-brand),
-   Formular-Felder analog .hmd-filters, Primary-Button analog .hmd-filters
-   button, Fehlerhinweis analog .hmd-err-msg. */
+   im selben Design-System — Panel-Grund, Bifröst-Kante oben (Signatur),
+   Schatten. Brand-Zeile analog der Nav, Felder analog .hmd-filters,
+   Primary-Button messing, Fehlerhinweis analog .hmd-err-msg. */
 .hmd-login-body {
     display: flex;
     min-height: 100vh;
@@ -641,20 +830,23 @@ a:hover { text-decoration: underline; }
 .hmd-login-card {
     background: var(--hmd-panel);
     border: 1px solid var(--hmd-border);
-    border-top: 3px solid var(--hmd-accent);
     border-radius: var(--hmd-radius);
     padding: 1.6rem 1.5rem 1.4rem;
     box-shadow: var(--hmd-shadow);
+    background-image: var(--hmd-bifrost);
+    background-size: 100% 3px;
+    background-position: left top;
+    background-repeat: no-repeat;
 }
 .hmd-login-brand {
     display: flex; align-items: center; gap: var(--hmd-sp-1);
-    font-weight: 700; font-size: 1.1rem; color: var(--hmd-fg);
+    font-weight: 700; font-size: 1.05rem; letter-spacing: .12em; color: var(--hmd-fg);
     margin-bottom: .8rem;
 }
-.hmd-login-brand span { color: var(--hmd-accent); }
+.hmd-login-brand svg { width: 24px; height: 24px; display: block; }
 .hmd-login-card h1 { font-size: 1.25rem; margin: 0 0 1rem; color: var(--hmd-fg); }
 .hmd-login-err {
-    color: var(--hmd-err); background: rgba(248, 81, 73, .1);
+    color: var(--hmd-err); background: var(--hmd-err-tint);
     border: 1px solid var(--hmd-err); border-radius: var(--hmd-radius-sm);
     padding: .5rem .7rem; margin: 0 0 .8rem; font-size: .85rem;
 }
@@ -674,13 +866,14 @@ a:hover { text-decoration: underline; }
 }
 .hmd-login-field input::placeholder { color: var(--hmd-dim); opacity: .6; }
 .hmd-login-btn {
-    background: var(--hmd-accent); color: #04121f;
+    background: var(--hmd-accent); color: var(--hmd-on-accent);
     border: none; border-radius: var(--hmd-radius-sm);
     padding: .5rem 1rem; font-size: .9rem; font-weight: 600;
     cursor: pointer; transition: filter var(--hmd-tx);
 }
-.hmd-login-btn:hover { filter: brightness(1.1); }
+.hmd-login-btn:hover { filter: brightness(1.08); }
 .hmd-login-hint { margin: 1rem 0 0; text-align: center; color: var(--hmd-dim); font-size: .76rem; }
+.hmd-login-hint svg { width: 12px; height: 12px; vertical-align: -1px; margin-right: .2rem; }
 
 /* === a11y: Fokus-Indikator (systemweit) ============================= */
 /* Sichbarer Fokus-Ring für Tastatur-Navigation; :where() hält Spezifität 0,
@@ -702,7 +895,7 @@ a:hover { text-decoration: underline; }
 /* === a11y: Skip-Link ================================================ */
 .hmd-skip {
     position: absolute; left: -9999px; top: 0; z-index: 1000;
-    background: var(--hmd-accent); color: #04121f;
+    background: var(--hmd-accent); color: var(--hmd-on-accent);
     padding: .5rem .75rem; border-radius: var(--hmd-radius-sm);
     font-weight: 600; text-decoration: none;
 }

@@ -11,7 +11,7 @@
 
 <HeimdallDocument Title="@I18n.T("page.title.login")" BasePath="@BasePath" HideNav="true" HideFooter="true" BodyClass="hmd-login-body" MainClass="hmd-login">
     <div class="hmd-login-card">
-        <div class="hmd-login-brand"><span aria-hidden="true">⌖</span> Heimdall</div>
+        <div class="hmd-login-brand">@Heimdall.Blazor.HeimdallMark.Brand("hmd-bif-login") Heimdall</div>
         <h1>@I18n.T("login.heading")</h1>
         @if (!string.IsNullOrEmpty(Error))
         {
@@ -31,7 +31,7 @@
             </label>
             <button type="submit" class="hmd-login-btn">@I18n.T("login.submit")</button>
         </form>
-        <p class="hmd-login-hint"><span aria-hidden="true">⌖</span> @I18n.T("login.hint")</p>
+        <p class="hmd-login-hint">@Heimdall.Blazor.HeimdallMark.Brand("hmd-bif-login-hint") @I18n.T("login.hint")</p>
     </div>
 </HeimdallDocument>
 

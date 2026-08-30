@@ -86,6 +86,12 @@ public static class HeimdallI18n
         ["home.kpi.errtraces"]      = Lang("Fehler-Traces", "Error traces", "Traces d'erreur"),
         ["kpi.sub.total"]           = Lang("gesamt", "total", "total"),
         ["kpi.sub.latest"]          = Lang("neueste {0}", "newest {0}", "{0} récentes"),
+        // --- Signal-Band (Home-Hero „Wachtband“) ----------------------------
+        ["home.band.t"]              = Lang("Signale · letzte Stunde", "Signals · last hour", "Signaux · dernière heure"),
+        ["home.band.axis.from"]      = Lang("vor 60 min", "60 min ago", "il y a 60 min"),
+        ["home.band.axis.mid"]      = Lang("vor 30 min", "30 min ago", "il y a 30 min"),
+        ["home.band.axis.now"]       = Lang("jetzt", "now", "maintenant"),
+        ["home.band.tip.ago"]        = Lang("vor {0} min", "{0} min ago", "il y a {0} min"),
         // --- Navcards (Home + Drilldown teilen sich diese) -------------------
         ["navcard.dashboard.t"]     = Lang("Dashboard", "Dashboard", "Tableau de bord"),
         ["navcard.dashboard.sub"]   = Lang("RED-Metriken, Latenzen, Uptime", "RED metrics, latency, uptime", "Métriques RED, latence, disponibilité"),

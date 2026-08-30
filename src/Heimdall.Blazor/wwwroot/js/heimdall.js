@@ -1,10 +1,11 @@
 // Heimdall — minimales Progressive-Enhancement-JS (Vanilla, kein Build-Step, kein npm).
 //
-// Vier Bereiche (alle ohne JS optional — die Seite bleibt nutzbar):
+// Fünf Bereiche (alle ohne JS optional — die Seite bleibt nutzbar):
 //   1. Hover-Tooltips auf Linienchart-Punkten (.hmd-chart-pt mit data-t/data-v/data-label).
 //   2. Crosshair + synchrone Wertanzeige auf Liniencharts (SVG mit .hmd-chart-data-Payload).
 //   3. Brushing/Zoom: horizontaler Drag im Chart → Redirect mit from/to (Unix-ns).
 //   4. Zeitpicker: datetime-local → Unix-ns (hidden from/to) beim Submit; Auto-Refresh.
+//   5. Signal-Band (Übersicht): Crosshair + Tooltip je Lane (.hmd-band-chart mit data-vals).
 //
 // Charts/Punkte werden server-seitig als SVG gerendert (HeimdallCharting); dieses Script
 // reichert sie nur client-seitig an. Theme-Tokens (--hmd-*) kommen aus dem Heimdall-CSS.
@@ -119,6 +120,7 @@
     document.addEventListener("pointermove", function (e) {
         if (currentTarget) position(e.clientX, e.clientY);
         updateCrosshair(e);
+        updateBand(e);
     });
     document.addEventListener("pointerout", function (e) {
         var el = pointFromEvent(e);
@@ -246,6 +248,11 @@
             var rt = e.relatedTarget;
             if (!rt || !svg.contains(rt)) hideCross(svg);
         }
+        var chart = bandChartFromEvent(e);
+        if (chart) {
+            var rt2 = e.relatedTarget;
+            if (!rt2 || !chart.contains(rt2)) hideBand(chart);
+        }
     });
 
     // --- Brushing/Zoom: Drag → from/to-Redirect --------------------------
@@ -305,6 +312,93 @@
         params.delete("preset");
         location.search = params.toString();
     });
+
+    // === Signal-Band (Übersicht): Crosshair + Tooltip je Lane ============
+    // Der Server liefert je Lane 60 Minuten-Buckets als SVG (Linie/Fläche über
+    // Null-Basis, Endpunkt-Dot als HTML) plus data-vals/data-max — hier kommt
+    // nur der Hover-Layer dazu: vertikale Fadenkreuz-Linie im SVG, runder
+    // Punkt + Tooltip als HTML-Spans (kreisrund trotz preserveAspectRatio=
+    // "none"). Ohne JS bleibt die Lane voll lesbar (Wert + Rate im Meta-Block).
+
+    function bandChartFromEvent(e) {
+        return e.target && e.target.closest ? e.target.closest(".hmd-band-chart") : null;
+    }
+
+    function bandVals(chart) {
+        if (chart._hmdVals !== undefined) return chart._hmdVals;
+        var raw = chart.getAttribute("data-vals") || "";
+        var vals = [], parts = raw.split(",");
+        for (var i = 0; i < parts.length; i++) {
+            var n = Number(parts[i]);
+            if (isFinite(n)) vals.push(n);
+        }
+        chart._hmdVals = vals;
+        return vals;
+    }
+
+    function ensureBandEls(chart) {
+        if (chart._hmdBand !== undefined) return;
+        var svg = chart.querySelector("svg");
+        if (!svg) { chart._hmdBand = null; return; }
+        var vb = svg.viewBox && svg.viewBox.baseVal;
+        var vw = vb && vb.width ? vb.width : 600;
+        var vh = vb && vb.height ? vb.height : 56;
+        var line = document.createElementNS(SVGNS, "line");
+        line.setAttribute("class", "hmd-band-xhair");
+        line.setAttribute("x1", "0");
+        line.setAttribute("x2", "0");
+        line.setAttribute("y1", "0");
+        line.setAttribute("y2", String(vh));
+        svg.appendChild(line);
+        var dot = document.createElement("span");
+        dot.className = "hmd-band-hoverdot";
+        chart.appendChild(dot);
+        var tip = document.createElement("span");
+        tip.className = "hmd-band-tip";
+        chart.appendChild(tip);
+        chart._hmdBand = { line: line, dot: dot, tip: tip, vw: vw, vh: vh };
+    }
+
+    function hideBand(chart) {
+        var b = chart._hmdBand;
+        if (!b) return;
+        b.line.style.visibility = "hidden";
+        b.dot.style.visibility = "hidden";
+        b.tip.style.visibility = "hidden";
+    }
+
+    function updateBand(e) {
+        var chart = bandChartFromEvent(e);
+        if (!chart) return;
+        var vals = bandVals(chart);
+        if (!vals || vals.length < 2) return;
+        ensureBandEls(chart);
+        var b = chart._hmdBand;
+        if (!b) return;
+        var rect = chart.getBoundingClientRect();
+        if (!rect.width) return;
+        var fx = (e.clientX - rect.left) / rect.width;
+        if (fx < 0 || fx > 1) { hideBand(chart); return; }
+        var i = Math.round(fx * (vals.length - 1));
+        var v = vals[i];
+        // Punkt-Höhe wie server (HeimdallCharting: Null-Basis, 3px Padding oben/unten).
+        var max = Number(chart.getAttribute("data-max")) || 1;
+        var y = b.vh - 3 - (v / max) * (b.vh - 6);
+        b.line.setAttribute("x1", String(fx * b.vw));
+        b.line.setAttribute("x2", String(fx * b.vw));
+        b.line.style.visibility = "visible";
+        b.dot.style.left = (fx * 100) + "%";
+        b.dot.style.top = (y / b.vh * 100) + "%";
+        b.dot.style.visibility = "visible";
+        var ago = (chart.getAttribute("data-ago") || "{0}")
+            .replace("{0}", String(vals.length - 1 - i));
+        b.tip.textContent = ago + " · " + fmtValue(v) + " " + (chart.getAttribute("data-lbl") || "");
+        b.tip.style.visibility = "visible";
+        // Tooltip horizontal klemmen, damit er an den Bandrändern nicht hinausläuft.
+        var tw = b.tip.offsetWidth;
+        var leftPx = Math.min(Math.max(fx * rect.width, tw / 2 + 2), rect.width - tw / 2 - 2);
+        b.tip.style.left = leftPx + "px";
+    }
 
     // === Zeitpicker: datetime-local → Unix-ns + Auto-Refresh ============
 

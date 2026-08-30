@@ -632,6 +632,58 @@ internal static class HeimdallCharting
     }
 
     /// <summary>
+    /// Lane des Signal-Bandes („Wachtband“) auf der Übersicht: 60 Minuten-Buckets
+    /// als Linie + Fläche über einer NULL-Basislinie (Volumen ist absolut —
+    /// Skala immer 0..max, bei lauter Nullen bleibt die Grundlinie unten) plus
+    /// drei dezente Gitterlinien. Liefert das gestreckte SVG
+    /// (<c>preserveAspectRatio="none"</c>, volle Breite via CSS) UND den
+    /// Endpunkt-Dot als HTML-<c>&lt;span&gt;</c>: Kreise im gestreckten SVG
+    /// würden zu Ellipsen verzerren, ein HTML-Dot bleibt kreisrund. Der Dot
+    /// trägt seine Höhe inline (Prozent), horizontal sitzt er fest am rechten
+    /// Rand (der letzte Bucket ist immer „jetzt“). Bei &lt; 2 Punkten leer.
+    /// </summary>
+    public static string RenderBandLaneSvg(IReadOnlyList<(long Tms, double V)> pts, int w = 600, int h = 56)
+    {
+        if (pts is null || pts.Count < 2) return string.Empty;
+        const double PadTop = 3, PadBottom = 3;
+        double max = 0;
+        foreach (var p in pts) { if (p.V > max) max = p.V; }
+        if (!(max > 0)) max = 1;                        // lauter Nullen → Grundlinie
+        double usable = h - PadTop - PadBottom;
+
+        var sb = new StringBuilder(160 + pts.Count * 12);
+        sb.Append("<svg class=\"hmd-band-lane-svg\" viewBox=\"0 0 ").Append(w).Append(' ')
+          .Append(h).Append("\" preserveAspectRatio=\"none\" aria-hidden=\"true\">");
+        sb.Append("<g class=\"hmd-band-grid\">");
+        for (int g = 1; g <= 3; g++)
+        {
+            double gy = h * g / 4.0;
+            sb.Append("<line x1=\"0\" x2=\"").Append(w).Append("\" y1=\"").Append(F(gy))
+              .Append("\" y2=\"").Append(F(gy)).Append("\"/>");
+        }
+        sb.Append("</g>");
+
+        double dx = (double)w / (pts.Count - 1);
+        double baseY = h - PadBottom, lastY = baseY;
+        var path = new StringBuilder(pts.Count * 12);
+        for (int i = 0; i < pts.Count; i++)
+        {
+            double y = baseY - (pts[i].V / max) * usable;
+            lastY = y;
+            path.Append(i == 0 ? 'M' : 'L').Append(F(i * dx)).Append(' ').Append(F(y)).Append(' ');
+        }
+        // Fläche: Wertelinie + Schließen entlang der Null-Basislinie.
+        sb.Append("<path class=\"hmd-band-area\" d=\"").Append(path)
+          .Append("L").Append(F(w)).Append(' ').Append(F(baseY))
+          .Append(" L0 ").Append(F(baseY)).Append(" Z\"/>");
+        sb.Append("<path class=\"hmd-band-line\" d=\"").Append(path).Append("\"/>");
+        sb.Append("</svg>");
+        sb.Append("<span class=\"hmd-band-enddot\" aria-hidden=\"true\" style=\"top:")
+          .Append(F(lastY / h * 100.0)).Append("%\"></span>");
+        return sb.ToString();
+    }
+
+    /// <summary>
     /// Erzeugt ein Kreisdiagramm (Pie) als SVG mit rechtsseitiger Legende.
     /// Negatives/NaN werden abgesichert; die Gesamtsumme darf null sein
     /// (dann bleibt ein grauer Vollkreis).
