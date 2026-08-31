@@ -54,6 +54,40 @@ public class HostPathBaseTests : HostBootTestBase
         Assert.Contains("/otel/_content/Heimdall.Blazor/css/heimdall.css", html);
         Assert.DoesNotContain("href=\"/_content/Heimdall.Blazor/css/heimdall.css\"", html);
     }
+
+    /// <summary>Regression: die Redirects des Dashboard-Import-POSTs müssen die
+    /// PathBase mitführen (wie alle anderen POST-Redirects auch) — sonst 404 nach
+    /// JEDEM Submit unter IIS-Unterverzeichnis/Proxy-Pfad-Strip.</summary>
+    [Fact]
+    public async Task Dashboard_Import_Post_Redirectet_Mit_PathBase()
+    {
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(
+            @"{ ""uid"": ""pb-import-test"", ""title"": ""PathBase Import"", ""panels"": [] }"),
+            "file", "dashboard.json");
+
+        var resp = await CreateClient(new Uri("http://localhost/otel/"), allowAutoRedirect: false)
+            .PostAsync("otel/dashboards/import", form);
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
+        Assert.Equal("/otel/otel/dashboards/pb-import-test", resp.Headers.Location?.ToString());
+    }
+
+    /// <summary>Regression: der Leer-Submit-Fehler-Redirect (err=QueryParam) muss
+    /// ebenfalls die PathBase tragen, sonst verliert die Fehlermeldung den Kontext.</summary>
+    [Fact]
+    public async Task Dashboard_Import_Post_Ohne_Inhalt_Redirectet_Mit_PathBase()
+    {
+        // Wie das echte Formular ohne Auswahl: leerer file-Teil + leeres json-Feld.
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(string.Empty), "file", "empty.json");
+        form.Add(new StringContent(string.Empty), "json");
+
+        var resp = await CreateClient(new Uri("http://localhost/otel/"), allowAutoRedirect: false)
+            .PostAsync("otel/dashboards/import", form);
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
+        var loc = resp.Headers.Location?.ToString() ?? string.Empty;
+        Assert.StartsWith("/otel/otel/dashboards/import?err=", loc);
+    }
 }
 
 /// <summary>

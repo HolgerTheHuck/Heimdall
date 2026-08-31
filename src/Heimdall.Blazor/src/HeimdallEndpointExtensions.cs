@@ -228,13 +228,14 @@ public static class HeimdallEndpointExtensions
                 content = await sr.ReadToEndAsync();
             }
             else if (!string.IsNullOrWhiteSpace(form["json"])) content = form["json"];
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);   // PathBase mitschleppen
             if (string.IsNullOrWhiteSpace(content))
             {
                 var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
-                return Results.Redirect($"{prefix}/dashboards/import?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.nodashboardjson")));
+                return Results.Redirect($"{full}/dashboards/import?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.nodashboardjson")));
             }
-            try { var uid = store.Save(content!); return Results.Redirect($"{prefix}/dashboards/{uid}"); }
-            catch (Exception ex) { return Results.Redirect($"{prefix}/dashboards/import?err=" + Uri.EscapeDataString(ex.Message)); }
+            try { var uid = store.Save(content!); return Results.Redirect($"{full}/dashboards/{uid}"); }
+            catch (Exception ex) { return Results.Redirect($"{full}/dashboards/import?err=" + Uri.EscapeDataString(ex.Message)); }
         });
 
         group.MapGet("/dashboards/{uid}", (HttpContext ctx, string uid, string? preset, string? from, string? to) =>
@@ -446,8 +447,11 @@ public static class HeimdallEndpointExtensions
         var referer = ctx.Request.Headers.Referer.ToString();
         if (string.IsNullOrEmpty(referer)) return null;
         if (!Uri.TryCreate(referer, UriKind.Absolute, out var uri)) return null;
+        // Der externe Referer-Pfad trägt die PathBase (IIS-Unterverzeichnis/
+        // Proxy-Pfad-Strip) — mit FullPrefix vergleichen, sonst schlägt der
+        // Prefix-Check unter PathBase-Deployment immer fehl (Back-Link nie da).
         var path = uri.AbsolutePath;
-        var dashRoot = prefix + "/dashboards/";
+        var dashRoot = HeimdallUiPaths.FullPrefix(ctx, prefix) + "/dashboards/";
         if (!path.StartsWith(dashRoot, StringComparison.Ordinal)) return null;
         var rest = path.Substring(dashRoot.Length);
         var seg = rest.Split('/', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
