@@ -206,6 +206,8 @@ public static class HeimdallI18n
         // --- Allgemein (mehrere Seiten) --------------------------------------
         ["common.back.to"]   = Lang("zurück zur", "back to", "retour à la"),
         ["common.row.range"] = Lang("Zeile {0}–{1}", "Row {0}–{1}", "Ligne {0}–{1}"),
+        // Tooltip (title) auf der Service-Chip-Gruppe (Traces + Logs): nichts gewählt = alle.
+        ["common.filter.svc.none.all"] = Lang("nichts gewählt = alle", "none selected = all", "aucun sélectionné = tous"),
         ["table.status"]     = Lang("Status", "Status", "Statut"),
 
         // --- Metriken-Seite --------------------------------------------------

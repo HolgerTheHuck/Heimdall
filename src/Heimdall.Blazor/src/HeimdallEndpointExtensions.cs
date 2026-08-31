@@ -102,13 +102,14 @@ public static class HeimdallEndpointExtensions
         group.MapGet("/drilldown", (HttpContext ctx) =>
             new RazorComponentResult<DrilldownPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix) }));
 
-        group.MapGet("/traces", (HttpContext ctx, string? name, string? svc, string? ver, string? err, string? limit, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
+        group.MapGet("/traces", (HttpContext ctx, string? name, string[]? svc, string? ver, string? err, string? limit, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
             new RazorComponentResult<TracesPage>(new
             {
                 BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 NameContains = name,
-                // Selects schicken bei „alle" leere Values mit -> null.
-                ServiceName = NullIfEmpty(svc ?? ""),
+                // Chips schicken pro gewaehltem Service ein wiederholtes svc= mit
+                // (leeres svc= bei „alle" wird elementweise weggesanitaert).
+                ServiceNames = ParseSvcList(svc),
                 ServiceVersion = NullIfEmpty(ver ?? ""),
                 HasError = ParseErr(err),
                 Limit = ParseInt(limit) ?? 100,
@@ -123,16 +124,17 @@ public static class HeimdallEndpointExtensions
         group.MapGet("/trace/{tid}", (HttpContext ctx, string tid) =>
             new RazorComponentResult<TraceDetailPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), TraceId = tid }));
 
-        group.MapGet("/logs", (HttpContext ctx, string? text, string? q, string? sev, string? svc, string? ver, string? limit, string? expand, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
+        group.MapGet("/logs", (HttpContext ctx, string? text, string? q, string? sev, string[]? svc, string? ver, string? limit, string? expand, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
             new RazorComponentResult<LogsPage>(new
             {
                 BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 Text = text,
                 Query1 = q,
                 MinSeverity = ParseInt(sev),
-                // Selects schicken bei „alle" leere Values mit -> null, sonst
+                // Chips schicken pro gewaehltem Service ein wiederholtes svc= mit;
+                // leere Werte („alle") werden elementweise weggesanitaert, sonst
                 // wuerde ein leerer String als Filterwert interpretiert.
-                ServiceName = NullIfEmpty(svc ?? ""),
+                ServiceNames = ParseSvcList(svc),
                 ServiceVersion = NullIfEmpty(ver ?? ""),
                 Limit = ParseInt(limit) ?? 200,
                 Expand = expand == "1",
@@ -420,6 +422,22 @@ public static class HeimdallEndpointExtensions
             System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null;
 
     private static string? NullIfEmpty(string s) => string.IsNullOrWhiteSpace(s) ? null : s;
+
+    /// <summary>Service-Multi-Select (Chips): wiederholte <c>svc=a&amp;svc=b</c>-
+    /// Query-Params binden als Array. Elementweise Sanitierung — leere Strings
+    /// (Chip-„alle"-Submit) fallen raus, Duplikate ebenso; alles leer = kein
+    /// Filter = alle Services.</summary>
+    private static System.Collections.Generic.IReadOnlyList<string>? ParseSvcList(string[]? raw)
+    {
+        if (raw is null || raw.Length == 0) return null;
+        System.Collections.Generic.List<string> result = new(raw.Length);
+        foreach (var s in raw)
+        {
+            var v = NullIfEmpty(s ?? "");
+            if (v is not null && !result.Contains(v)) result.Add(v);
+        }
+        return result.Count == 0 ? null : result;
+    }
 
     private static int? ParseInt(Microsoft.Extensions.Primitives.StringValues v) =>
         int.TryParse(v.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : null;

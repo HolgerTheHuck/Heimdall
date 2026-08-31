@@ -264,20 +264,24 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         sb.Append("FROM heim_spans WHERE 1=1");
         var ps = new List<SqliteParameter>();
         AddRange(sb, ps, filter);
-        if (filter.ServiceName is not null || filter.ServiceVersion is not null)
+        // Effektive Service-Liste: Multi-Select (IN, ODER innerhalb der Liste) hat
+        // Vorrang, sonst Fallback auf das einzelne ServiceName (Alert-Regeln,
+        // aeltere Aufrufer). Leere Strings fallen defensiv raus.
+        var svcNames = EffectiveServiceNames(filter.ServiceNames, filter.ServiceName);
+        if (svcNames is not null)
         {
-            // Service-/Version-Filter index-gestuetzt ueber heim_span_attrs (statt
+            // Service-Filter index-gestuetzt ueber heim_span_attrs (statt
             // frueherem resource_json LIKE — Full-Scan mit Substring-Semantik).
-            // INTERSECT erzwingt Paar-Semantik auf DEMSELBEN Span (Name+Version
-            // zusammen), nicht „irgendein Span hat den Namen, irgendein die Version".
+            // INTERSECT erzwingt Paar-Semantik auf DEMSELBEN Span (Service+Version
+            // zusammen), nicht „irgendein Span hat den Service, irgendein die Version".
             // Semantik-Aenderung: exakter Match statt Substring — alte Bookmarks
             // mit Teil-Strings filtern strenger.
             sb.Append(" AND trace_id IN (SELECT trace_id FROM heim_spans WHERE rowid IN (" +
-                      "SELECT span_rowid FROM heim_span_attrs WHERE key IN ('service.name','service_name') AND value = @svc");
+                      "SELECT span_rowid FROM heim_span_attrs WHERE key IN ('service.name','service_name') AND value IN (" +
+                      BuildInList(svcNames, ps, "sv") + ")");
             if (filter.ServiceVersion is not null)
                 sb.Append(" INTERSECT SELECT span_rowid FROM heim_span_attrs WHERE key IN ('service.version','service_version') AND value = @svcver");
             sb.Append("))");
-            if (filter.ServiceName is not null) ps.Add(Param("@svc", filter.ServiceName));
             if (filter.ServiceVersion is not null) ps.Add(Param("@svcver", filter.ServiceVersion));
         }
         if (filter.NameContains is not null)
@@ -367,17 +371,15 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     public IReadOnlyList<LogRow> SearchLogs(LogSearch search)
     {
         search ??= new LogSearch();
-        // Dedizierte Service-/Version-Felder (Dropdown der UI) intern auf AttrFilter
-        // abbilden -> derselbe index-gestuetzte Pfad, UND-verknuepft mit den
-        // LogQL-Feldfiltern aus AttrFilters (Konfliktfall, z. B. q={service.name="a"}
-        // + Dropdown "b", liefert leer — vorhersagbar, keine Merge-Magie).
-        if (search.ServiceName is not null || search.ServiceVersion is not null)
+        // Dedizierte Service-/Version-Felder (Chips/Dropdown der UI): Version bleibt
+        // AttrFilter (Paar-Semantik auf derselben Log-Zeile, UND mit allem anderen).
+        // Der Service bekommt einen EIGENEN IN-Pfad — als mehrere '='-AttrFilter
+        // abgebildet waere das UND und damit immer leer.
+        var svcNames = EffectiveServiceNames(search.ServiceNames, search.ServiceName);
+        if (search.ServiceVersion is not null)
         {
             var filters = new List<AttrFilter>(search.AttrFilters ?? (IReadOnlyList<AttrFilter>)Array.Empty<AttrFilter>());
-            if (search.ServiceName is not null)
-                filters.Add(new AttrFilter("service.name", "=", search.ServiceName));
-            if (search.ServiceVersion is not null)
-                filters.Add(new AttrFilter("service.version", "=", search.ServiceVersion));
+            filters.Add(new AttrFilter("service.version", "=", search.ServiceVersion));
             search = search with { AttrFilters = filters };
         }
         var sb = SqlBuilder();
@@ -429,6 +431,14 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 }
                 i++;
             }
+        }
+        // Service-Filter (single ODER Multi-Select): ODER innerhalb der Liste via
+        // IN, UND mit allem anderen. Index-gestuetzt ueber heim_log_attrs wie die
+        // Feldfilter; Key-Normalisierung service.name ODER service_name.
+        if (svcNames is not null)
+        {
+            sb.Append(" AND rowid IN (SELECT log_rowid FROM heim_log_attrs WHERE key IN ('service.name','service_name') AND value IN (" +
+                      BuildInList(svcNames, ps, "sv") + "))");
         }
         // Sortierung VOR dem Paging (Allowlist — kein Raw-Input im SQL).
         //   time → ts_unix_nano · severity → severity. Default: ts_unix_nano DESC.
@@ -521,6 +531,40 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     {
         if (f.FromUnixNano is not null) { sb.Append(" AND start_unix_nano >= @from"); ps.Add(Param("@from", f.FromUnixNano.Value)); }
         if (f.ToUnixNano is not null) { sb.Append(" AND start_unix_nano <= @to"); ps.Add(Param("@to", f.ToUnixNano.Value)); }
+    }
+
+    /// <summary>Effektive Service-Filter-Liste: Multi-Select
+    /// (<paramref name="serviceNames"/>, ODER innerhalb der Liste) hat Vorrang,
+    /// sonst Fallback auf das einzelne <paramref name="serviceName"/> (Alert-Regeln,
+    /// aeltere Aufrufer). Leere Strings fallen defensiv raus; leere Effektiv-Liste
+    /// = kein Filter („alle").</summary>
+    private static List<string>? EffectiveServiceNames(IReadOnlyList<string>? serviceNames, string? serviceName)
+    {
+        List<string> result = new();
+        if (serviceNames is { Count: > 0 })
+        {
+            foreach (var s in serviceNames)
+                if (!string.IsNullOrEmpty(s) && !result.Contains(s)) result.Add(s);
+        }
+        else if (!string.IsNullOrEmpty(serviceName))
+        {
+            result.Add(serviceName);
+        }
+        return result.Count == 0 ? null : result;
+    }
+
+    /// <summary>Baut ein parameterisiertes <c>@pfx0,@pfx1,...</c>-Fragment fuer
+    /// eine IN-Klausel und haengt die Parameter an <paramref name="ps"/> an —
+    /// Werte landen nie im SQL-Text. Fuer die Multi-Select-Service-Filter.</summary>
+    private static string BuildInList(List<string> values, List<SqliteParameter> ps, string prefix)
+    {
+        var names = new string[values.Count];
+        for (int i = 0; i < values.Count; i++)
+        {
+            names[i] = "@" + prefix + i.ToString(CultureInfo.InvariantCulture);
+            ps.Add(Param(names[i], values[i]));
+        }
+        return string.Join(",", names);
     }
 
     private static StringBuilder SqlBuilder() => new StringBuilder(256);

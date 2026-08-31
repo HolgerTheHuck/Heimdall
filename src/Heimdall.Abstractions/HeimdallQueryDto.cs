@@ -68,7 +68,11 @@ public sealed record MetricRow(
 /// (Allowlist im SQLite-Backend), <c>Dir</c> ∈ asc/desc; null = bisher
 /// (neueste zuerst, first_start DESC). <c>ServiceName</c>/<c>ServiceVersion</c>
 /// greifen auf die Resource-Attribute zu (Paar-Semantik auf demselben Span);
-/// der SQLite-Backend filtert sie indexgestuetzt exakt (kein Substring).</summary>
+/// der SQLite-Backend filtert sie indexgestuetzt exakt (kein Substring).
+/// <c>ServiceNames</c> (Multi-Select) ist die ODER-Liste: die Zeile braucht
+/// <c>service.name</c> aus der Liste (IN), UND-verknuepft mit allem anderen
+/// inkl. <c>ServiceVersion</c>. Greift nur wenn nicht leer — sonst Fallback auf
+/// <c>ServiceName</c> (Alert-Regeln, aeltere Aufrufer).</summary>
 public sealed record TraceFilter(
     long? FromUnixNano = null,
     long? ToUnixNano = null,
@@ -79,7 +83,8 @@ public sealed record TraceFilter(
     int Limit = 100,
     int Offset = 0,
     string? Sort = null,
-    string? Dir = null);
+    string? Dir = null,
+    IReadOnlyList<string>? ServiceNames = null);
 
 /// <summary>Filter fuer die flache Span-Auflistung (z. B. Server-Spans im
 /// Zeitfenster, gruppiert in der App nach Controller/Endpoint). Kind ist der
@@ -108,7 +113,12 @@ public sealed record AttrFilter(string Key, string Op, string Value);
 /// <c>ServiceName</c>/<c>ServiceVersion</c> sind dedizierte Feldfilter auf den
 /// Resource-Attribute (Paar-Semantik auf derselben Log-Zeile) — das Backend
 /// bildet sie intern auf <see cref="AttrFilter"/> ab, d. h. UND-verknuepft
-/// mit <c>AttrFilters</c> und allem anderen.</summary>
+/// mit <c>AttrFilters</c> und allem anderen.
+/// <c>ServiceNames</c> (Multi-Select) ist die ODER-Liste: die Zeile braucht
+/// <c>service.name</c> aus der Liste (IN), UND-verknuepft mit allem anderen
+/// inkl. <c>ServiceVersion</c>. Greift nur wenn nicht leer — sonst Fallback auf
+/// <c>ServiceName</c>. Darf NICHT als mehrere <c>=</c>-AttrFilters abgebildet
+/// werden (waere UND und damit immer leer).</summary>
 public sealed record LogSearch(
     string? Text = null,
     int? MinSeverity = null,
@@ -121,7 +131,8 @@ public sealed record LogSearch(
     int Limit = 200,
     int Offset = 0,
     string? Sort = null,
-    string? Dir = null);
+    string? Dir = null,
+    IReadOnlyList<string>? ServiceNames = null);
 
 /// <summary>Signal-Volumen pro Zeit-Bucket (z. B. pro Minute) für die
 /// Übersichts-Seite: Spans/Logs/Metrik-Punkte, die in den Bucket fallen.

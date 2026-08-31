@@ -284,6 +284,87 @@ public class ServiceFilterTests
         finally { TryDelete(path); }
     }
 
+    // === Filter: Multi-Select (ServiceNames) ==============================
+
+    [Fact]
+    public void SearchLogs_ServiceNames_IN_OderInnerhalbDerListe()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = NewSql(path);
+            sink.WriteLogs(new[]
+            {
+                Log(NowNs,     "msg-shop-v1", "shop",    "v1"),
+                Log(NowNs + 1, "msg-bill-v2", "billing", "v2"),
+                Log(NowNs + 2, "msg-worker",  "worker"),
+                Log(NowNs + 3, "msg-shop-v9", "shop",    "v9"),
+            });
+
+            // ODER innerhalb der Liste: shop- UND billing-Logs, kein worker.
+            var both = sink.SearchLogs(new LogSearch { ServiceNames = new[] { "shop", "billing" }, Limit = 100 });
+            Assert.Equal(3, both.Count);
+            Assert.DoesNotContain("msg-worker", Bodies(both));
+
+            // UND mit Version bleibt Paar-Semantik auf derselben Zeile.
+            var pair = sink.SearchLogs(new LogSearch { ServiceNames = new[] { "shop", "billing" }, ServiceVersion = "v2", Limit = 100 });
+            Assert.Equal(new[] { "msg-bill-v2" }, Bodies(pair));
+        }
+        finally { TryDelete(path); }
+    }
+
+    [Fact]
+    public void SearchLogs_ServiceNames_NimmtVorrangVorEinzelServiceName()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = NewSql(path);
+            sink.WriteLogs(new[]
+            {
+                Log(NowNs,     "msg-shop", "shop"),
+                Log(NowNs + 1, "msg-bill", "billing"),
+            });
+
+            // Nicht-leere Liste hat Vorrang (dokumentierte Rangfolge).
+            var hits = sink.SearchLogs(new LogSearch { ServiceName = "shop", ServiceNames = new[] { "billing" }, Limit = 100 });
+            Assert.Equal(new[] { "msg-bill" }, Bodies(hits));
+
+            // Leere Liste = kein Filter -> Fallback auf ServiceName.
+            var fallback = sink.SearchLogs(new LogSearch { ServiceName = "shop", ServiceNames = Array.Empty<string>(), Limit = 100 });
+            Assert.Equal(new[] { "msg-shop" }, Bodies(fallback));
+        }
+        finally { TryDelete(path); }
+    }
+
+    [Fact]
+    public void ListTraces_ServiceNames_IN_UndVersionPaarSemantik()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = NewSql(path);
+            sink.WriteSpans(new[]
+            {
+                Span(1, 1, "shop",    "v1"),
+                Span(2, 2, "billing", "v1"),
+                Span(3, 3, "worker",  null),
+                Span(4, 4, "billing", "v2"),
+            });
+
+            // ODER innerhalb der Liste: T1, T2 und T4 — nicht T3 (worker).
+            var both = sink.ListTraces(new TraceFilter { ServiceNames = new[] { "shop", "billing" }, Limit = 100 });
+            Assert.Equal(3, both.Count);
+            Assert.DoesNotContain(Tid(3).hex, both.Select(t => t.TraceId));
+
+            // UND mit Version: Paar auf demselben Span — nur T4 (billing/v2).
+            var pair = sink.ListTraces(new TraceFilter { ServiceNames = new[] { "shop", "billing" }, ServiceVersion = "v2", Limit = 100 });
+            Assert.Single(pair);
+            Assert.Equal(Tid(4).hex, pair[0].TraceId);
+        }
+        finally { TryDelete(path); }
+    }
+
     private static void TryDelete(string path)
     {
         if (File.Exists(path)) try { File.Delete(path); } catch { }

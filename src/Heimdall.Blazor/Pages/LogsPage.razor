@@ -14,7 +14,7 @@
     <h1>@I18n.T("page.title.logs")</h1>
 
     <form class="hmd-filters" method="get" action="@(BasePath + "/logs")">
-        <label class="hmd-logq">@I18n.T("logs.filter.search") <input type="search" name="q" value="@Query1" placeholder="{service.name=\"shop\"} |= \"timeout\"" /></label>
+        <label class="hmd-logq">@I18n.T("logs.filter.search") <input type="search" name="q" value="@Query1" placeholder="{service.name=\"shop\"} |= \"timeout\"" title="@LogqlHint" /></label>
         <label>@I18n.T("logs.filter.text") <input type="search" name="text" value="@Text" placeholder="timeout" /></label>
         <label>@I18n.T("logs.filter.severity")
             <select name="sev">
@@ -25,23 +25,26 @@
                 <option value="21" selected="@(MinSeverity == 21)">FATAL</option>
             </select>
         </label>
-        @* Service-/Version-Dropdown (Discovery, siehe OnInitialized). Version haengt
-           am Service: ohne Service disabled (kein Wert), mit Service nur die
-           Versionen DIESES Service. Abhaengigkeit ohne JS: der Service-Wechsel
-           wirkt beim naechsten Submit (Zeit-Preset oder „Suchen"), der Server
-           rendert dann die Versionsliste des neuen Service. *@
-        <label>@I18n.T("logs.filter.service")
-            <select name="svc">
-                <option value="" selected="@(ServiceName is null)">@I18n.T("traces.status.all")</option>
-                @foreach (var s in _services)
-                {
-                    <option value="@s" selected="@(s == ServiceName)">@s</option>
-                }
-            </select>
-        </label>
+        @* Service-Chips (Multi-Select; Discovery, siehe OnInitialized). Wiederholte
+           svc=-Params im GET-Form, kein Haken = alle. Version haengt am Service:
+           nur bei GENAU EINEM gewaehlten Service aktiv (Paar-Semantik), sonst
+           disabled. Abhaengigkeit ohne JS: wirkt beim naechsten Submit (Zeit-Preset
+           oder „Suchen"), der Server rendert dann die Versionsliste des Service. *@
+        <div class="hmd-filter-field">
+            <span class="hmd-filter-label">@I18n.T("logs.filter.service")</span>
+            @if (_services.Count > 0)
+            {
+                <div class="hmd-chips" role="group" aria-label="@I18n.T("logs.filter.service")" title="@I18n.T("common.filter.svc.none.all")">
+                    @foreach (var s in _services)
+                    {
+                        <label class="hmd-chip"><input type="checkbox" name="svc" value="@s" checked="@(_svcSel.Contains(s))" /><span>@s</span></label>
+                    }
+                </div>
+            }
+        </div>
         <label>@I18n.T("logs.filter.version")
-            <select name="ver" disabled="@(ServiceName is null)">
-                @if (ServiceName is null)
+            <select name="ver" disabled="@(_svcSel.Count != 1)">
+                @if (_svcSel.Count != 1)
                 {
                     <option value="">—</option>
                 }
@@ -60,7 +63,6 @@
         <button type="submit">@I18n.T("logs.filter.submit")</button>
         <label class="hmd-inline-chk"><input type="checkbox" name="expand" value="1" checked="@Expand" /> @I18n.T("logs.expand")</label>
     </form>
-    <p class="hmd-dim hmd-logq-hint">@I18n.T("logs.syntax.prefix") <code>@I18n.T("logs.syntax.example")</code> @I18n.T("logs.syntax.f1") <code>service.name</code>@I18n.T("logs.syntax.f2") <code>|= "text"</code> @I18n.T("logs.syntax.bodytext") <code>= != =~ !~</code>.</p>
 
     @if (_logs.Count == 0)
     {
@@ -129,8 +131,9 @@
     // LogQL-Suchfeld (Vorrang vor Text): {k=v} |= "t" -> AttrFilters + Body-Text.
     [Parameter] public string? Query1 { get; set; }
     [Parameter] public int? MinSeverity { get; set; }
-    // Service-/Version-Dropdown (Discovery aus Logs ∪ Spans im Zeitraum).
-    [Parameter] public string? ServiceName { get; set; }
+    // Service-Multi-Select (Chips; Discovery aus Logs ∪ Spans im Zeitraum):
+    // wiederholte svc=-Params; null/leer = alle.
+    [Parameter] public System.Collections.Generic.IReadOnlyList<string>? ServiceNames { get; set; }
     [Parameter] public string? ServiceVersion { get; set; }
     [Parameter] public int Limit { get; set; } = 200;
     [Parameter] public int Offset { get; set; } = 0;
@@ -143,10 +146,19 @@
 
     private List<Heimdall.LogRow> _logs = new();
     private List<string> _services = new();
+    // Sanitierte Service-Auswahl (Schnitt mit Discovery-Liste, dedupliziert,
+    // Reihenfolge erhalten). Leere Liste = kein Haken = alle Services.
+    private List<string> _svcSel = new();
     private List<string> _versions = new();
     private int _offset;
     private int _pageSize;
     private bool _hasMore;
+    // LogQL-Syntax als Tooltip auf dem Suchfeld (statt Absatz darunter, der
+    // Platz wegnimmt und das Filter-Layout unruhig macht).
+    private string LogqlHint =>
+        I18n.T("logs.syntax.prefix") + " " + I18n.T("logs.syntax.example") + " " +
+        I18n.T("logs.syntax.f1") + " service.name" + I18n.T("logs.syntax.f2") +
+        " |= \"text\" " + I18n.T("logs.syntax.bodytext") + " = != =~ !~.";
     // Effektive Sortierung (normalisiert): aktuellste zuerst als Default.
     private string _sort = "time";
     private string _dir = "desc";
@@ -155,18 +167,24 @@
     {
         var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano());
 
-        // Dropdown-Wertemengen (Logs ∪ Spans, im aufgeloesten Zeitraum). Sanitierung:
+        // Chip-Wertemengen (Logs ∪ Spans, im aufgeloesten Zeitraum). Sanitierung:
         // Werte ausserhalb der Discovery-Liste (alte Bookmarks, Tippfehler, stale
-        // ver nach Service-Wechsel im noch nicht neu geladenen DOM) fallen auf
-        // „alle" zurueck — sonst irritiert ein stummer Filter mit leerem Ergebnis.
+        // ver nach Service-Wechsel im noch nicht neu geladenen DOM) fallen raus —
+        // leere Auswahl = „alle", sonst irritiert ein stummer Filter mit leerem
+        // Ergebnis.
         _services = new List<string>(Query.ListServiceNames(range.From, range.To));
-        if (ServiceName is not null && !_services.Contains(ServiceName)) ServiceName = null;
-        if (ServiceName is null) ServiceVersion = null;
-        else
+        if (ServiceNames is not null)
         {
-            _versions = new List<string>(Query.ListServiceVersions(ServiceName, range.From, range.To));
+            foreach (var sn in ServiceNames)
+                if (!string.IsNullOrEmpty(sn) && _services.Contains(sn) && !_svcSel.Contains(sn)) _svcSel.Add(sn);
+        }
+        // Version nur bei GENAU EINEM gewaehlten Service (Paar-Semantik).
+        if (_svcSel.Count == 1)
+        {
+            _versions = new List<string>(Query.ListServiceVersions(_svcSel[0], range.From, range.To));
             if (ServiceVersion is not null && !_versions.Contains(ServiceVersion)) ServiceVersion = null;
         }
+        else ServiceVersion = null;
 
         string? body = string.IsNullOrWhiteSpace(Text) ? null : Text;
         List<Heimdall.AttrFilter>? attrFilters = null;
@@ -198,9 +216,9 @@
             FromUnixNano = range.From,
             ToUnixNano = range.To,
             AttrFilters = attrFilters,
-            // UND-verknuepft mit den LogQL-Feldfiltern (Backend bildet beide auf
-            // denselben Attr-Filter-Pfad ab; Konflikt = leere Menge, keine Merge).
-            ServiceName = ServiceName,
+            // UND-verknuepft mit den LogQL-Feldfiltern (Backend hat einen eigenen
+            // IN-Pfad fuer die Service-Liste; Konflikt = leere Menge, keine Merge).
+            ServiceNames = _svcSel.Count == 0 ? null : _svcSel,
             ServiceVersion = ServiceVersion,
             Limit = _pageSize,
             Offset = _offset,
@@ -247,7 +265,8 @@
         var parts = new List<string>();
         if (!string.IsNullOrEmpty(Query1)) parts.Add("q=" + System.Uri.EscapeDataString(Query1));
         if (!string.IsNullOrEmpty(Text)) parts.Add("text=" + System.Uri.EscapeDataString(Text));
-        if (!string.IsNullOrEmpty(ServiceName)) parts.Add("svc=" + System.Uri.EscapeDataString(ServiceName));
+        // Mehrfachauswahl: ein svc= pro gewaehltem Service (wiederholte Params).
+        foreach (var s in _svcSel) parts.Add("svc=" + System.Uri.EscapeDataString(s));
         if (!string.IsNullOrEmpty(ServiceVersion)) parts.Add("ver=" + System.Uri.EscapeDataString(ServiceVersion));
         if (MinSeverity is int sev) parts.Add("sev=" + sev.ToString(System.Globalization.CultureInfo.InvariantCulture));
         parts.Add("limit=" + _pageSize.ToString(System.Globalization.CultureInfo.InvariantCulture));

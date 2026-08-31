@@ -322,11 +322,12 @@ public class HeimdallUiTests : HostBootTestBase
             null);
 
     /// <summary>
-    /// Das Service-Dropdown listet die Discovery-Menge aus Logs UND Spans —
+    /// Die Service-Chips listen die Discovery-Menge aus Logs UND Spans —
     /// ein Service, der nur Traces schickt („traceonly"), taucht ebenfalls auf.
+    /// Kein Haken gesetzt = „alle" (kein svc=-Param).
     /// </summary>
     [Fact]
-    public async Task LogsSeite_ServiceDropdown_ListetServicesAusLogsUndSpans()
+    public async Task LogsSeite_ServiceChips_ListetServicesAusLogsUndSpans()
     {
         var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
         var t = SeedNowNs();
@@ -334,9 +335,11 @@ public class HeimdallUiTests : HostBootTestBase
         sink.WriteSpans(new[] { SeedSpan(TraceId, RootSpanId, "traceonly") });
 
         var body = await (await Client.GetAsync("/otel/logs")).Content.ReadAsStringAsync();
-        Assert.Contains("<select name=\"svc\"", body);
-        Assert.Contains("value=\"shop\"", body);            // Log-seitiger Discovery-Zweig
-        Assert.Contains("value=\"traceonly\"", body);       // Span-seitiger Discovery-Zweig
+        Assert.Contains("hmd-chip", body);                   // Chip-Gruppe statt Select
+        Assert.DoesNotContain("<select name=\"svc\"", body); // altes Dropdown ist weg
+        Assert.Contains("name=\"svc\"", body);
+        Assert.Contains("value=\"shop\"", body);             // Log-seitiger Discovery-Zweig
+        Assert.Contains("value=\"traceonly\"", body);        // Span-seitiger Discovery-Zweig
     }
 
     /// <summary>
@@ -442,6 +445,77 @@ public class HeimdallUiTests : HostBootTestBase
         var exakt = await (await Client.GetAsync("/otel/traces?svc=bil")).Content.ReadAsStringAsync();
         Assert.Contains("b201020304050607", exakt);
         Assert.Contains("b101020304050607", exakt);
+    }
+
+    /// <summary>
+    /// Multi-Select: <c>?svc=shop&amp;svc=billing</c> zeigt die Logs BEIDER
+    /// Services, nicht die des dritten (worker). Der Sort-Link (URL-Builder)
+    /// erhält beide wiederholten svc=-Params.
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_MultiServiceFilter_FiltertAufBeide()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var t = SeedNowNs();
+        sink.WriteLogs(new[]
+        {
+            SeedLog(t,     "msg-shop",   "shop"),
+            SeedLog(t + 1, "msg-bill",   "billing"),
+            SeedLog(t + 2, "msg-worker", "worker"),
+        });
+
+        var body = await (await Client.GetAsync("/otel/logs?svc=shop&svc=billing")).Content.ReadAsStringAsync();
+        Assert.Contains("msg-shop", body);
+        Assert.Contains("msg-bill", body);
+        Assert.DoesNotContain("msg-worker", body);
+        // Pager/Sort-URLs transportieren die Mehrfachauswahl (href hat &amp;).
+        Assert.Contains("svc=shop&amp;svc=billing", body);
+    }
+
+    /// <summary>
+    /// Version-Dropdown bei Mehrfachauswahl: Version ist Paar-Semantik zu
+    /// GENAU EINEM Service — bei zwei gewählten Services ist das Select
+    /// disabled; ein trotzdem mitgesendetet ver wird ignoriert (kein Filter).
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_MultiServiceFilter_VersionDisabled()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var t = SeedNowNs();
+        sink.WriteLogs(new[]
+        {
+            SeedLog(t,     "msg-shop",   "shop",    "v1"),
+            SeedLog(t + 1, "msg-bill",   "billing", "v2"),
+        });
+
+        var body = await (await Client.GetAsync("/otel/logs?svc=shop&svc=billing&ver=v2")).Content.ReadAsStringAsync();
+        Assert.Contains("<select name=\"ver\" disabled", body);
+        // ver fiel weg (kein Paar zu 2 Services): beide Logs bleiben sichtbar.
+        Assert.Contains("msg-shop", body);
+        Assert.Contains("msg-bill", body);
+    }
+
+    /// <summary>
+    /// Traces-Seite Multi-Select: <c>?svc=shop&amp;svc=billing</c> zeigt die
+    /// Traces beider Services, nicht die des dritten (worker).
+    /// </summary>
+    [Fact]
+    public async Task TracesSeite_MultiServiceFilter_FiltertAufBeide()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var billingTid = new byte[] { 0xb2, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+        var workerTid = new byte[] { 0xb3, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15 };
+        sink.WriteSpans(new[]
+        {
+            SeedSpan(TraceId, RootSpanId, "shop"),
+            SeedSpan(billingTid, RootSpanId, "billing"),
+            SeedSpan(workerTid, RootSpanId, "worker"),
+        });
+
+        var body = await (await Client.GetAsync("/otel/traces?svc=shop&svc=billing")).Content.ReadAsStringAsync();
+        Assert.Contains("b101020304050607", body);      // Shop-Trace
+        Assert.Contains("b201020304050607", body);      // Billing-Trace
+        Assert.DoesNotContain("b301020304050607", body); // Worker-Trace gefiltert
     }
 
     // === Signal-Band / Wachtband (Übersicht) =============================
