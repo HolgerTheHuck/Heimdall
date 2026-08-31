@@ -6,6 +6,8 @@
 //   3. Brushing/Zoom: horizontaler Drag im Chart → Redirect mit from/to (Unix-ns).
 //   4. Zeitpicker: datetime-local → Unix-ns (hidden from/to) beim Submit; Auto-Refresh.
 //   5. Signal-Band (Übersicht): Crosshair + Tooltip je Lane (.hmd-band-chart mit data-vals).
+//   6. Service-Multi-Select (details.hmd-msel): Aussen-Klick/Escape schliessen,
+//      Summary + Count-Badge live aktualisieren (Uebersetzungen via data-Attribute).
 //
 // Charts/Punkte werden server-seitig als SVG gerendert (HeimdallCharting); dieses Script
 // reichert sie nur client-seitig an. Theme-Tokens (--hmd-*) kommen aus dem Heimdall-CSS.
@@ -399,6 +401,59 @@
         var leftPx = Math.min(Math.max(fx * rect.width, tw / 2 + 2), rect.width - tw / 2 - 2);
         b.tip.style.left = leftPx + "px";
     }
+
+    // === Service-Multi-Select (details.hmd-msel) =========================
+
+    // Summary + Count-Badge des geschlossenen Controls live aktualisieren —
+    // gleiche Regel wie HeimdallServiceMultiSelect.SummaryText() server-seitig:
+    // 0 gewählt → data-hmd-msel-all („alle"), 1-2 → Namen, ≥3 → erster Name +
+    // data-hmd-msel-more („+N weitere", {0}-Platzhalter wie I18n.T(key, args)).
+    function updateMselSummary(d) {
+        var checked = d.querySelectorAll('input[name="svc"]:checked');
+        var txt = d.querySelector('[data-hmd-msel-text]');
+        var cnt = d.querySelector('[data-hmd-msel-count]');
+        if (!txt) return;
+        var nameOf = function (c) {
+            var l = c.closest("label");
+            return l ? l.textContent.trim() : "";
+        };
+        if (checked.length === 0) {
+            txt.textContent = d.getAttribute("data-hmd-msel-all") || "";
+        } else if (checked.length <= 2) {
+            txt.textContent = nameOf(checked[0]) + (checked.length === 2 ? ", " + nameOf(checked[1]) : "");
+        } else {
+            var more = d.getAttribute("data-hmd-msel-more");
+            txt.textContent = nameOf(checked[0]) + " " +
+                (more ? more.replace("{0}", checked.length - 1) : "+" + (checked.length - 1));
+        }
+        if (cnt) cnt.textContent = checked.length ? String(checked.length) : "";
+    }
+
+    document.addEventListener("change", function (e) {
+        var d = e.target && e.target.closest ? e.target.closest("details.hmd-msel") : null;
+        if (d) updateMselSummary(d);
+    });
+
+    // Aussen-Klick: alle offenen Service-Comboboxen schliessen (eine offene Disclosure
+    // über der Tabelle nervt, bis sie per Submit weggeht).
+    document.addEventListener("click", function (e) {
+        var open = document.querySelectorAll("details.hmd-msel[open]");
+        for (var i = 0; i < open.length; i++) {
+            if (!open[i].contains(e.target)) open[i].removeAttribute("open");
+        }
+    });
+
+    // Escape schliesst und setzt den Focus auf das geschlossene Control zurück —
+    // Tastatur-/Screenreader-Nutzung bleibt rund.
+    document.addEventListener("keydown", function (e) {
+        if (e.key !== "Escape") return;
+        var d = e.target && e.target.closest ? e.target.closest("details.hmd-msel") : null;
+        if (d) {
+            var s = d.querySelector("summary");
+            d.removeAttribute("open");
+            if (s) s.focus();
+        }
+    });
 
     // === Zeitpicker: datetime-local → Unix-ns + Auto-Refresh ============
 

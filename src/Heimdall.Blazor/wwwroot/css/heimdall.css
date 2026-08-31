@@ -227,25 +227,78 @@ a:hover { text-decoration: underline; }
 }
 .hmd-filters button:hover { filter: brightness(1.08); }
 
-/* Service-Multi-Select (Chips): Checkboxen als Pills im Filter-Formular —
-   GET-nativ ohne JS, kein Haken gesetzt = „alle" (Hinweis als title-Tooltip
-   auf der Gruppe, kein sichtbarer Text — der wuerde die Chips aus der
-   label-Reihe heben). Die Checkbox selbst ist visuell versteckt aber
-   fokussierbar; :has() malt den Checked-State am Chip, input:checked + span
-   ist der Teil-Fallback fuer Browser ohne :has(). Selektoren mit
-   .hmd-filters-Praefix, damit sie gegen .hmd-filters label /
+/* Service-Multi-Select (Disclosure-Combobox): geschlossener Control (Summary mit
+   Auswahl-Summary + Count-Badge), Panel mit scrollbaren Checkbox-Reihen. GET-nativ
+   ohne JS — der <details>-Toggle ist nativ, gecheckte Boxen in geschlossenem
+   <details> werden trotzdem submittet, die Summary bleibt serverberechnet bis zum
+   naechsten Reload. heimdall.js schliesst bei Aussen-Klick/Escape und aktualisiert
+   die Summary live (Uebersetzungen via data-hmd-msel-all/-more).
+   Die Checkbox ist visuell versteckt aber fokussierbar; :has() malt den Checked-State
+   an der Reihe, input:checked + span ist der Teil-Fallback fuer Browser ohne :has().
+   summary display:flex: sonst display:list-item + Marker-Bullet zerstoert die
+   Grundlinie in der align-items:end-Flexzeile (.hmd-filters).
+   Panel z-index 30: ueber sticky thead (z-2) und sticky Nav (z-20) — .hmd-filters hat
+   kein overflow:hidden (Panel-Wegfall-Stelle, falls das je ergaenzt wird); im
+   Root-Stacking-Kontext reicht 30, die 9000er-Tooltips brauchen keinen Vorlauf.
+   Selektoren mit .hmd-filters-Praefix, damit sie gegen .hmd-filters label /
    .hmd-filters input (Typ-Selektor) gewinnen. */
 .hmd-filter-field { display: flex; flex-direction: column; gap: .2rem; color: var(--hmd-dim); font-size: .72rem; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
-.hmd-chips { display: flex; flex-wrap: wrap; gap: .35rem; }
-.hmd-filters .hmd-chip {
-    position: relative;
-    display: inline-flex;
+.hmd-msel { position: relative; min-width: 8rem; }
+.hmd-msel > summary {
+    list-style: none;                       /* nativen Details-Pfeil aus */
+    display: flex;
     align-items: center;
+    gap: .4rem;
+    background: var(--hmd-bg);
+    color: var(--hmd-fg);
+    border: 1px solid var(--hmd-border);
+    border-radius: 4px;
+    padding: .3rem .4rem;
+    font-size: .85rem;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    cursor: pointer;
+    transition: border-color var(--hmd-tx);
+}
+.hmd-msel > summary::-webkit-details-marker { display: none; }
+.hmd-msel > summary:hover { border-color: var(--hmd-accent); }
+.hmd-msel > summary:focus-visible { border-color: var(--hmd-accent); box-shadow: 0 0 0 2px var(--hmd-accent-dim); }
+.hmd-msel[open] > summary { border-color: var(--hmd-accent); }
+.hmd-msel-text { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hmd-msel-count { margin-left: auto; font-size: .7rem; background: var(--hmd-accent-dim); color: var(--hmd-on-accent); border-radius: 999px; padding: 0 .45rem; }
+.hmd-msel-count:empty { display: none; }
+.hmd-msel-chev { color: var(--hmd-dim); transition: transform var(--hmd-tx); }
+.hmd-msel[open] .hmd-msel-chev { transform: rotate(180deg); }
+.hmd-msel-panel {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 30;
+    min-width: 100%;
+    max-width: 18rem;
+    max-height: 14rem;                       /* scrollbar bei vielen Services */
+    overflow-y: auto;
+    background: var(--hmd-panel);
+    border: 1px solid var(--hmd-border);
+    border-radius: var(--hmd-radius-sm);
+    box-shadow: var(--hmd-shadow);
+    padding: .3rem;
+    display: flex;
+    flex-direction: column;
+    gap: .15rem;
+    scrollbar-width: thin;
+    scrollbar-color: var(--hmd-border) transparent;
+}
+.hmd-filters .hmd-msel-opt {
+    display: flex;
+    align-items: center;
+    gap: .4rem;
     color: var(--hmd-fg);
     background: var(--hmd-panel-2);
     border: 1px solid var(--hmd-border);
-    border-radius: 999px;
-    padding: .18rem .65rem;
+    border-radius: var(--hmd-radius-sm);
+    padding: .22rem .5rem;
     font-size: .8rem;
     font-weight: 500;
     text-transform: none;
@@ -253,7 +306,7 @@ a:hover { text-decoration: underline; }
     cursor: pointer;
     transition: color var(--hmd-tx), background-color var(--hmd-tx), border-color var(--hmd-tx);
 }
-.hmd-filters .hmd-chip input {
+.hmd-filters .hmd-msel-opt input {
     position: absolute;
     opacity: 0;
     width: 1px; height: 1px;
@@ -263,14 +316,15 @@ a:hover { text-decoration: underline; }
     background: none;
     pointer-events: none;
 }
-.hmd-filters .hmd-chip:hover { border-color: var(--hmd-accent); }
-.hmd-filters .hmd-chip:has(input:checked) {
+.hmd-filters .hmd-msel-opt:hover { border-color: var(--hmd-accent); }
+.hmd-filters .hmd-msel-opt:has(input:checked) {
     color: var(--hmd-on-accent);
     background: var(--hmd-accent-dim);
     border-color: var(--hmd-accent);
 }
-.hmd-filters .hmd-chip input:checked + span { color: var(--hmd-accent); }
-.hmd-filters .hmd-chip:has(input:focus-visible) { outline: 2px solid var(--hmd-accent); outline-offset: 1px; }
+.hmd-filters .hmd-msel-opt input:checked + span { color: var(--hmd-accent); }
+.hmd-filters .hmd-msel-opt:has(input:focus-visible) { outline: 2px solid var(--hmd-accent); outline-offset: 1px; }
+.hmd-msel-opt span { overflow-wrap: anywhere; }   /* lange Service-Namen laufen nicht aus dem Panel */
 
 /* border-collapse:separate (statt collapse+overflow:hidden), damit der Sticky-
    Header gegen das Viewport arbeitet: overflow:hidden würde die Tabelle selbst

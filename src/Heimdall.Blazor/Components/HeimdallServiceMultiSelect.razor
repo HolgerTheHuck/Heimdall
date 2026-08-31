@@ -1,0 +1,59 @@
+@namespace Heimdall.Blazor
+@* Einbettbare Service-Multi-Select-Combobox (Progressive Enhancement): geschlossener
+   Control (Summary mit Auswahl-Summary + Count-Badge) öffnet per nativem <details>-
+   Disclosure ein scrollbares Panel mit den Checkboxen (name="svc", wiederholte
+   svc=-Params im GET-Form — Form-Semantik identisch zur frueheren Chip-Zeile). Ohne
+   JS voll funktionsfaehig: Details-Toggle ist nativ, gecheckte Boxen in geschlossenem
+   <details> werden trotzdem submittet, die Summary bleibt serverberechnet bis zum
+   naechsten Reload. Mit JS (heimdall.js) schliesst das Panel bei Außen-Klick/Escape
+   und die Summary aktualisiert sich live — gleiche Summary-Regel serverseitig wie
+   clientseitig (0 = alle, 1-2 = Namen, >=3 = erster Name + "+N weitere"). Das JS
+   braucht die Übersetzungen als data-Attribute (data-hmd-msel-all/-more), keine
+   eigene i18n-Tabelle im JS. Besitzt kein eigenes <form> — wird in die Filter-Forms
+   eingebettet (siehe HeimdallTimeRange). *@
+@inject Heimdall.Blazor.IHeimdallI18n I18n
+<div class="hmd-filter-field">
+    <span class="hmd-filter-label">@Label</span>
+    <details class="hmd-msel" data-hmd-msel-all="@I18n.T("common.filter.svc.all")"
+             data-hmd-msel-more="@I18n.T("common.filter.svc.more")" title="@Title">
+        <summary aria-label="@Label" title="@Title">
+            <span class="hmd-msel-text" data-hmd-msel-text>@SummaryText()</span>
+            <span class="hmd-msel-count" data-hmd-msel-count>@(Selected.Count > 0 ? Selected.Count.ToString(System.Globalization.CultureInfo.InvariantCulture) : "")</span>
+            <span class="hmd-msel-chev" aria-hidden="true">▾</span>
+        </summary>
+        <div class="hmd-msel-panel" role="group" aria-label="@Label">
+            @foreach (var s in Services)
+            {
+                <label class="hmd-msel-opt"><input type="checkbox" name="svc" value="@s" checked="@Selected.Contains(s)" /><span>@s</span></label>
+            }
+        </div>
+    </details>
+</div>
+
+@code {
+    /// <summary>Alle Services aus der Discovery (Logs ∪ Spans im Zeitraum) —
+    /// das Panel listet sie vollständig, nicht nur die aktuelle Auswahl.</summary>
+    [Parameter] public System.Collections.Generic.IReadOnlyList<string> Services { get; set; } = [];
+
+    /// <summary>Aktuelle Auswahl (sanitierte Schnittmenge mit Services) — kein
+    /// Haken gesetzt = „alle Services".</summary>
+    [Parameter] public System.Collections.Generic.IReadOnlyCollection<string> Selected { get; set; } = [];
+
+    /// <summary>Sichtbares Label über der Combobox + aria-Label (z. B. „Service").</summary>
+    [Parameter] public string Label { get; set; } = string.Empty;
+
+    /// <summary>Tooltip (title) auf Control + Summary („nichts gewählt = alle").</summary>
+    [Parameter] public string? Title { get; set; }
+
+    /// <summary>
+    /// Summary-Text des geschlossenen Controls (serverseitig, vor dem ersten Submit):
+    /// 0 gewählt → „alle"; 1-2 → Namen; ≥3 → erster Name + „+N weitere". heimdall.js
+    /// reproduziert die Regel clientseitig für Live-Updates (gleiche data-Attribute).
+    /// </summary>
+    private string SummaryText()
+    {
+        if (Selected.Count == 0) return I18n.T("common.filter.svc.all");
+        if (Selected.Count <= 2) return string.Join(", ", Selected);
+        return Selected.First() + " " + I18n.T("common.filter.svc.more", Selected.Count - 1);
+    }
+}

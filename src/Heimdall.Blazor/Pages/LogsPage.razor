@@ -25,23 +25,14 @@
                 <option value="21" selected="@(MinSeverity == 21)">FATAL</option>
             </select>
         </label>
-        @* Service-Chips (Multi-Select; Discovery, siehe OnInitialized). Wiederholte
+        @* Service-Multi-Select (Combobox; Discovery, siehe OnInitialized). Wiederholte
            svc=-Params im GET-Form, kein Haken = alle. Version haengt am Service:
            nur bei GENAU EINEM gewaehlten Service aktiv (Paar-Semantik), sonst
            disabled. Abhaengigkeit ohne JS: wirkt beim naechsten Submit (Zeit-Preset
            oder „Suchen"), der Server rendert dann die Versionsliste des Service. *@
-        <div class="hmd-filter-field">
-            <span class="hmd-filter-label">@I18n.T("logs.filter.service")</span>
-            @if (_services.Count > 0)
-            {
-                <div class="hmd-chips" role="group" aria-label="@I18n.T("logs.filter.service")" title="@I18n.T("common.filter.svc.none.all")">
-                    @foreach (var s in _services)
-                    {
-                        <label class="hmd-chip"><input type="checkbox" name="svc" value="@s" checked="@(_svcSel.Contains(s))" /><span>@s</span></label>
-                    }
-                </div>
-            }
-        </div>
+        <HeimdallServiceMultiSelect Services="@_services" Selected="@_svcSel"
+                                    Label="@I18n.T("logs.filter.service")"
+                                    Title="@I18n.T("common.filter.svc.none.all")" />
         <label>@I18n.T("logs.filter.version")
             <select name="ver" disabled="@(_svcSel.Count != 1)">
                 @if (_svcSel.Count != 1)

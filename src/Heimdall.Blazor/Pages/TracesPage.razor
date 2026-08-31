@@ -8,23 +8,14 @@
 
     <form class="hmd-filters" method="get" action="@(BasePath + "/traces")">
         <label>@I18n.T("traces.filter.name") <input type="search" name="name" value="@NameContains" placeholder="checkout" /></label>
-        @* Service-Chips (Multi-Select; Discovery aus Logs ∪ Spans im Zeitraum, siehe
+        @* Service-Multi-Select (Combobox; Discovery aus Logs ∪ Spans im Zeitraum, siehe
            OnInitialized). Wiederholte svc=-Params im GET-Form, kein Haken = alle.
            Param-Name svc bleibt (alte Bookmarks = 1-Element-Auswahl). Version haengt
            am Service: nur bei GENAU EINEM gewaehlten Service aktiv (Paar-Semantik),
            sonst disabled; Abhaengigkeit wirkt beim naechsten Submit (kein JS). *@
-        <div class="hmd-filter-field">
-            <span class="hmd-filter-label">@I18n.T("traces.filter.service")</span>
-            @if (_services.Count > 0)
-            {
-                <div class="hmd-chips" role="group" aria-label="@I18n.T("traces.filter.service")" title="@I18n.T("common.filter.svc.none.all")">
-                    @foreach (var s in _services)
-                    {
-                        <label class="hmd-chip"><input type="checkbox" name="svc" value="@s" checked="@(_svcSel.Contains(s))" /><span>@s</span></label>
-                    }
-                </div>
-            }
-        </div>
+        <HeimdallServiceMultiSelect Services="@_services" Selected="@_svcSel"
+                                    Label="@I18n.T("traces.filter.service")"
+                                    Title="@I18n.T("common.filter.svc.none.all")" />
         <label>@I18n.T("traces.filter.version")
             <select name="ver" disabled="@(_svcSel.Count != 1)">
                 @if (_svcSel.Count != 1)

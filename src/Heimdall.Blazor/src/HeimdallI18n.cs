@@ -206,8 +206,13 @@ public static class HeimdallI18n
         // --- Allgemein (mehrere Seiten) --------------------------------------
         ["common.back.to"]   = Lang("zurück zur", "back to", "retour à la"),
         ["common.row.range"] = Lang("Zeile {0}–{1}", "Row {0}–{1}", "Ligne {0}–{1}"),
-        // Tooltip (title) auf der Service-Chip-Gruppe (Traces + Logs): nichts gewählt = alle.
+        // Tooltip (title) auf der Service-Combobox (Traces + Logs): nichts gewählt = alle.
         ["common.filter.svc.none.all"] = Lang("nichts gewählt = alle", "none selected = all", "aucun sélectionné = tous"),
+        // Multi-Select-Combobox (HeimdallServiceMultiSelect): Summary-Text im geschlossenen
+        // Control. "alle" bewusst als eigener Key (fr "tous", maskulin, passend zu
+        // "services") statt traces.status.all ("toutes", feminin).
+        ["common.filter.svc.all"]  = Lang("alle", "all", "tous"),
+        ["common.filter.svc.more"] = Lang("+{0} weitere", "+{0} more", "+{0} autres"),
         ["table.status"]     = Lang("Status", "Status", "Statut"),
 
         // --- Metriken-Seite --------------------------------------------------

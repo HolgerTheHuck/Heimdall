@@ -322,9 +322,9 @@ public class HeimdallUiTests : HostBootTestBase
             null);
 
     /// <summary>
-    /// Die Service-Chips listen die Discovery-Menge aus Logs UND Spans —
+    /// Die Service-Combobox listet die Discovery-Menge aus Logs UND Spans —
     /// ein Service, der nur Traces schickt („traceonly"), taucht ebenfalls auf.
-    /// Kein Haken gesetzt = „alle" (kein svc=-Param).
+    /// Kein Haken gesetzt = „alle" (kein svc=-Param, kein Count-Badge).
     /// </summary>
     [Fact]
     public async Task LogsSeite_ServiceChips_ListetServicesAusLogsUndSpans()
@@ -335,11 +335,43 @@ public class HeimdallUiTests : HostBootTestBase
         sink.WriteSpans(new[] { SeedSpan(TraceId, RootSpanId, "traceonly") });
 
         var body = await (await Client.GetAsync("/otel/logs")).Content.ReadAsStringAsync();
-        Assert.Contains("hmd-chip", body);                   // Chip-Gruppe statt Select
-        Assert.DoesNotContain("<select name=\"svc\"", body); // altes Dropdown ist weg
-        Assert.Contains("name=\"svc\"", body);
-        Assert.Contains("value=\"shop\"", body);             // Log-seitiger Discovery-Zweig
-        Assert.Contains("value=\"traceonly\"", body);        // Span-seitiger Discovery-Zweig
+        Assert.Contains("hmd-msel", body);                        // Combobox statt Select
+        Assert.Contains("hmd-msel-panel", body);                  // Panel mit Checkboxen gerendert
+        Assert.DoesNotContain("<select name=\"svc\"", body);      // altes Dropdown ist weg
+        Assert.DoesNotContain("hmd-msel-search", body);           // Canari: kein Suchfeld im Panel
+        Assert.Contains("type=\"checkbox\" name=\"svc\"", body);
+        Assert.Contains("value=\"shop\"", body);                  // Log-seitiger Discovery-Zweig
+        Assert.Contains("value=\"traceonly\"", body);             // Span-seitiger Discovery-Zweig
+        Assert.Contains("data-hmd-msel-all", body);               // Summary „alle" via data-Attribut
+        Assert.DoesNotContain("data-hmd-msel-count>1", body);      // kein Count-Badge ohne Auswahl
+    }
+
+    /// <summary>
+    /// Geschlossenes Control der Combobox bei Auswahl: Summary zeigt die
+    /// gewählten Namen, Count-Badge zählt, nur diese Boxen sind gecheckt —
+    /// das Panel listet trotzdem ALLE Discovery-Services (nicht nur die
+    /// Auswahl; Regressiv gegen versehentliches Rendern nur der Auswahl).
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_MultiSelect_GeschlossenesControlMitZaehler()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var t = SeedNowNs();
+        sink.WriteLogs(new[]
+        {
+            SeedLog(t,     "msg-shop",   "shop"),
+            SeedLog(t + 1, "msg-bill",   "billing"),
+            SeedLog(t + 2, "msg-worker", "worker"),
+        });
+
+        var body = await (await Client.GetAsync("/otel/logs?svc=shop&svc=billing")).Content.ReadAsStringAsync();
+        Assert.Contains("shop, billing", body);                   // Summary mit beiden Namen
+        Assert.Contains("data-hmd-msel-count>2</span>", body);    // Count-Badge
+        Assert.Contains("value=\"shop\" checked", body);
+        Assert.Contains("value=\"billing\" checked", body);
+        // Panel listet die Discovery-Menge vollständig, nicht nur die Auswahl.
+        Assert.Contains("value=\"worker\"", body);
+        Assert.DoesNotContain("value=\"worker\" checked", body);
     }
 
     /// <summary>
