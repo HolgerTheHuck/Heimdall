@@ -120,7 +120,7 @@ public class GrafanaTemplatingTests
         // stehen (gnetId-19924: 6 von 10 Panels). BuiltIns liefert alle drei Built-ins.
         var b = GrafanaTemplating.BuiltIns(fromMs: 0, toMs: 300_000, stepMs: 15_000);
         Assert.Equal("15s", b["__interval"]);
-        Assert.Equal("1m", b["__rate_interval"]);          // 4×15s=60s → Floor 1m
+        Assert.Equal("4m", b["__rate_interval"]);          // 4×15s=60s → Floor 4m (Grafana „4×Scrape“)
         Assert.Equal("5m", b["__range"]);                  // toMs−fromMs = 300 s
     }
 

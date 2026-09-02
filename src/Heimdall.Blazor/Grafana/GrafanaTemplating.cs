@@ -118,9 +118,12 @@ public static class GrafanaTemplating
     /// berechnet aus dem gewählten Zeitraum und Step:
     /// <list type="bullet">
     /// <item><c>__interval</c> = <paramref name="stepMs"/> (auflösungsabhängig).</item>
-    /// <item><c>__rate_interval</c> = 4 × <c>__interval</c>, ABER mindestens 1 m
-    ///   (Grafana floort <c>$__rate_interval</c> bei 1 m — sonst träfe
-    ///   <c>rate(…[30s])</c> bei 60-s-Export-Kadenz keine zwei Punkte).</item>
+    /// <item><c>__rate_interval</c> = 4 × <c>__interval</c>, ABER mindestens 4 m
+    ///   (Grafana-Heuristik „4 × Scrape-Intervall“: <c>rate()</c> braucht ≥ 2
+    ///   Samples im Fenster — bei typischer 60-s-OTLP-Export-Kadenz enthält ein
+    ///   1-m-Fenster meist genau EINEN Punkt → leere Serie. Genau das machte
+    ///   kleine Zeiträume (15 min → Step 7,5 s → Floor 1 m) leer, während 1 h
+    ///   (rate-interval 2 m) noch Daten zeigte. 4 m übersteht auch Jitter.)</item>
     /// <item><c>__range</c> = <c>(toMs − fromMs)</c> — der GESAMTE gewählte
     ///   Zeitraum, für <c>increase(…[$__range])</c>/<c>count_over_time(…[$__range])</c>
     ///   in Stat-/Table-Panels (gnetId-19924-Pattern). Fehlte <c>__range</c>,
@@ -133,7 +136,7 @@ public static class GrafanaTemplating
         return new Dictionary<string, string>(4, System.StringComparer.Ordinal)
         {
             ["__interval"] = DurationLabel(stepMs),
-            ["__rate_interval"] = DurationLabel(Math.Max(stepMs * 4, 60_000L)),
+            ["__rate_interval"] = DurationLabel(Math.Max(stepMs * 4, 240_000L)),
             ["__range"] = DurationLabel(toMs - fromMs),
         };
     }

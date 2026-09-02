@@ -489,6 +489,8 @@ a:hover { text-decoration: underline; }
    LogsPage-Script); ohne JS bleibt der native <summary>-Toggle nutzbar. */
 .hmd-logs { table-layout: fixed; }
 .hmd-logs .hmd-col-ts    { width: 7.25rem; }   /* nur Zeit, nicht breiter als nötig */
+.hmd-logs .hmd-col-svc   { width: 9rem; }      /* Service-Name (flache Logs-Liste) */
+.hmd-logs .hmd-log-svc   { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hmd-logs .hmd-col-sev   { width: 3rem; }
 .hmd-logs .hmd-col-trace { width: 5.5rem; }
 .hmd-logs tbody tr { cursor: pointer; }       /* ganze Zeile ist klickbar */
@@ -738,6 +740,25 @@ a:hover { text-decoration: underline; }
     letter-spacing: .08em;
     font-weight: 600;
 }
+/* Bearbeiten-Link direkt am Panel (✎, rechts oben im Kachel-Kopf). */
+.hmd-gpanel-edit {
+    float: right;
+    margin-left: .4rem;
+    color: var(--hmd-dim);
+    text-decoration: none;
+}
+.hmd-gpanel-edit:hover { color: var(--hmd-accent); }
+
+/* Inline-Vorschau im Panel-Editor: abgesetzte Box unter dem Formular, Inhalt
+   = derselbe Render-Pfad wie die Dashboard-Kachel. */
+.hmd-preview {
+    margin-top: 1rem;
+    padding: .6rem .8rem .8rem;
+    border: 1px dashed var(--hmd-border);
+    border-radius: var(--hmd-radius);
+    background: var(--hmd-panel);
+}
+.hmd-preview .hmd-gpanel { border: none; box-shadow: none; padding: 0; }
 .hmd-gpanel-body { flex: 1 1 auto; min-width: 0; }
 .hmd-gpanel-body svg { width: 100%; height: auto; }
 .hmd-gauge-wrap { display: flex; justify-content: center; }
@@ -1031,3 +1052,128 @@ a:hover { text-decoration: underline; }
     .hmd-nav { flex-wrap: wrap; }
     .hmd-lang { margin-left: 0; }
 }
+/* === Dashboard-Editor: Edit-Menue (Details-Disclosure, ohne JS) ====== */
+/* .hmd-editmenu-row haengt das Menue rechts neben/bueber den Titel     */
+/* (Grafana-artig oben rechts); Float statt Flex, damit die Seite ohne  */
+/* JS-Layout bleibt.                                                    */
+.hmd-editmenu-row { float: right; margin: 0 0 .25rem .5rem; }
+.hmd-editmenu { position: relative; display: inline-block; }
+.hmd-editmenu > summary {
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+    gap: .4rem;
+    background: var(--hmd-bg);
+    color: var(--hmd-fg);
+    border: 1px solid var(--hmd-border);
+    border-radius: 4px;
+    padding: .3rem .7rem;
+    font-size: .85rem;
+    font-weight: 400;
+    text-transform: none;
+    letter-spacing: normal;
+    cursor: pointer;
+    transition: border-color var(--hmd-tx);
+}
+.hmd-editmenu > summary::-webkit-details-marker { display: none; }
+.hmd-editmenu > summary::after { content: "\25BE"; color: var(--hmd-dim); font-size: .7rem; }
+.hmd-editmenu > summary:hover { border-color: var(--hmd-accent); }
+.hmd-editmenu > summary:focus-visible { border-color: var(--hmd-accent); box-shadow: 0 0 0 2px var(--hmd-accent-dim); }
+.hmd-editmenu[open] > summary { border-color: var(--hmd-accent); }
+.hmd-editmenu-body {
+    position: absolute;
+    top: 100%;
+    right: 0;
+    z-index: 40;
+    min-width: 12rem;
+    background: var(--hmd-panel);
+    border: 1px solid var(--hmd-border);
+    border-radius: var(--hmd-radius-sm);
+    box-shadow: var(--hmd-shadow);
+    padding: .3rem;
+    display: flex;
+    flex-direction: column;
+    gap: .15rem;
+}
+.hmd-editmenu-body a {
+    color: var(--hmd-fg);
+    background: var(--hmd-panel-2);
+    border: 1px solid var(--hmd-border);
+    border-radius: var(--hmd-radius-sm);
+    padding: .28rem .5rem;
+    font-size: .8rem;
+    text-decoration: none;
+}
+.hmd-editmenu-body a:hover { border-color: var(--hmd-accent); }
+.hmd-editmenu-body form { margin: 0; }
+.hmd-editmenu-body button {
+    width: 100%;
+    text-align: left;
+    color: var(--hmd-fg);
+    background: var(--hmd-panel-2);
+    border: 1px solid var(--hmd-border);
+    border-radius: var(--hmd-radius-sm);
+    padding: .28rem .5rem;
+    font-size: .8rem;
+    cursor: pointer;
+}
+.hmd-editmenu-body button:hover { border-color: var(--hmd-accent); }
+
+/* Query-Syntax-Highlighting (PromQL/LogQL): Overlay hinter der Textarea — das
+   <pre> spiegelt den Text farbig, die Textarea selbst ist transparent (nur
+   Caret sichtbar). Identische Metrik (Font/Zeile/Padding) ist Pflicht, sonst
+   „schwimmt" der Text. Progressive Enhancement: ohne JS bleibt die Textarea
+   normal (Klasse wird erst vom JS vergeben).
+   Achtung Kaskade: .hmd-form textarea (Hintergrund/Farbe/Fontgröße) muss
+   geschlagen werden — deshalb der .hmd-form-qualifizierte Doppelselektor und
+   die Platzierung am DATEIENDE (spätere gleichspezifische Regeln gewinnen). */
+.hmd-ql-wrap { position: relative; }
+.hmd-ql-wrap .hmd-ql-hl,
+.hmd-form .hmd-ql-wrap textarea,
+.hmd-ql-wrap textarea {
+    margin: 0;
+    font-family: var(--hmd-mono);
+    font-size: .88rem;
+    line-height: 1.45;
+    padding: .35rem .5rem;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    border: 0;
+}
+.hmd-ql-wrap .hmd-ql-hl {
+    display: block;
+    min-height: calc(1.45em * 2 + .7rem);
+    color: var(--hmd-fg);
+    background: var(--hmd-panel-alt, transparent);
+    border: 1px solid var(--hmd-border);
+    border-radius: var(--hmd-radius);
+}
+.hmd-form .hmd-ql-wrap textarea,
+.hmd-ql-wrap textarea {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    resize: none;
+    background: transparent;
+    color: transparent;
+    caret-color: var(--hmd-fg);
+    -webkit-text-fill-color: transparent;
+}
+.hmd-ql-wrap textarea:focus { outline: none; }
+.hmd-ql-wrap:focus-within .hmd-ql-hl { border-color: var(--hmd-accent); }
+/* Tokens: gedeckte Nachtwacht-Palette (liest sich hell/dunkel via Tokens). */
+.hmd-ql-kw   { color: var(--hmd-accent); font-weight: 600; }
+.hmd-ql-fn   { color: var(--hmd-link, var(--hmd-accent)); }
+.hmd-ql-num  { color: var(--hmd-warn); }
+.hmd-ql-str  { color: var(--hmd-ok); }
+.hmd-ql-lbl  { color: var(--hmd-fg); }
+.hmd-ql-op   { color: var(--hmd-err); }
+.hmd-ql-com  { color: var(--hmd-dim); font-style: italic; }
+
+/* Grid-Position kompakt: X/Y/W/H teilen sich eine Zeile statt je eine Spalte
+   zu füllen (Panel-Editor, Feldset „Position & Größe"). */
+.hmd-grid-pos { display: flex; flex-wrap: wrap; gap: .8rem 1.2rem; }
+.hmd-grid-pos label { flex-direction: row; align-items: center; gap: .4rem; }
+.hmd-grid-pos input[type="number"] { width: 4.2rem; }

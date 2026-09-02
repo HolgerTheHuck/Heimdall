@@ -177,6 +177,13 @@ public static class HeimdallI18n
         ["login.error.badcreds"]        = Lang("Benutzername oder Passwort falsch", "Incorrect username or password", "Nom d'utilisateur ou mot de passe incorrect"),
         ["login.error.noauth"]          = Lang("Auth nicht aktiv", "Authentication not enabled", "Authentification non activée"),
         ["endpoint.err.nodashboardjson"] = Lang("Kein Dashboard-JSON", "No dashboard JSON", "Aucun JSON de tableau de bord"),
+        ["endpoint.err.baddashboardjson"] = Lang("Ungültiges Dashboard-JSON", "Invalid dashboard JSON", "JSON de tableau de bord invalide"),
+        ["endpoint.err.paneltitle"]      = Lang("Panel-Titel fehlt", "Panel title missing", "Titre de panneau manquant"),
+        ["endpoint.err.paneltargets"]    = Lang("Panel braucht mindestens ein Target mit PromQL-Ausdruck", "Panel needs at least one target with a PromQL expression", "Le panneau requiert au moins une cible avec une expression PromQL"),
+        ["endpoint.err.overlap"]         = Lang("Panel überlappt „{0}“ — Position anpassen oder Überlappung erlauben.", "Panel overlaps \"{0}\" — adjust the position or allow overlap.", "Le panneau chevauche « {0} » — ajustez la position ou autorisez le chevauchement."),
+        ["endpoint.err.varname"]         = Lang("Variablen-Name fehlt", "Variable name missing", "Nom de variable manquant"),
+        ["endpoint.err.dashboardtitle"]  = Lang("Dashboard-Titel fehlt", "Dashboard title missing", "Titre de tableau de bord manquant"),
+        ["endpoint.err.notfound"]        = Lang("Nicht gefunden", "Not found", "Introuvable"),
         ["endpoint.err.rulename"]       = Lang("Regelname fehlt", "Rule name missing", "Nom de règle manquant"),
 
         // --- Drilldown -------------------------------------------------------
@@ -185,6 +192,9 @@ public static class HeimdallI18n
         // --- Traces-Seite ----------------------------------------------------
         ["traces.filter.name"]    = Lang("Name enthält", "Name contains", "Le nom contient"),
         ["traces.filter.service"] = Lang("Service", "Service", "Service"),
+        // Tabellen-Header (Tempo-Semantik): Root-Span-Name + Root-Service je Trace.
+        ["traces.col.name"]    = Lang("Trace", "Trace", "Trace"),
+        ["traces.col.service"] = Lang("Service", "Service", "Service"),
         ["traces.filter.version"] = Lang("Version", "Version", "Version"),
         ["traces.filter.status"]  = Lang("Status", "Status", "Statut"),
         ["traces.filter.limit"]   = Lang("Limit", "Limit", "Limite"),
@@ -202,6 +212,12 @@ public static class HeimdallI18n
         ["traces.empty.hint.http"]= Lang("OTLP/HTTP", "OTLP/HTTP", "OTLP/HTTP"),
         ["traces.empty.hint.grpc"]= Lang("gRPC", "gRPC", "gRPC"),
         ["traces.count"]          = Lang("{0} auf dieser Seite · {1} Spans gesamt", "{0} on this page · {1} spans total", "{0} sur cette page · {1} spans au total"),
+
+        // --- Logs-Seite: gruppierte Ansicht (view=svc, Opt-in) ----------------
+        ["logs.view"]       = Lang("Ansicht", "View", "Vue"),
+        ["logs.view.list"]  = Lang("Liste", "List", "Liste"),
+        ["logs.view.svc"]   = Lang("nach Service", "by service", "par service"),
+        ["logs.group.none"] = Lang("(ohne Service)", "(no service)", "(sans service)"),
 
         // --- Allgemein (mehrere Seiten) --------------------------------------
         ["common.back.to"]   = Lang("zurück zur", "back to", "retour à la"),
@@ -460,6 +476,67 @@ public static class HeimdallI18n
         ["grafana.view.panel.failed"]  = Lang("Panel konnte nicht geladen werden.", "Panel could not be loaded.", "Le panneau n'a pas pu être chargé."),
         // Zurück-Link zum zuvor angesehenen Dashboard (Referer-basiert).
         ["grafana.view.back.prev"]     = Lang("← Zurück", "← Back", "← Retour"),
+
+        // --- Grafana: Edit (Dashboard-Editor) --------------------------------
+        // Einstieg: <details>-Menü oben rechts in der Dashboard-Ansicht (no-JS).
+        ["grafana.edit.menu"]           = Lang("Bearbeiten ▾", "Edit ▾", "Modifier ▾"),
+        ["grafana.edit.menu.dashboard"] = Lang("Dashboard bearbeiten", "Edit dashboard", "Modifier le tableau de bord"),
+        ["grafana.edit.menu.json"]      = Lang("JSON bearbeiten", "Edit JSON", "Modifier le JSON"),
+        ["grafana.edit.menu.duplicate"] = Lang("Duplizieren", "Duplicate", "Dupliquer"),
+        ["grafana.edit.edit"]           = Lang("Bearbeiten", "Edit", "Modifier"),
+        // Editor-Hub (/dashboards/{uid}/edit).
+        ["grafana.edit.heading"]        = Lang("Dashboard bearbeiten", "Edit dashboard", "Modifier le tableau de bord"),
+        ["grafana.edit.heading.new"]    = Lang("Neues Dashboard", "New dashboard", "Nouveau tableau de bord"),
+        ["grafana.edit.legend.metadata"] = Lang("Metadaten", "Metadata", "Métadonnées"),
+        ["grafana.edit.legend.panels"]  = Lang("Panels", "Panels", "Panneaux"),
+        ["grafana.edit.legend.vars"]    = Lang("Template-Variablen", "Template variables", "Variables de modèle"),
+        ["grafana.edit.title"]          = Lang("Titel", "Title", "Titre"),
+        ["grafana.edit.addPanel"]       = Lang("+ Panel hinzufügen", "+ Add panel", "+ Ajouter un panneau"),
+        ["grafana.edit.addVar"]         = Lang("+ Variable hinzufügen", "+ Add variable", "+ Ajouter une variable"),
+        ["grafana.edit.duplicate"]      = Lang("Duplizieren", "Duplicate", "Dupliquer"),
+        ["grafana.edit.new"]            = Lang("+ Neues Dashboard", "+ New dashboard", "+ Nouveau tableau de bord"),
+        ["grafana.edit.save"]           = Lang("Speichern", "Save", "Enregistrer"),
+        ["grafana.edit.cancel"]         = Lang("Abbrechen", "Cancel", "Annuler"),
+        ["grafana.edit.col.grid"]       = Lang("Position", "Position", "Position"),
+        ["grafana.edit.col.type"]       = Lang("Typ", "Type", "Type"),
+        ["grafana.edit.col.targets"]    = Lang("Targets", "Targets", "Cibles"),
+        ["grafana.edit.col.actions"]    = Lang("Aktionen", "Actions", "Actions"),
+        ["grafana.edit.empty.panels"]   = Lang("Noch keine Panels.", "No panels yet.", "Aucun panneau."),
+        ["grafana.edit.empty.vars"]     = Lang("Keine Template-Variablen.", "No template variables.", "Aucune variable de modèle."),
+        ["grafana.edit.row.header"]     = Lang("(Abschnitt)", "(section)", "(section)"),
+        // Panel-Formular (/dashboards/{uid}/panel/{key}/edit bzw. panel/new).
+        ["grafana.edit.panel.heading.edit"] = Lang("Panel bearbeiten", "Edit panel", "Modifier le panneau"),
+        ["grafana.edit.panel.heading.new"]  = Lang("Neues Panel", "New panel", "Nouveau panneau"),
+        ["grafana.edit.panel.title"]    = Lang("Titel", "Title", "Titre"),
+        ["grafana.edit.panel.type"]     = Lang("Typ", "Type", "Type"),
+        ["grafana.edit.panel.grid"]     = Lang("Position & Größe (X / Y / Breite / Höhe, 24-Spalten-Grid)", "Position & size (X / Y / width / height, 24-column grid)", "Position et taille (X / Y / largeur / hauteur, grille 24 colonnes)"),
+        ["grafana.edit.panel.targets"]  = Lang("PromQL-Targets", "PromQL targets", "Cibles PromQL"),
+        ["grafana.edit.panel.legend"]   = Lang("Legende (legendFormat)", "Legend (legendFormat)", "Légende (legendFormat)"),
+        ["grafana.edit.panel.instant"]  = Lang("Instant", "Instant", "Instant"),
+        ["grafana.edit.panel.addTarget"] = Lang("+ Target", "+ Target", "+ Cible"),
+        ["grafana.edit.panel.unit"]     = Lang("Einheit", "Unit", "Unité"),
+        ["grafana.edit.panel.thresholds"] = Lang("Schwellen (aufsteigend; leerer Wert = Basis)", "Thresholds (ascending; empty = base)", "Seuils (croissant ; vide = base)"),
+        ["grafana.edit.panel.addThreshold"] = Lang("+ Schwelle", "+ Threshold", "+ Seuil"),
+        ["grafana.edit.panel.repeat"]   = Lang("Repeat-Variable (leer = aus)", "Repeat variable (empty = off)", "Variable de répétition (vide = désactivé)"),
+        ["grafana.edit.panel.graphMode"] = Lang("Stat-Graph-Modus", "Stat graph mode", "Mode de graphique stat"),
+        ["grafana.edit.panel.color"]    = Lang("Farbe", "Color", "Couleur"),
+        ["grafana.edit.panel.value"]    = Lang("Wert", "Value", "Valeur"),
+        ["grafana.edit.remove"]         = Lang("Entfernen", "Remove", "Supprimer"),
+        ["grafana.edit.preview"]        = Lang("Vorschau", "Preview", "Aperçu"),
+        ["grafana.edit.preview.heading"] = Lang("Vorschau (ungespeichert)", "Preview (unsaved)", "Aperçu (non enregistré)"),
+        ["grafana.edit.allowOverlap"]   = Lang("Überlappung erlauben", "Allow overlap", "Autoriser le chevauchement"),
+        // Variablen-Formular (/dashboards/{uid}/var/{key}/edit bzw. var/new).
+        ["grafana.edit.var.heading.edit"] = Lang("Variable bearbeiten", "Edit variable", "Modifier la variable"),
+        ["grafana.edit.var.heading.new"]  = Lang("Neue Variable", "New variable", "Nouvelle variable"),
+        ["grafana.edit.var.name"]       = Lang("Name", "Name", "Nom"),
+        ["grafana.edit.var.type"]       = Lang("Typ", "Type", "Type"),
+        ["grafana.edit.var.query"]      = Lang("Query (label_values(…) oder Custom-Liste)", "Query (label_values(…) or custom list)", "Query (label_values(…) ou liste personnalisée)"),
+        ["grafana.edit.var.current"]    = Lang("Aktueller Wert (leer = alle)", "Current value (empty = all)", "Valeur actuelle (vide = toutes)"),
+        ["grafana.edit.var.includeAll"] = Lang("„Alle“-Option anbieten", "Offer \"All\" option", "Proposer l'option « Toutes »"),
+        ["grafana.edit.var.multi"]      = Lang("Mehrfachauswahl", "Multi-select", "Sélection multiple"),
+        // JSON-Editor (/dashboards/{uid}/json).
+        ["grafana.edit.json.heading"]   = Lang("Dashboard-JSON bearbeiten", "Edit dashboard JSON", "Modifier le JSON du tableau de bord"),
+        ["grafana.edit.json.hint"]      = Lang("Das JSON wird vollständig ersetzt; die UID des Dashboards wird beim Speichern beibehalten (eine andere UID im Text wird ignoriert).", "The JSON is fully replaced; the dashboard UID is kept on save (a different UID in the text is ignored).", "Le JSON est entièrement remplacé ; l'UID du tableau de bord est conservée lors de l'enregistrement (une autre UID dans le texte est ignorée)."),
     };
 
     /// <summary>

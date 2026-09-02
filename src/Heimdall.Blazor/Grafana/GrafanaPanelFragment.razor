@@ -9,13 +9,17 @@
 @inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
 
 <link rel="stylesheet" href="@AssetPath" />
-<GrafanaPanelView Panel="@Panel" BasePath="@BasePath" />
+<GrafanaPanelView Panel="@Panel" BasePath="@BasePath" EditUrl="@EditUrl" />
 
 @code {
     [Parameter] public RenderedPanel Panel { get; set; } = null!;
 
     /// <summary>Mount-Pfad des Dashboards (für Trace-Links in Log-Zeilen).</summary>
     [Parameter] public string BasePath { get; set; } = "/otel";
+
+    /// <summary>Panel-Editor-URL (Pfad-Key aus dem rohen JSON aufgelöst) oder
+    /// null = kein Link — Editieren direkt am Panel in der Dashboard-Ansicht.</summary>
+    [Parameter] public string? EditUrl { get; set; }
 
     private string AssetPath =>
         HeimdallUiPaths.AssetBase(Http.HttpContext) + "/_content/Heimdall.Blazor/css/heimdall.css";

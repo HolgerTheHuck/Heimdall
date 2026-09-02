@@ -497,6 +497,44 @@
         });
     }, true);
 
+    // === Auto-Refresh: Scroll-Position der Liste erhalten ==================
+    // Die Log-/Trace-Liste scrollt im eigenen Container (.hmd-list-scroll,
+    // overflow:auto + Sticky-Header). location.reload() stellt nur die
+    // Fenster-Scroll-Position wieder her — der Listen-Container springt nach
+    // oben und der User verliert beim Refresh seine Position. Deshalb: vor
+    // dem Reload in sessionStorage sichern, nach dem Load wiederherstellen.
+    // Key = URL OHNE refresh-Param (sonst würde auch der Interval-Wechsel im
+    // Refresh-Select die Position wegwerfen); Filter-Änderungen erzeugen
+    // andere Keys → neue Ergebnismenge startet bewusst oben.
+
+    function listScrollKey() {
+        var p = new URLSearchParams(location.search);
+        p.delete("refresh");
+        return "hmdListScroll:" + location.pathname + "?" + p.toString();
+    }
+
+    function saveListScroll() {
+        var el = document.querySelector(".hmd-list-scroll");
+        if (!el) return;
+        try {
+            sessionStorage.setItem(listScrollKey(),
+                JSON.stringify({ t: el.scrollTop, l: el.scrollLeft }));
+        } catch (e) { /* kein Storage — Refresh trotzdem ausführen */ }
+    }
+
+    function restoreListScroll() {
+        var el = document.querySelector(".hmd-list-scroll");
+        if (!el) return;
+        var raw;
+        try { raw = sessionStorage.getItem(listScrollKey()); } catch (e) { return; }
+        if (!raw) return;
+        try { sessionStorage.removeItem(listScrollKey()); } catch (e) { }
+        var pos;
+        try { pos = JSON.parse(raw); } catch (e) { return; }
+        el.scrollTop = pos.t || 0;
+        el.scrollLeft = pos.l || 0;
+    }
+
     function startAutoRefresh() {
         var params = new URLSearchParams(location.search);
         var r = params.get("refresh");
@@ -505,7 +543,7 @@
         if (!m) return;
         var secs = parseInt(m[1], 10) * (m[2] === "m" ? 60 : 1);
         if (secs < 3) return;
-        var iv = setInterval(function () { location.reload(); }, secs * 1000);
+        var iv = setInterval(function () { saveListScroll(); location.reload(); }, secs * 1000);
         var badge = document.createElement("div");
         badge.className = "hmd-refresh-badge";
         badge.setAttribute("role", "status");
@@ -551,13 +589,19 @@
     // Chart-Enhancement per Event-Delegation automatisch (kein Re-Init).
 
     function panelUrl(base, uid, idx) {
-        return base + "/dashboards/" + encodeURIComponent(uid) + "/panel/" + idx + location.search;
+        // Cache-Buster (&_=ts): preset+vars sind in der URL byte-stabil — eine
+        // Cache-Schicht, die no-store ignoriert (IIS Output Caching/ARR vor dem
+        // Host), wuerde die Panel-URL sonst aus dem Cache bedienen und das Panel
+        // „friert" auf dem to des Cache-Zeitpunkts ein. Mit _=ts ist jede URL
+        // einmalig → keine Cache-Schicht kann eine alte Antwort liefern.
+        return base + "/dashboards/" + encodeURIComponent(uid) + "/panel/" + idx
+            + location.search + (location.search ? "&" : "?") + "_=" + Date.now();
     }
 
     function loadPanel(panel, url) {
         if (panel._hmdLoading) return;
         panel._hmdLoading = true;
-        fetch(url, { headers: { "Accept": "text/html" }, credentials: "same-origin" })
+        fetch(url, { headers: { "Accept": "text/html" }, credentials: "same-origin", cache: "no-store" })
             .then(function (res) { if (!res.ok) throw new Error("HTTP " + res.status); return res.text(); })
             .then(function (html) { panel.outerHTML = html; })
             .catch(function () {
@@ -596,7 +640,76 @@
         }
     }
 
-    function initAll() { initTimePicker(); initLazyPanels(); }
+    // === Query-Syntax-Highlighting (PromQL/LogQL) =========================
+    // Textareas mit data-hmd-ql="promql" (Panel-Editor-Targets) bekommen ein
+    // Highlight-Overlay: ein <pre> HINTER der Textarea zeigt den Text farbig,
+    // die Textarea selbst ist transparent (nur Caret + Auswahl sichtbar). Bei
+    // jedem input/scroll wird synchronisiert. Progressive Enhancement: ohne JS
+    // bleibt die Textarea unverändert (Overlay wird hier erst gebaut).
+    function hlQlTokens(text) {
+        // Eine Alternative über alle PromQL/LogQL-Bausteine; Reihenfolge = Priorität.
+        var re = /("(?:[^"\\]|\\.)*")|(\/\/[^\n]*)|(\{\{[^}]*\}\})|(\b\d+(?:\.\d+)?(?:ms|s|m|h|d|w|y)?\b)|([A-Za-z_][A-Za-z0-9_]*)|([=!<>]=|=~|!~|\|=|\|\||[-+*\/%^=!<>~|])|([{}()\[\],;:.\[\]])/g;
+        var KW = { by:1, without:1, on:1, ignoring:1, group_left:1, group_right:1, offset:1, bool:1,
+                   and:1, or:1, unless:1, if:1, sum:1, min:1, max:1, avg:1, group:1, stddev:1, stdvar:1,
+                   count:1, count_values:1, bottomk:1, topk:1, quantile:1 };
+        var FN = { rate:1, irate:1, increase:1, delta:1, idelta:1, deriv:1, predict_linear:1,
+                   histogram_quantile:1, histogram_count:1, histogram_sum:1, histogram_fraction:1,
+                   abs:1, absent:1, absent_over_time:1, ceil:1, changes:1, clamp:1, clamp_max:1, clamp_min:1,
+                   day_of_month:1, day_of_week:1, day_of_year:1, days_in_month:1, exp:1, floor:1,
+                   histogram_avg:1, hour:1, label_join:1, label_replace:1, ln:1, log2:1, log10:1,
+                   minute:1, month:1, pi:1, round:1, scalar:1, sgn:1, sort:1, sort_by_label:1,
+                   sort_by_label_desc:1, sort_desc:1, sqrt:1, time:1, timestamp:1, vector:1, year:1,
+                   avg_over_time:1, min_over_time:1, max_over_time:1, sum_over_time:1, count_over_time:1,
+                   quantile_over_time:1, stddev_over_time:1, stdvar_over_time:1, last_over_time:1,
+                   present_over_time:1, mad_over_time:1, ts_of_max_over_time:1, ts_of_min_over_time:1 };
+        var out = "", last = 0, m;
+        re.lastIndex = 0;
+        while ((m = re.exec(text)) !== null) {
+            out += esc(text.slice(last, m.index));
+            if (m[1]) out += '<span class="hmd-ql-str">' + esc(m[0]) + "</span>";
+            else if (m[2]) out += '<span class="hmd-ql-com">' + esc(m[0]) + "</span>";
+            else if (m[3]) out += '<span class="hmd-ql-kw">' + esc(m[0]) + "</span>";
+            else if (m[4]) out += '<span class="hmd-ql-num">' + esc(m[0]) + "</span>";
+            else if (m[5]) {
+                var w = m[0].toLowerCase();
+                out += '<span class="' + (KW[w] ? "hmd-ql-kw" : (FN[w] ? "hmd-ql-fn" : "hmd-ql-lbl")) + '">' + esc(m[0]) + "</span>";
+            }
+            else out += '<span class="hmd-ql-op">' + esc(m[0]) + "</span>";
+            last = re.lastIndex;
+        }
+        out += esc(text.slice(last));
+        return out;
+    }
+
+    function initQlHighlight() {
+        var tas = document.querySelectorAll('textarea[data-hmd-ql]');
+        for (var i = 0; i < tas.length; i++) {
+            (function (ta) {
+                if (ta._hmdQl) return;
+                ta._hmdQl = true;
+                var pre = document.createElement("pre");
+                pre.className = "hmd-ql-hl";
+                pre.setAttribute("aria-hidden", "true");
+                var wrap = document.createElement("div");
+                wrap.className = "hmd-ql-wrap";
+                ta.parentNode.insertBefore(wrap, ta);
+                wrap.appendChild(pre);
+                wrap.appendChild(ta);
+                function sync() {
+                    // \n am Ende ergänzen: sonst frisst das pre den letzten Zeilenumbruch.
+                    pre.innerHTML = hlQlTokens(ta.value) + "\n";
+                }
+                ta.addEventListener("input", sync);
+                ta.addEventListener("scroll", function () {
+                    pre.scrollTop = ta.scrollTop;
+                    pre.scrollLeft = ta.scrollLeft;
+                });
+                sync();
+            })(tas[i]);
+        }
+    }
+
+    function initAll() { restoreListScroll(); initTimePicker(); initLazyPanels(); initQlHighlight(); }
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", initAll);

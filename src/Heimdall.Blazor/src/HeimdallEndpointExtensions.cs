@@ -26,6 +26,34 @@ namespace Heimdall.Blazor;
 /// </summary>
 public static class HeimdallEndpointExtensions
 {
+    /// <summary>
+    /// Stampft <c>Cache-Control: no-store</c> auf alle dynamischen Antworten, die
+    /// die Pipeline weiter unten erzeugt. Heimdall sendete bisher GAR KEINEN
+    /// Cache-Header — exakt das lädt Middle-Boxen (IIS Output Caching, ARR-Cache,
+    /// heuristisches Browser-Caching) ein, Panel-/API-Antworten eigenmächtig zu
+    /// cachen. Symptom in Produktion: importierte Dashboard-Panels blieben bei
+    /// Presets < 24 h auf alten Zeitfenstern „eingefroren“, weil der vorgelagerte
+    /// IIS die byte-identische Panel-URL (preset + vars sind stabil) aus seinem
+    /// Cache bediente — samt dem zum Cache-Zeitpunkt berechneten <c>to</c> —,
+    /// während nie angefragte URLs (7 t) frische Antworten bekamen. Browser-
+    /// seitiges „Disable cache“ hilft dagegen nicht (der Cache sitzt hinter dem
+    /// Browser). <c>no-store</c> weist jede Cache-Schicht (inkl. IIS-User-Mode-
+    /// Cache) an, die Antwort nicht zu speichern.
+    ///
+    /// Nach <c>UseStaticFiles()</c> einhängen — statische Assets (CSS/JS/Fonts)
+    /// laufen am Middleware-Kurzschluss vorbei und behalten ihr eigenes
+    /// Caching-Verhalten. Header werden VOR <c>next()</c> gesetzt, sodass sie für
+    /// jede weiter unten beginnende Antwort gelten.
+    /// </summary>
+    public static void UseHeimdallNoCache(this IApplicationBuilder app)
+    {
+        app.Use(async (ctx, next) =>
+        {
+            ctx.Response.Headers.CacheControl = "no-store";
+            await next(ctx);
+        });
+    }
+
     public static IEndpointConventionBuilder MapHeimdallDashboard(this IEndpointRouteBuilder endpoints, string prefix = "/otel")
     {
         var group = endpoints.MapGroup(prefix);
@@ -124,7 +152,7 @@ public static class HeimdallEndpointExtensions
         group.MapGet("/trace/{tid}", (HttpContext ctx, string tid) =>
             new RazorComponentResult<TraceDetailPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), TraceId = tid }));
 
-        group.MapGet("/logs", (HttpContext ctx, string? text, string? q, string? sev, string[]? svc, string? ver, string? limit, string? expand, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
+        group.MapGet("/logs", (HttpContext ctx, string? text, string? q, string? sev, string[]? svc, string? ver, string? limit, string? expand, string? offset, string? sort, string? dir, string? preset, string? from, string? to, string? view) =>
             new RazorComponentResult<LogsPage>(new
             {
                 BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
@@ -144,6 +172,8 @@ public static class HeimdallEndpointExtensions
                 Preset = preset,
                 From = ParseNs(from),
                 To = ParseNs(to),
+                // Alternative Ansicht: view=svc gruppiert die Liste nach Service.
+                View = NullIfEmpty(view ?? ""),
             }));
 
         group.MapGet("/metrics", (HttpContext ctx, string? name, string? limit, string? preset, string? from, string? to) =>
@@ -286,7 +316,17 @@ public static class HeimdallEndpointExtensions
             var slot = slots[idx];
             var titled = slot.Panel with { Title = slot.Title };
             var rp = GrafanaPanelRenderer.Render(titled, engine, prep.FromMs, prep.ToMs, prep.StepMs, slot.Vars, query, i18n.Lang, HeimdallUiPaths.FullPrefix(ctx, prefix));
-            return new RazorComponentResult<GrafanaPanelFragment>(new { Panel = rp, BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix) });
+            // Edit-Link direkt am Panel (Grafana-artig): Pfad-Key aus dem Match
+            // Render-Panels ↔ rohes JSON; kein Treffer → kein Link.
+            string? editUrl = null;
+            var rawJson = store.GetRaw(uid);
+            if (rawJson is not null)
+            {
+                var keys = GrafanaDashboardEditor.MatchRenderKeys(rawJson, new[] { slot.Panel });
+                if (keys.Count > 0 && keys[0] is string k)
+                    editUrl = HeimdallUiPaths.FullPrefix(ctx, prefix) + "/dashboards/" + Uri.EscapeDataString(uid) + "/panel/" + k + "/edit";
+            }
+            return new RazorComponentResult<GrafanaPanelFragment>(new { Panel = rp, BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), EditUrl = editUrl });
         });
 
         group.MapPost("/dashboards/{uid}/delete", (HttpContext ctx, string uid, IGrafanaDashboardStore store) =>
@@ -294,6 +334,259 @@ public static class HeimdallEndpointExtensions
             if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
             store.Delete(uid);
             return Results.Redirect(HeimdallUiPaths.FullPrefix(ctx, prefix) + "/dashboards");
+        });
+
+        // === Dashboard-Editor (Erstellen/Bearbeiten, Formular + rohes JSON) ===
+        // Backend = GrafanaDashboardEditor: JsonNode-Mutation auf dem ROHEN JSON —
+        // verlustfrei fuer importierte Dashboards (datasource.uid, overrides, options
+        // ueberleben). Panel-Identitaet sind Pfad-Keys ins panels-Array ("3" bzw.
+        // "1.3" fuer Row-Kind-Panels) — nicht GrafanaPanel.Id und nicht der
+        // Slot-Index der Ansicht. Alle POSTs: Same-Origin-Check + Redirect-Muster
+        // wie /dashboards/import; Save IMMER mit Routen-Uid (store.Save(uid, json)),
+        // damit uid-lose Alt-Bestände ihren Dateinamen behalten.
+        group.MapGet("/dashboards/new", (HttpContext ctx) =>
+            new RazorComponentResult<GrafanaDashboardEditPage>(new
+            { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix) }));
+
+        group.MapGet("/dashboards/{uid}/edit", (HttpContext ctx, string uid, string? err) =>
+            new RazorComponentResult<GrafanaDashboardEditPage>(new
+            { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), Uid = uid, Error = err }));
+
+        group.MapGet("/dashboards/{uid}/json", (HttpContext ctx, string uid, string? err) =>
+            new RazorComponentResult<GrafanaDashboardJsonPage>(new
+            { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), Uid = uid, Error = err }));
+
+        // "+ Target"/"+ Schwelle"-Links addieren Server-seitig Formularzeilen
+        // (addtgt= Anzahl zusaetzlicher Target-Zeilen, addthr analog). Kein JS.
+        group.MapGet("/dashboards/{uid}/panel/new", (HttpContext ctx, string uid, string? addtgt, string? addthr) =>
+            new RazorComponentResult<GrafanaPanelEditPage>(new
+            {
+                BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), Uid = uid,
+                AddTgt = ParseInt(addtgt), AddThr = ParseInt(addthr),
+            }));
+
+        group.MapGet("/dashboards/{uid}/panel/{key}/edit", (HttpContext ctx, string uid, string key, string? addtgt, string? addthr, string? err) =>
+            new RazorComponentResult<GrafanaPanelEditPage>(new
+            {
+                BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), Uid = uid, PanelKey = key,
+                AddTgt = ParseInt(addtgt), AddThr = ParseInt(addthr), Error = err,
+            }));
+
+        // Live-Vorschau: der „Vorschau"-Button im Panel-Formular (GET-Submit,
+        // formaction hierher) liefert ALLE Felder in der Query — das Panel wird
+        // aus dem UNGESPEICHERTEN Stand ausgewertet (Panel-JSON auf einem
+        // Wegwerf-Skeleton gebaut, nicht gespeichert) und inline unter dem
+        // Formular gerendert. GET = kein CSRF-Risiko, nichts persistiert.
+        group.MapGet("/dashboards/{uid}/panel/preview", (HttpContext ctx, string uid, string? preset, string? from, string? to) =>
+        {
+            string? err = null;
+            var store = ctx.RequestServices.GetRequiredService<IGrafanaDashboardStore>();
+            var dash = store.Get(uid);
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
+            if (dash is null) return Results.NotFound();
+            var pf = BindPanelQuery(ctx.Request.Query);
+            var panelKey = NullIfEmpty(ctx.Request.Query["panelKey"].ToString());
+
+            // Panel aus dem Formularstand bauen (Wegwerf-Skeleton, nie gespeichert).
+            // UpsertPanel lehnt z. B. fehlende Targets ab — der Fehler landet als
+            // Meldung über dem Formular statt als Preview.
+            RenderedPanel? preview = null;
+            try
+            {
+                var skeleton = GrafanaDashboardEditor.CreateNew("preview");
+                var json = GrafanaDashboardEditor.UpsertPanel(skeleton, null, pf);
+                var parsed = GrafanaDashboardModel.Parse(json);
+                var panel = parsed?.Panels.Count > 0 ? parsed.Panels[0] : null;
+                if (panel is not null)
+                {
+                    var engine = ctx.RequestServices.GetRequiredService<Heimdall.Prometheus.PromEngine>();
+                    var query = ctx.RequestServices.GetRequiredService<Heimdall.IHeimdallQuery>();
+                    var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
+                    // Render-Variablen des ECHTEN Dashboards (Template-Variablen +
+                    // $__rate_interval &c. aus den var-*/Zeit-Params), damit die
+                    // Vorschau dieselbe Interpolation nutzt wie die Ansicht.
+                    var vars = ctx.Request.Query
+                        .Where(kv => kv.Key.StartsWith("var-", StringComparison.Ordinal))
+                        .ToDictionary(kv => kv.Key.Substring(4), kv => kv.Value.ToString(), StringComparer.Ordinal);
+                    var prep = GrafanaDashboardRender.BuildRenderVars(dash, vars, preset, ParseNs(from), ParseNs(to), HeimdallRange.NowUnixNano());
+                    preview = GrafanaPanelRenderer.Render(panel, engine, prep.FromMs, prep.ToMs, prep.StepMs, prep.RenderVars, query, i18n.Lang, full);
+                }
+            }
+            catch (ArgumentException ex)
+            {
+                err = ex.Message;   // z. B. fehlende Targets — Seite mit Meldung + Formularstand
+            }
+
+            return new RazorComponentResult<GrafanaPanelEditPage>(new
+            {
+                BasePath = full, Uid = uid, PanelKey = panelKey,
+                Form = pf, Preview = preview, Error = err,
+            });
+        });
+
+        group.MapGet("/dashboards/{uid}/var/new", (HttpContext ctx, string uid) =>
+            new RazorComponentResult<GrafanaVariableEditPage>(new
+            { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), Uid = uid }));
+
+        group.MapGet("/dashboards/{uid}/var/{key}/edit", (HttpContext ctx, string uid, string key, string? err) =>
+            new RazorComponentResult<GrafanaVariableEditPage>(new
+            { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), Uid = uid, VarKey = key, Error = err }));
+
+        group.MapPost("/dashboards/save", async (HttpContext ctx, IGrafanaDashboardStore store) =>
+        {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            var form = await ctx.Request.ReadFormAsync();
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
+            var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
+            var uid = NullIfEmpty(form["uid"].ToString());
+            var title = form["title"].ToString().Trim();
+            try
+            {
+                if (string.IsNullOrEmpty(uid))
+                {
+                    // Neu-Anlage: Skeleton mit generierter Uid; Save leitet die Uid
+                    // aus dem Payload ab und legt die Datei an.
+                    if (title.Length == 0)
+                        return Results.Redirect($"{full}/dashboards/new?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.dashboardtitle")));
+                    var uid2 = store.Save(GrafanaDashboardEditor.CreateNew(title));
+                    return Results.Redirect($"{full}/dashboards/{uid2}");
+                }
+                // Rename: Uid (und damit die Datei) bleibt — Titel nur via SetTitle.
+                var raw = store.GetRaw(uid);
+                if (raw is null) return Results.Redirect($"{full}/dashboards?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.notfound")));
+                store.Save(uid, GrafanaDashboardEditor.SetTitle(raw, title));
+                return Results.Redirect($"{full}/dashboards/{uid}");
+            }
+            catch (ArgumentException)
+            {
+                return Results.Redirect(string.IsNullOrEmpty(uid)
+                    ? $"{full}/dashboards/new?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.dashboardtitle"))
+                    : $"{full}/dashboards/{uid}/edit?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.dashboardtitle")));
+            }
+        });
+
+        group.MapPost("/dashboards/{uid}/duplicate", (HttpContext ctx, string uid, IGrafanaDashboardStore store) =>
+        {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
+            var raw = store.GetRaw(uid);
+            if (raw is null) return Results.Redirect($"{full}/dashboards?err=" + Uri.EscapeDataString("not found"));
+            var newUid = store.Save(GrafanaDashboardEditor.Duplicate(raw, GrafanaDashboardEditor.NewUid()));
+            return Results.Redirect($"{full}/dashboards/{newUid}");
+        });
+
+        group.MapPost("/dashboards/{uid}/json", async (HttpContext ctx, string uid, IGrafanaDashboardStore store) =>
+        {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            var form = await ctx.Request.ReadFormAsync();
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
+            var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
+            var content = form["json"].ToString();
+            if (string.IsNullOrWhiteSpace(content))
+                return Results.Redirect($"{full}/dashboards/{uid}/json?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.nodashboardjson")));
+            try
+            {
+                // ReplaceJson erzwingt die Routen-Uid (eine andere Uid im Text wuerde
+                // sonst als neue Datei speichern und die Alt-Datei verwaisten).
+                store.Save(uid, GrafanaDashboardEditor.ReplaceJson(content, uid));
+                return Results.Redirect($"{full}/dashboards/{uid}");
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.Redirect($"{full}/dashboards/{uid}/json?err=" + Uri.EscapeDataString(ex.Message));
+            }
+        });
+
+        group.MapPost("/dashboards/{uid}/panel/save", async (HttpContext ctx, string uid, IGrafanaDashboardStore store) =>
+        {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            var form = await ctx.Request.ReadFormAsync();
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
+            var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
+            var panelKey = NullIfEmpty(form["panelKey"].ToString());
+            var errUrl = $"{full}/dashboards/{uid}/panel/{(panelKey is null ? "new" : panelKey + "/edit")}?err=";
+            var pf = BindPanelForm(form);
+            if (string.IsNullOrWhiteSpace(pf.Title))
+                return Results.Redirect(errUrl + Uri.EscapeDataString(i18n.T("endpoint.err.paneltitle")));
+            if (!string.Equals(pf.Type, "row", StringComparison.OrdinalIgnoreCase) && pf.Targets.All(t => string.IsNullOrWhiteSpace(t.Expr)))
+                return Results.Redirect(errUrl + Uri.EscapeDataString(i18n.T("endpoint.err.paneltargets")));
+            try
+            {
+                var raw = store.GetRaw(uid);
+                if (raw is null) return Results.NotFound();
+                // Grid-Hygiene: überlappende Panels = unlesbares Dashboard. Ohne
+                // ausdrücklichen Haken (force=1) blockt ein Kollisions-Save mit
+                // dem Titel des kollidierenden Panels (Update: eigenes Panel ausgenommen).
+                if (form["force"] != "1")
+                {
+                    var hit = FindOverlap(raw, panelKey, pf);
+                    if (hit is not null)
+                        return Results.Redirect(errUrl + Uri.EscapeDataString(
+                            i18n.T("endpoint.err.overlap", hit)));
+                }
+                store.Save(uid, GrafanaDashboardEditor.UpsertPanel(raw, panelKey, pf));
+                return Results.Redirect($"{full}/dashboards/{uid}");
+            }
+            catch (Exception ex)
+            {
+                return Results.Redirect(errUrl + Uri.EscapeDataString(ex.Message));
+            }
+        });
+
+        group.MapPost("/dashboards/{uid}/panel/{key}/delete", (HttpContext ctx, string uid, string key, IGrafanaDashboardStore store) =>
+        {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
+            try
+            {
+                var raw = store.GetRaw(uid);
+                if (raw is not null) store.Save(uid, GrafanaDashboardEditor.DeletePanel(raw, key));
+                return Results.Redirect($"{full}/dashboards/{uid}/edit");
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.Redirect($"{full}/dashboards/{uid}/edit?err=" + Uri.EscapeDataString(ex.Message));
+            }
+        });
+
+        group.MapPost("/dashboards/{uid}/var/save", async (HttpContext ctx, string uid, IGrafanaDashboardStore store) =>
+        {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            var form = await ctx.Request.ReadFormAsync();
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
+            var i18n = ctx.RequestServices.GetRequiredService<Heimdall.Blazor.IHeimdallI18n>();
+            var varKey = NullIfEmpty(form["varKey"].ToString());
+            var errUrl = $"{full}/dashboards/{uid}/var/{(varKey is null ? "new" : varKey + "/edit")}?err=";
+            var vf = BindVariableForm(form);
+            if (string.IsNullOrWhiteSpace(vf.Name))
+                return Results.Redirect(errUrl + Uri.EscapeDataString(i18n.T("endpoint.err.varname")));
+            try
+            {
+                var raw = store.GetRaw(uid);
+                if (raw is null) return Results.Redirect($"{full}/dashboards?err=" + Uri.EscapeDataString(i18n.T("endpoint.err.notfound")));
+                store.Save(uid, GrafanaDashboardEditor.UpsertVariable(raw, varKey, vf));
+                return Results.Redirect($"{full}/dashboards/{uid}");
+            }
+            catch (Exception ex)
+            {
+                return Results.Redirect(errUrl + Uri.EscapeDataString(ex.Message));
+            }
+        });
+
+        group.MapPost("/dashboards/{uid}/var/{key}/delete", (HttpContext ctx, string uid, string key, IGrafanaDashboardStore store) =>
+        {
+            if (!CheckSameOrigin(ctx, prefix)) return Results.BadRequest("cross-origin POST rejected");
+            var full = HeimdallUiPaths.FullPrefix(ctx, prefix);
+            try
+            {
+                var raw = store.GetRaw(uid);
+                if (raw is not null) store.Save(uid, GrafanaDashboardEditor.DeleteVariable(raw, key));
+                return Results.Redirect($"{full}/dashboards/{uid}/edit");
+            }
+            catch (ArgumentException ex)
+            {
+                return Results.Redirect($"{full}/dashboards/{uid}/edit?err=" + Uri.EscapeDataString(ex.Message));
+            }
         });
 
         // === Alarm-Subsystem (Regeln ueber Logs/Metriken/Traces) ===
@@ -445,6 +738,80 @@ public static class HeimdallEndpointExtensions
     private static long? ParseLong(Microsoft.Extensions.Primitives.StringValues v) =>
         long.TryParse(v.ToString(), NumberStyles.Integer, CultureInfo.InvariantCulture, out var n) ? n : null;
 
+    /// <summary>Bindet das Panel-Formular (indexbasierte Target-/Threshold-Zeilen
+    /// t{i}Expr/t{i}Legend/t{i}Instant bzw. thr{i}Value/thr{i}Color — Checkboxen
+    /// verschieben sonst die Parallel-Array-Zuordnung). Blanks leert der Editor
+    /// beim Speichern heraus; Zeilen-Caps schuetzen vor Formular-Bomben.</summary>
+    private static GrafanaDashboardEditor.PanelForm BindPanelForm(Microsoft.AspNetCore.Http.IFormCollection form) =>
+        BindPanelFields(k => form[k].ToString());
+
+    /// <summary>Titel des ersten Panels, das das Formular-Rechteck schneidet
+    /// (Update: das Panel am panelKey selbst ist ausgenommen); null = kollisionsfrei.</summary>
+    private static string? FindOverlap(string rawJson, string? panelKey, GrafanaDashboardEditor.PanelForm pf)
+    {
+        var panels = GrafanaDashboardEditor.ListPanels(rawJson);
+        foreach (var p in panels)
+        {
+            if (panelKey is not null && string.Equals(p.Key, panelKey, StringComparison.Ordinal)) continue;
+            var g = p.GridPos;
+            if (pf.X < g.X + g.W && g.X < pf.X + Math.Max(1, pf.W)
+                && pf.Y < g.Y + g.H && g.Y < pf.Y + Math.Max(1, pf.H))
+                return string.IsNullOrEmpty(p.Title) ? p.Key : p.Title;
+        }
+        return null;
+    }
+
+    /// <summary>Panel-Formular aus GET-Query (Live-Vorschau: derselbe Feld-Naming-
+    /// Vertrag wie das POST-Formular — t{i}Expr/thr{i}* inkl. Entfernen-Haken t{i}Rm).</summary>
+    private static GrafanaDashboardEditor.PanelForm BindPanelQuery(Microsoft.AspNetCore.Http.IQueryCollection query) =>
+        BindPanelFields(k => query[k].ToString());
+
+    /// <summary>Panel-Formular aus Name-Wert-Zugriff (IFormCollection und IQueryCollection
+    /// teilen denselben Feld-Naming-Vertrag, daher generiert über einen Getter).</summary>
+    private static GrafanaDashboardEditor.PanelForm BindPanelFields(Func<string, string> get)
+    {
+        const int MaxRows = 50;
+        int tgtCount = Math.Clamp(ParseInt(get("tgtCount")) ?? 0, 0, MaxRows);
+        var targets = new System.Collections.Generic.List<GrafanaDashboardEditor.TargetForm>(tgtCount);
+        for (int i = 0; i < tgtCount; i++)
+        {
+            if (get($"t{i}Rm") == "1") continue;   // Entfernen-Haken: Zeile fällt weg (Save + Vorschau)
+            targets.Add(new GrafanaDashboardEditor.TargetForm(
+                get($"t{i}Expr"),
+                NullIfEmpty(get($"t{i}Legend")),
+                get($"t{i}Instant") == "1"));
+        }
+        int thrCount = Math.Clamp(ParseInt(get("thrCount")) ?? 0, 0, MaxRows);
+        var thresholds = new System.Collections.Generic.List<GrafanaDashboardEditor.ThresholdForm>(thrCount);
+        for (int i = 0; i < thrCount; i++)
+        {
+            if (get($"thr{i}Rm") == "1") continue;
+            var raw = get($"thr{i}Value");
+            double? val = double.TryParse(raw, NumberStyles.Float, CultureInfo.InvariantCulture, out var d) ? d : null;
+            thresholds.Add(new GrafanaDashboardEditor.ThresholdForm(val, get($"thr{i}Color")));
+        }
+        return new GrafanaDashboardEditor.PanelForm(
+            get("title"),
+            NullIfEmpty(get("type")) ?? "timeseries",
+            ParseInt(get("gridX")) ?? 0, ParseInt(get("gridY")) ?? 0,
+            ParseInt(get("gridW")) ?? 6, ParseInt(get("gridH")) ?? 8,
+            targets,
+            NullIfEmpty(get("unit")),
+            thresholds,
+            NullIfEmpty(get("repeat")),
+            NullIfEmpty(get("graphMode")));
+    }
+
+    /// <summary>Bindet das Variablen-Formular (Render-Contract-Form, siehe Editor).</summary>
+    private static GrafanaDashboardEditor.VariableForm BindVariableForm(Microsoft.AspNetCore.Http.IFormCollection form) =>
+        new(
+            form["name"].ToString(),
+            NullIfEmpty(form["type"].ToString()) ?? "query",
+            NullIfEmpty(form["query"].ToString()) ?? string.Empty,
+            NullIfEmpty(form["current"].ToString()),
+            form["includeAll"] == "1",
+            form["multi"] == "1");
+
     private static bool? ParseBool(Microsoft.Extensions.Primitives.StringValues v)
     {
         var s = v.ToString();
@@ -489,6 +856,10 @@ public static class HeimdallEndpointExtensions
     /// nicht-Cookie-Auth-UIs: ein Cross-Site-Form-POST setzt einen anderen Origin-Header
     /// (oder keinen), den der Browser nicht fälschen kann. Same-Site-Requests (leerer
     /// Origin bei GET-Form-Navigation, gleicher Host bei POST) werden akzeptiert.
+    /// Zusätzlich akzeptiert die Liste <c>Heimdall:Ui:TrustedOrigins</c> externe
+    /// Origins, unter denen die UI hinter einem Reverse-Proxy/ARR mit abweichender
+    /// TLD betrieben wird und deren Host-Header der Proxy nicht 1:1 durchreicht
+    /// (X-Forwarded-Host fehlt) — siehe <see cref="IsTrustedOrigin"/>.
     /// </summary>
     private static bool CheckSameOrigin(HttpContext ctx, string prefix)
     {
@@ -499,10 +870,47 @@ public static class HeimdallEndpointExtensions
             var referer = ctx.Request.Headers["Referer"].ToString();
             if (string.IsNullOrEmpty(referer)) return true;   // kein Header → SameSite
             if (!Uri.TryCreate(referer, UriKind.Absolute, out var refUri)) return true;
-            return SameAuthority(refUri, ctx);
+            return SameAuthority(refUri, ctx) || IsTrustedOrigin(refUri, ctx);
         }
         if (!Uri.TryCreate(origin, UriKind.Absolute, out var uri)) return false;
-        return SameAuthority(uri, ctx);
+        return SameAuthority(uri, ctx) || IsTrustedOrigin(uri, ctx);
+    }
+
+    /// <summary>
+    /// Zusätzlicher Trust-Anchor für <see cref="CheckSameOrigin"/>: die Sektion
+    /// <c>Heimdall:Ui:TrustedOrigins</c> (String-Array vollständiger Origins, z. B.
+    /// <c>"https://portal.example.de"</c>) listet die externen Origins, unter denen
+    /// die UI hinter einem Reverse-Proxy erreichbar ist. Nötig, wenn der Proxy die
+    /// externe Authority nicht durchreicht: Der Browser sendet beim Form-POST
+    /// unausweisbar Origin/Referer mit der EXTERNEN Origin, während
+    /// <see cref="SameAuthority"/> gegen Request.Host (bzw. X-Forwarded-Host) läuft —
+    /// bei abweichender TLD und fehlendem X-Forwarded-Host (IIS-ARR setzt das nicht
+    /// von selbst) schlägt der Vergleich fehl, obwohl der Request legitime
+    /// Same-Origin-Navigation des externen Frontends ist. Scheme und Host werden
+    /// case-insensitive verglichen, Ports wie in <see cref="SameAuthority"/>
+    /// (Default-Ports gelten als null).
+    /// </summary>
+    private static bool IsTrustedOrigin(Uri external, HttpContext ctx)
+    {
+        // Bewusst ohne Configuration.Binder (Get<string[]>()): die Sektion wird
+        // per GetChildren() gelesen — Heimdall.Blazor referenziert das Binder-
+        // Paket nicht, und für ein String-Array reicht GetChildren().
+        var section = ctx.RequestServices
+            .GetService<Microsoft.Extensions.Configuration.IConfiguration>()
+            ?.GetSection("Heimdall:Ui:TrustedOrigins");
+        if (section is null) return false;
+        foreach (var child in section.GetChildren())
+        {
+            var entry = child.Value;
+            if (string.IsNullOrWhiteSpace(entry)) continue;
+            if (!Uri.TryCreate(entry, UriKind.Absolute, out var t)) continue;
+            if (!string.Equals(t.Host, external.Host, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!string.Equals(t.Scheme, external.Scheme, StringComparison.OrdinalIgnoreCase)) continue;
+            int? tPort = t.IsDefaultPort ? null : t.Port;
+            int? ePort = external.IsDefaultPort ? null : external.Port;
+            if (Nullable.Equals(tPort, ePort)) return true;
+        }
+        return false;
     }
 
     /// <summary>

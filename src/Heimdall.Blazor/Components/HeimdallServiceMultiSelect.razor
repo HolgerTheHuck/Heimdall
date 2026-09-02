@@ -14,7 +14,7 @@
 @inject Heimdall.Blazor.IHeimdallI18n I18n
 <div class="hmd-filter-field">
     <span class="hmd-filter-label">@Label</span>
-    <details class="hmd-msel" data-hmd-msel-all="@I18n.T("common.filter.svc.all")"
+    <details class="hmd-msel" data-hmd-msel-all="@AllLabel()"
              data-hmd-msel-more="@I18n.T("common.filter.svc.more")" title="@Title">
         <summary aria-label="@Label" title="@Title">
             <span class="hmd-msel-text" data-hmd-msel-text>@SummaryText()</span>
@@ -24,7 +24,7 @@
         <div class="hmd-msel-panel" role="group" aria-label="@Label">
             @foreach (var s in Services)
             {
-                <label class="hmd-msel-opt"><input type="checkbox" name="svc" value="@s" checked="@Selected.Contains(s)" /><span>@s</span></label>
+                <label class="hmd-msel-opt"><input type="checkbox" name="@FieldName" value="@s" checked="@Selected.Contains(s)" /><span>@s</span></label>
             }
         </div>
     </details>
@@ -45,6 +45,14 @@
     /// <summary>Tooltip (title) auf Control + Summary („nichts gewählt = alle").</summary>
     [Parameter] public string? Title { get; set; }
 
+    /// <summary>Formular-Feldname der Checkboxen (GET-Param); Default "svc" für den
+    /// Service-Filter, Dashboard-Template-Variablen nutzen "var-&lt;name&gt;".</summary>
+    [Parameter] public string FieldName { get; set; } = "svc";
+
+    /// <summary>Text für „nichts gewählt = alles" (data-hmd-msel-all); null =
+    /// Service-Standard („alle").</summary>
+    [Parameter] public string? AllText { get; set; }
+
     /// <summary>
     /// Summary-Text des geschlossenen Controls (serverseitig, vor dem ersten Submit):
     /// 0 gewählt → „alle"; 1-2 → Namen; ≥3 → erster Name + „+N weitere". heimdall.js
@@ -52,8 +60,10 @@
     /// </summary>
     private string SummaryText()
     {
-        if (Selected.Count == 0) return I18n.T("common.filter.svc.all");
+        if (Selected.Count == 0) return AllLabel();
         if (Selected.Count <= 2) return string.Join(", ", Selected);
         return Selected.First() + " " + I18n.T("common.filter.svc.more", Selected.Count - 1);
     }
+
+    private string AllLabel() => AllText ?? I18n.T("common.filter.svc.all");
 }

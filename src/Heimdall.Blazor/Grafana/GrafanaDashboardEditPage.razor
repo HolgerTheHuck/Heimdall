@@ -1,0 +1,164 @@
+@* Editor-Hub (U = Uid gesetzt) + Neu-Anlage (U fehlt). Metadaten-Form, Panel-
+   und Variablen-Liste mit Bearbeiten-/Loesch-Aktionen, Duplizieren, Link auf
+   den JSON-Editor. Backend = GrafanaDashboardEditor (rohes JSON, verlustfrei);
+   Keys sind Pfad-Keys ins panels-Array ("3" bzw. "1.3" fuer Row-Kinder). Kein JS. *@
+@using Heimdall.Blazor.Grafana
+@inject IGrafanaDashboardStore Store
+@inject Heimdall.Blazor.IHeimdallI18n I18n
+
+<HeimdallDocument Title="@Heading" BasePath="@BasePath">
+    <h1>@Heading</h1>
+    <p class="hmd-dim">
+        @if (!IsNew)
+        {
+            <a href="@(BasePath + "/dashboards/" + Uid)">@I18n.T("grafana.view.back")</a><text> · </text>
+            <span class="hmd-mono">@Uid</span><text> · </text>
+            <a href="@(BasePath + "/dashboards/" + Uid + "/json")">@I18n.T("grafana.edit.menu.json")</a>
+        }
+        else
+        {
+            <a href="@(BasePath + "/dashboards")">@I18n.T("grafana.view.back")</a>
+        }
+    </p>
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <p class="hmd-err-msg" role="alert">@Error</p>
+    }
+    @if (_missing)
+    {
+        <p class="hmd-empty" role="status">@I18n.T("grafana.view.notfound", Uid)</p>
+    }
+    else
+    {
+        <form class="hmd-form" method="post" action="@(BasePath + "/dashboards/save")">
+            <input type="hidden" name="uid" value="@Uid" />
+            <fieldset>
+                <legend>@I18n.T("grafana.edit.legend.metadata")</legend>
+                <label>@I18n.T("grafana.edit.title") <input type="text" name="title" value="@_title" required /></label>
+            </fieldset>
+            <div class="hmd-form-actions">
+                <button type="submit" class="hmd-btn">@I18n.T("grafana.edit.save")</button>
+                <a class="hmd-btn hmd-btn-ghost" href="@(IsNew ? BasePath + "/dashboards" : BasePath + "/dashboards/" + Uid)">@I18n.T("grafana.edit.cancel")</a>
+            </div>
+        </form>
+
+        @if (!IsNew)
+        {
+            <fieldset>
+                <legend>@I18n.T("grafana.edit.legend.panels")</legend>
+                <p><a class="hmd-btn" href="@(BasePath + "/dashboards/" + Uid + "/panel/new")">@I18n.T("grafana.edit.addPanel")</a></p>
+                @if (_panels.Count == 0)
+                {
+                    <p class="hmd-empty" role="status">@I18n.T("grafana.edit.empty.panels")</p>
+                }
+                else
+                {
+                    <div class="hmd-list-scroll">
+                    <table class="hmd-table">
+                        <caption>@I18n.T("grafana.edit.legend.panels")</caption>
+                        <thead><tr>
+                            <th scope="col">@I18n.T("grafana.edit.panel.title")</th>
+                            <th scope="col">@I18n.T("grafana.edit.col.type")</th>
+                            <th scope="col">@I18n.T("grafana.edit.col.grid")</th>
+                            <th scope="col">@I18n.T("grafana.edit.col.targets")</th>
+                            <th scope="col"><span class="hmd-vh">@I18n.T("grafana.edit.col.actions")</span></th>
+                        </tr></thead>
+                        <tbody>
+                        @foreach (var p in _panels)
+                        {
+                            <tr>
+                                <td>@p.Title @(IsRowType(p.Type) ? I18n.T("grafana.edit.row.header") : null)</td>
+                                <td class="hmd-mono">@p.Type</td>
+                                <td class="hmd-mono">@p.GridPos.X, @p.GridPos.Y · @p.GridPos.W×@p.GridPos.H</td>
+                                <td>@p.TargetCount</td>
+                                <td>
+                                    <a href="@(BasePath + "/dashboards/" + Uid + "/panel/" + p.Key + "/edit")">@I18n.T("grafana.edit.edit")</a>
+                                    <form class="hmd-inline-form" method="post" action="@(BasePath + "/dashboards/" + Uid + "/panel/" + p.Key + "/delete")">
+                                        <button type="submit" class="hmd-btn hmd-btn-danger">@I18n.T("alert.detail.delete")</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                    </div>
+                }
+            </fieldset>
+
+            <fieldset>
+                <legend>@I18n.T("grafana.edit.legend.vars")</legend>
+                <p><a class="hmd-btn" href="@(BasePath + "/dashboards/" + Uid + "/var/new")">@I18n.T("grafana.edit.addVar")</a></p>
+                @if (_vars.Count == 0)
+                {
+                    <p class="hmd-empty" role="status">@I18n.T("grafana.edit.empty.vars")</p>
+                }
+                else
+                {
+                    <div class="hmd-list-scroll">
+                    <table class="hmd-table">
+                        <caption>@I18n.T("grafana.edit.legend.vars")</caption>
+                        <thead><tr>
+                            <th scope="col">@I18n.T("grafana.edit.var.name")</th>
+                            <th scope="col">@I18n.T("grafana.edit.var.type")</th>
+                            <th scope="col">@I18n.T("grafana.edit.var.query")</th>
+                            <th scope="col"><span class="hmd-vh">@I18n.T("grafana.edit.col.actions")</span></th>
+                        </tr></thead>
+                        <tbody>
+                        @foreach (var v in _vars)
+                        {
+                            <tr>
+                                <td class="hmd-mono">@v.Name</td>
+                                <td class="hmd-mono">@v.Type</td>
+                                <td class="hmd-mono hmd-clip">@v.Query</td>
+                                <td>
+                                    <a href="@(BasePath + "/dashboards/" + Uid + "/var/" + v.Key + "/edit")">@I18n.T("grafana.edit.edit")</a>
+                                    <form class="hmd-inline-form" method="post" action="@(BasePath + "/dashboards/" + Uid + "/var/" + v.Key + "/delete")">
+                                        <button type="submit" class="hmd-btn hmd-btn-danger">@I18n.T("alert.detail.delete")</button>
+                                    </form>
+                                </td>
+                            </tr>
+                        }
+                        </tbody>
+                    </table>
+                    </div>
+                }
+            </fieldset>
+
+            <div class="hmd-form-actions">
+                <form method="post" action="@(BasePath + "/dashboards/" + Uid + "/duplicate")">
+                    <button type="submit" class="hmd-btn">@I18n.T("grafana.edit.duplicate")</button>
+                </form>
+            </div>
+        }
+    }
+</HeimdallDocument>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    /// <summary>null = Neu-Anlage (nur Metadaten-Formular).</summary>
+    [Parameter] public string? Uid { get; set; }
+    [Parameter] public string? Error { get; set; }
+
+    private bool IsNew => string.IsNullOrEmpty(Uid);
+    private string Heading => IsNew ? I18n.T("grafana.edit.heading.new") : I18n.T("grafana.edit.heading");
+    private string _title = "";
+    private bool _missing;
+    private System.Collections.Generic.IReadOnlyList<GrafanaDashboardEditor.PanelEntry> _panels =
+        System.Array.Empty<GrafanaDashboardEditor.PanelEntry>();
+    private System.Collections.Generic.IReadOnlyList<GrafanaDashboardEditor.VarEntry> _vars =
+        System.Array.Empty<GrafanaDashboardEditor.VarEntry>();
+
+    private static bool IsRowType(string type) =>
+        string.Equals(type, "row", System.StringComparison.OrdinalIgnoreCase);
+
+    protected override void OnInitialized()
+    {
+        if (IsNew) return;
+        var raw = Store.GetRaw(Uid!);
+        if (raw is null) { _missing = true; return; }
+        _title = Store.Get(Uid!)?.Title ?? string.Empty;
+        _panels = GrafanaDashboardEditor.ListPanels(raw);
+        _vars = GrafanaDashboardEditor.ListVariables(raw);
+    }
+}

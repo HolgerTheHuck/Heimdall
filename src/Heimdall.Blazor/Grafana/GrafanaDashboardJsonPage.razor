@@ -1,0 +1,50 @@
+@* Roher JSON-Editor: Textarea mit dem unverfaelschten Dashboard-JSON.
+   Speichern via POST /dashboards/{uid}/json → GrafanaDashboardEditor.ReplaceJson
+   (parst lenient, erzwingt root["uid"] = Uid der Route). Kein JS. *@
+@using Heimdall.Blazor.Grafana
+@inject IGrafanaDashboardStore Store
+@inject Heimdall.Blazor.IHeimdallI18n I18n
+
+<HeimdallDocument Title="@I18n.T("grafana.edit.json.heading")" BasePath="@BasePath">
+    <h1>@I18n.T("grafana.edit.json.heading")</h1>
+    <p class="hmd-dim">
+        <a href="@(BasePath + "/dashboards/" + Uid + "/edit")">@I18n.T("grafana.view.back")</a>
+        <text> · </text><span class="hmd-mono">@Uid</span>
+    </p>
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <p class="hmd-err-msg" role="alert">@Error</p>
+    }
+    @if (_missing)
+    {
+        <p class="hmd-empty" role="status">@I18n.T("grafana.view.notfound", Uid)</p>
+    }
+    else
+    {
+        <p class="hmd-dim">@I18n.T("grafana.edit.json.hint")</p>
+        <form class="hmd-form" method="post" action="@(BasePath + "/dashboards/" + Uid + "/json")">
+            <textarea name="json" rows="24" spellcheck="false" class="hmd-mono" style="width:100%">@_json</textarea>
+            <div class="hmd-form-actions">
+                <button type="submit" class="hmd-btn">@I18n.T("grafana.edit.save")</button>
+                <a class="hmd-btn hmd-btn-ghost" href="@(BasePath + "/dashboards/" + Uid + "/edit")">@I18n.T("grafana.edit.cancel")</a>
+            </div>
+        </form>
+    }
+</HeimdallDocument>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string Uid { get; set; } = "";
+    [Parameter] public string? Error { get; set; }
+
+    private string _json = "";
+    private bool _missing;
+
+    protected override void OnInitialized()
+    {
+        var raw = Store.GetRaw(Uid);
+        if (raw is null) { _missing = true; return; }
+        _json = raw;
+    }
+}

@@ -13,7 +13,12 @@
 else
 {
     <section class="hmd-gpanel" style="grid-column: span @ColSpan;">
-        <h3 class="hmd-gpanel-title">@Panel.Panel.Title</h3>
+        <h3 class="hmd-gpanel-title">@Panel.Panel.Title@if (EditUrl is not null)
+        {
+            @* Bearbeiten direkt am Panel (Grafana-artig) — überlebt den outerHTML-
+               Swap des Lazy-Loaders, weil das Fragment die ganze Kachel ersetzt. *@
+            <a class="hmd-gpanel-edit" href="@EditUrl" title="@I18n.T("grafana.edit.edit")">✎</a>
+        }</h3>
         <div class="hmd-gpanel-body">
             @if (Panel.Result is ChartResult chart)
             {
@@ -126,6 +131,9 @@ else
 
     /// <summary>Mount-Pfad des Dashboards (für Trace-Links in Log-Zeilen).</summary>
     [Parameter] public string BasePath { get; set; } = "/otel";
+
+    /// <summary>Panel-Editor-URL oder null = kein Bearbeiten-Link im Panel-Kopf.</summary>
+    [Parameter] public string? EditUrl { get; set; }
 
     private int ColSpan
     {

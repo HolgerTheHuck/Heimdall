@@ -1,0 +1,242 @@
+@* Panel-Editor (Formular auf rohem JSON via GrafanaDashboardEditor). PanelKey
+   leer = neues Panel. Targets/Thresholds sind indexbasiert (t{i}Expr, thr{i}*)
+   mit versteckten Zaehlern; "+ Target"/"+ Schwelle" sind GET-Links (?addtgt=N),
+   damit das ohne JS servergerendert eine Zeile mehr anzeigt. Zeilen loeschen:
+   „Entfernen"-Haken (t{i}Rm/thr{i}Rm) — verschwinden beim naechsten Submit.
+   „Vorschau" = GET-Submit auf /panel/preview (alle Felder in der Query), das
+   UNGESPEICHERTE Panel wird serverseitig ausgewertet und inline unter dem
+   Formular gerendert; Formularstand bleibt erhalten. PromQL/LogQL-Felder
+   tragen data-hmd-ql (Highlight-Overlay, Progressive Enhancement). Kein
+   zwingendes JS. *@
+@using Heimdall.Blazor.Grafana
+@inject IGrafanaDashboardStore Store
+@inject Heimdall.Blazor.IHeimdallI18n I18n
+
+<HeimdallDocument Title="@Heading" BasePath="@BasePath">
+    <h1>@Heading</h1>
+    <p class="hmd-dim">
+        <a href="@(BasePath + "/dashboards/" + Uid + "/edit")">@I18n.T("grafana.view.back")</a>
+        <text> · </text><span class="hmd-mono">@Uid</span>
+ @if (_missing)
+        {
+            <text> · </text><span class="hmd-mono">@PanelKey</span>
+        }
+    </p>
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <p class="hmd-err-msg" role="alert">@Error</p>
+    }
+    @if (_missing)
+    {
+        <p class="hmd-empty" role="status">@I18n.T("grafana.view.notfound", Uid)</p>
+    }
+    else
+    {
+        <form class="hmd-form" method="post" action="@(BasePath + "/dashboards/" + Uid + "/panel/save")">
+            <input type="hidden" name="panelKey" value="@PanelKey" />
+            <input type="hidden" name="tgtCount" value="@_form.Targets.Count" />
+            <input type="hidden" name="thrCount" value="@_form.Thresholds.Count" />
+            <fieldset>
+                <legend>@I18n.T("grafana.edit.panel.title")</legend>
+                <label>@I18n.T("grafana.edit.panel.title") <input type="text" name="title" value="@_form.Title" required /></label>
+                <label>@I18n.T("grafana.edit.panel.type")
+                    <select name="type">
+                        @foreach (var t in PanelTypes)
+                        {
+                            <option value="@t" selected="@(t == _form.Type)">@t</option>
+                        }
+                    </select>
+                </label>
+            </fieldset>
+
+            <fieldset>
+                <legend>@I18n.T("grafana.edit.panel.grid")</legend>
+                @* Kompakt: die vier Positions-Felder teilen sich eine Zeile. *@
+                <div class="hmd-grid-pos">
+                    <label>X <input type="number" name="gridX" min="0" max="23" value="@_form.X" /></label>
+                    <label>Y <input type="number" name="gridY" min="0" value="@_form.Y" /></label>
+                    <label>W <input type="number" name="gridW" min="1" max="24" value="@_form.W" /></label>
+                    <label>H <input type="number" name="gridH" min="1" max="40" value="@_form.H" /></label>
+                </div>
+                @* Grid-Hygiene: überlappende Panels werden beim Save geblockt
+                   (Fehlermeldung mit dem kollidierenden Panel); der Haken erlaubt
+                   Ausnahmen (Bewusst-Overlap). *@
+                <label class="hmd-inline-chk"><input type="checkbox" name="force" value="1" /> @I18n.T("grafana.edit.allowOverlap")</label>
+            </fieldset>
+
+            <fieldset>
+                <legend>@I18n.T("grafana.edit.panel.targets")</legend>
+                <p><a class="hmd-btn" href="@(PanelKey is null ? BasePath + "/dashboards/" + Uid + "/panel/new?addtgt=" + _form.Targets.Count : BasePath + "/dashboards/" + Uid + "/panel/" + PanelKey + "/edit?addtgt=" + _form.Targets.Count)">@I18n.T("grafana.edit.panel.addTarget")</a></p>
+                @for (var i = 0; i < _form.Targets.Count; i++)
+                {
+                    var idx = i;
+                    <div class="hmd-target-row">
+                        <label>@I18n.T("grafana.edit.panel.targets") @idx
+                            <textarea name="@($"t{idx}Expr")" rows="2" spellcheck="false" data-hmd-ql="promql">@_form.Targets[idx].Expr</textarea>
+                        </label>
+                        <label>@I18n.T("grafana.edit.panel.legend")
+                            <input type="text" name="@($"t{idx}Legend")" value="@_form.Targets[idx].LegendFormat" />
+                        </label>
+                        <label class="hmd-check"><input type="checkbox" name="@($"t{idx}Instant")" value="1" checked="@_form.Targets[idx].Instant" /> Instant</label>
+                        <label class="hmd-check hmd-check-danger"><input type="checkbox" name="@($"t{idx}Rm")" value="1" /> @I18n.T("grafana.edit.remove")</label>
+                    </div>
+                }
+            </fieldset>
+
+            <fieldset>
+                <legend>@I18n.T("grafana.edit.panel.unit") / @I18n.T("grafana.edit.panel.thresholds")</legend>
+                <label>@I18n.T("grafana.edit.panel.unit")
+                    <input type="text" name="unit" list="hmd-units" value="@_form.Unit" />
+                </label>
+                <datalist id="hmd-units">
+                    <option value="percent"></option>
+                    <option value="short"></option>
+                    <option value="bytes"></option>
+                    <option value="seconds"></option>
+                    <option value="ms"></option>
+                    <option value="reqps"></option>
+                </datalist>
+                <p><a class="hmd-btn" href="@(PanelKey is null ? BasePath + "/dashboards/" + Uid + "/panel/new?addthr=" + _form.Thresholds.Count : BasePath + "/dashboards/" + Uid + "/panel/" + PanelKey + "/edit?addthr=" + _form.Thresholds.Count)">@I18n.T("grafana.edit.panel.addThreshold")</a></p>
+                @for (var i = 0; i < _form.Thresholds.Count; i++)
+                {
+                    var idx = i;
+                    <div class="hmd-thr-row">
+                        <label>@I18n.T("grafana.edit.panel.value") @idx
+                            <input type="number" step="any" name="@($"thr{idx}Value")" value="@(_form.Thresholds[idx].Value?.ToString(System.Globalization.CultureInfo.InvariantCulture))" />
+                        </label>
+                        <label>@I18n.T("grafana.edit.panel.color")
+                            <select name="@($"thr{idx}Color")">
+                                @foreach (var c in ThresholdColors)
+                                {
+                                    <option value="@c" selected="@(c == _form.Thresholds[idx].Color)">@c</option>
+                                }
+                            </select>
+                        </label>
+                        <label class="hmd-check hmd-check-danger"><input type="checkbox" name="@($"thr{idx}Rm")" value="1" /> @I18n.T("grafana.edit.remove")</label>
+                    </div>
+                }
+                <p class="hmd-dim">@I18n.T("grafana.edit.json.hint")</p>
+            </fieldset>
+
+            <fieldset>
+                <legend>@I18n.T("grafana.edit.panel.repeat") / @I18n.T("grafana.edit.panel.graphMode")</legend>
+                <label>@I18n.T("grafana.edit.panel.repeat")
+                    <select name="repeat">
+                        <option value=""></option>
+                        @foreach (var v in _varNames)
+                        {
+                            <option value="@v" selected="@(v == _form.Repeat)">@v</option>
+                        }
+                    </select>
+                </label>
+                <label>@I18n.T("grafana.edit.panel.graphMode")
+                    <select name="graphMode">
+                        @foreach (var mode in GraphModes)
+                        {
+                            <option value="@mode" selected="@(mode == _form.GraphMode)">@mode</option>
+                        }
+                    </select>
+                </label>
+            </fieldset>
+
+            <div class="hmd-form-actions">
+                <button type="submit" class="hmd-btn">@I18n.T("grafana.edit.save")</button>
+                @* Vorschau ohne Speichern: GET-Submit → /panel/preview (alle
+                   Felder in der Query; panelKey kommt aus dem hidden-Feld oben). *@
+                <button type="submit" class="hmd-btn hmd-btn-ghost" formmethod="get"
+                        formaction="@(BasePath + "/dashboards/" + Uid + "/panel/preview")">@I18n.T("grafana.edit.preview")</button>
+                <a class="hmd-btn hmd-btn-ghost" href="@(BasePath + "/dashboards/" + Uid + "/edit")">@I18n.T("grafana.edit.cancel")</a>
+            </div>
+        </form>
+
+        @if (Preview is not null)
+        {
+            @* Inline-Vorschau des UNGESPEICHERTEN Stands (GET-Submit oben) —
+               derselbe Render-Pfad wie in der Dashboard-Ansicht. *@
+            <section class="hmd-preview">
+                <h2 class="hmd-subhead">@I18n.T("grafana.edit.preview.heading")</h2>
+                <GrafanaPanelView Panel="@Preview" BasePath="@BasePath" />
+            </section>
+        }
+    }
+</HeimdallDocument>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string Uid { get; set; } = "";
+    /// <summary>Pfad-Key ins panels-Array ("3", "1.3") oder null = neues Panel.</summary>
+    [Parameter] public string? PanelKey { get; set; }
+    [Parameter] public string? Error { get; set; }
+    [Parameter] public int? AddTgt { get; set; }
+    [Parameter] public int? AddThr { get; set; }
+    /// <summary>Vom Preview-Endpoint vorgebundener Formularstand (GET-Query) —
+    /// gesetzt → das Formular zeigt DIESEN Stand statt der gespeicherten Werte.</summary>
+    [Parameter] public GrafanaDashboardEditor.PanelForm? Form { get; set; }
+    /// <summary>Aus dem Formularstand gerendertes Panel (nur mit Form gesetzt).</summary>
+    [Parameter] public RenderedPanel? Preview { get; set; }
+
+    private static readonly string[] PanelTypes =
+        { "timeseries", "stat", "table", "bargauge", "gauge", "pie", "logs", "heatmap", "row" };
+    private static readonly string[] ThresholdColors = { "green", "yellow", "orange", "red", "blue", "purple" };
+    // GraphMode nur für stat-Renderer relevant (options.graphMode): Fläche/Linie/keine.
+    private static readonly string[] GraphModes = { "area", "line", "none" };
+
+    private GrafanaDashboardEditor.PanelForm _form =
+        new("", "timeseries", 0, 0, 12, 8,
+            new[] { new GrafanaDashboardEditor.TargetForm("", null, false) }, null,
+            new[] { new GrafanaDashboardEditor.ThresholdForm(null, "green"), new GrafanaDashboardEditor.ThresholdForm(80, "red") },
+            null, null);
+    private System.Collections.Generic.IReadOnlyList<string> _varNames = System.Array.Empty<string>();
+    private bool _missing;
+
+    private string Heading => PanelKey is null
+        ? I18n.T("grafana.edit.panel.heading.new")
+        : I18n.T("grafana.edit.panel.heading.edit");
+
+    protected override void OnInitialized()
+    {
+        var raw = Store.GetRaw(Uid);
+        if (raw is null) { _missing = true; return; }
+        _varNames = GrafanaDashboardEditor.ListVariables(raw).Select(v => v.Name).ToArray();
+
+        if (Form is not null)
+        {
+            // Live-Vorschau: Formularstand kommt aus der GET-Query (Endpoint hat
+            // das Panel bereits gerendert) — nur Entfernen-Haken wirken schon
+            // (die Binding hat markierte Zeilen gedroppt).
+            _form = Form;
+            return;
+        }
+
+        if (PanelKey is null)
+        {
+            // Neues Panel: kollisionsfreie Suggest-Position (oben links zuerst
+            // frei, wie Grafana Auto-Flow), eine Target-Zeile + Basis-Thresholds.
+            var (x, y) = GrafanaDashboardEditor.SuggestNewPos(GrafanaDashboardEditor.ListPanels(raw), _form.W, _form.H);
+            var extra = _form.Targets.ToList();
+            var extraThr = _form.Thresholds.ToList();
+            for (var i = 0; i < (AddTgt ?? 0); i++) extra.Add(new GrafanaDashboardEditor.TargetForm("", null, false));
+            for (var i = 0; i < (AddThr ?? 0); i++) extraThr.Add(new GrafanaDashboardEditor.ThresholdForm(null, "green"));
+            _form = _form with { X = x, Y = y, Targets = extra, Thresholds = extraThr };
+        }
+        else
+        {
+            var form = GrafanaDashboardEditor.ReadPanel(raw, PanelKey);
+            if (form is null) { _missing = true; return; }
+            if (AddTgt is > 0)
+            {
+                var list = form.Targets.ToList();
+                for (var i = 0; i < AddTgt.Value; i++) list.Add(new GrafanaDashboardEditor.TargetForm("", null, false));
+                form = form with { Targets = list };
+            }
+            if (AddThr is > 0)
+            {
+                var list = form.Thresholds.ToList();
+                for (var i = 0; i < AddThr.Value; i++) list.Add(new GrafanaDashboardEditor.ThresholdForm(null, "green"));
+                form = form with { Thresholds = list };
+            }
+            _form = form;
+        }
+    }
+}

@@ -229,15 +229,27 @@ public static class GrafanaDashboardModel
     }
 
     /// <summary>
-    /// Sammelt Panels aus einem flachen <c>"panels"</c>-Array. Panels vom Typ
-    /// <c>"row"</c> werden übersprungen (Row-Header sind Layout, keine Panels).
+    /// Sammelt Panels aus einem flachen <c>"panels"</c>-Array. Row-Header
+    /// (Typ <c>"row"</c>) sind Layout, keine Panels — ihre verschachtelten
+    /// Kinder (kollabierte Rows, modernes Grafana-Format) werden aber
+    /// mitgesammelt, sonst verschwinden sie in der Ansicht, obwohl der
+    /// Editor sie als Pfad-Keys ("1.0" &c.) listet.
     /// </summary>
-    private static void CollectPanels(JsonElement array, List<GrafanaPanel> sink)
+    private static void CollectPanels(JsonElement array, List<GrafanaPanel> sink, int depth = 0)
     {
+        if (depth > 8) return;   // Zyklen-/Bombenschutz
         foreach (var p in array.EnumerateArray())
         {
             var panel = ParsePanel(p);
-            if (panel is not null && panel.Kind != GrafanaPanelKind.Row) sink.Add(panel);
+            if (panel is null) continue;
+            if (panel.Kind == GrafanaPanelKind.Row)
+            {
+                if (p.ValueKind == JsonValueKind.Object &&
+                    p.TryGetProperty("panels", out var ps) && ps.ValueKind == JsonValueKind.Array)
+                    CollectPanels(ps, sink, depth + 1);
+                continue;
+            }
+            sink.Add(panel);
         }
     }
 
@@ -256,7 +268,7 @@ public static class GrafanaDashboardModel
             if (r.ValueKind != JsonValueKind.Object) continue;
             // Row kann selbst ein panel-ähnliches Objekt sein (gridPos/title).
             if (r.TryGetProperty("panels", out var ps) && ps.ValueKind == JsonValueKind.Array)
-                CollectPanels(ps, sink);
+                CollectPanels(ps, sink, depth + 1);
             // Toleranz: Row-in-Row.
             if (r.TryGetProperty("rows", out var nested) && nested.ValueKind == JsonValueKind.Array)
                 CollectPanelsFromRows(nested, sink, depth + 1);

@@ -15,6 +15,9 @@
 @inject Heimdall.Blazor.IHeimdallI18n I18n
 
 <HeimdallDocument Title="@_title" BasePath="@BasePath">
+    <div class="hmd-editmenu-row">
+        <GrafanaEditMenu BasePath="@BasePath" Uid="@Uid" />
+    </div>
     <h1>@_title</h1>
     <p class="hmd-dim">
         @if (!string.IsNullOrEmpty(BackUrl))
@@ -39,18 +42,29 @@
             @foreach (var v in _dashboard.Templating)
             {
                 @if (string.IsNullOrEmpty(v.Name) || string.Equals(v.Type, "datasource", System.StringComparison.OrdinalIgnoreCase)) { continue; }
-                <label>@v.Name
-                    <select name="var-@v.Name" @(_multi[v.Name] ? "multiple" : null)>
-                        @if (v.IncludeAll)
-                        {
-                            <option value="$__all" selected="@(_isAll[v.Name])">@I18n.T("grafana.view.all")</option>
-                        }
-                        @foreach (var opt in _options[v.Name])
-                        {
-                            <option value="@opt" selected="@(_sel[v.Name].Contains(opt))">@opt</option>
-                        }
-                    </select>
-                </label>
+                @if (_multi[v.Name])
+                {
+                    // Multi-Variable: Combobox (Checkbox-Panel, wie Service-Filter) —
+                    // native <select multiple> wuerde als Meterhohe Liste klappen.
+                    // Nichts gewählt = $__all (kein var-Param im GET).
+                    <HeimdallServiceMultiSelect Services="@_options[v.Name]" Selected="@_sel[v.Name]"
+                        Label="@v.Name" FieldName="@("var-" + v.Name)" AllText="@I18n.T("grafana.view.all")" />
+                }
+                else
+                {
+                    <label>@v.Name
+                        <select name="var-@v.Name">
+                            @if (v.IncludeAll)
+                            {
+                                <option value="$__all" selected="@(_isAll[v.Name])">@I18n.T("grafana.view.all")</option>
+                            }
+                            @foreach (var opt in _options[v.Name])
+                            {
+                                <option value="@opt" selected="@(_sel[v.Name].Contains(opt))">@opt</option>
+                            }
+                        </select>
+                    </label>
+                }
             }
             <button type="submit">@I18n.T("grafana.view.apply")</button>
         </form>
@@ -151,6 +165,11 @@
         if (Vars is not null)
             foreach (var kv in Vars)
             { sb.Append(sep).Append("var-").Append(Uri.EscapeDataString(kv.Key)).Append('=').Append(Uri.EscapeDataString(kv.Value)); sep = '&'; }
+        // Cache-Buster: preset+vars sind byte-stabil — eine Cache-Schicht, die
+        // no-store ignoriert (IIS Output Caching/ARR), wuerde die URL sonst
+        // EIGMAECHTIG aus dem Cache bedienen (Panels „frieren" auf dem to des
+        // Cache-Zeitpunkts ein). Mit _=ts ist jede Panel-URL einmalig.
+        sb.Append(sep).Append("_=").Append(DateTimeOffset.UtcNow.ToUnixTimeMilliseconds());
         return sb.ToString();
     }
 }

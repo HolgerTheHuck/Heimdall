@@ -1,0 +1,21 @@
+@* Edit-Menü der Dashboard-Ansicht (Grafana-artig oben rechts): <details>-Disclosure,
+   ohne JS nutzbar (Präzedenz: .hmd-msel). Duplizieren als POST-Form, sonst Links. *@
+@namespace Heimdall.Blazor
+@inject Heimdall.Blazor.IHeimdallI18n I18n
+
+<details class="hmd-editmenu">
+    <summary>@I18n.T("grafana.edit.menu")</summary>
+    <div class="hmd-editmenu-body">
+        <a href="@(BasePath + "/dashboards/" + Uid + "/panel/new")">@I18n.T("grafana.edit.addPanel")</a>
+        <a href="@(BasePath + "/dashboards/" + Uid + "/edit")">@I18n.T("grafana.edit.menu.dashboard")</a>
+        <a href="@(BasePath + "/dashboards/" + Uid + "/json")">@I18n.T("grafana.edit.menu.json")</a>
+        <form method="post" action="@(BasePath + "/dashboards/" + Uid + "/duplicate")">
+            <button type="submit">@I18n.T("grafana.edit.menu.duplicate")</button>
+        </form>
+    </div>
+</details>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string Uid { get; set; } = "";
+}

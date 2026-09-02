@@ -68,11 +68,29 @@ public class GrafanaDashboardRenderTests
     {
         long now = 10_000L * NanosPerSecond;
         var prep = GrafanaDashboardRender.BuildRenderVars(Dash(), null, "1h", null, null, now);
-        // 1h-Fenster, step 30 s: __interval=30s, __rate_interval=max(30s*4,60s)=2m,
+        // 1h-Fenster, step 30 s: __interval=30s, __rate_interval=Floor 4m
+        // (4×30s=2m < 4m-Floor — Grafana-Heuristik 4×Scrape, siehe BuiltIns),
         // __range=1h (gesamter Zeitraum).
         Assert.Equal("30s", prep.RenderVars["__interval"]);
-        Assert.Equal("2m", prep.RenderVars["__rate_interval"]);
+        Assert.Equal("4m", prep.RenderVars["__rate_interval"]);
         Assert.Equal("1h", prep.RenderVars["__range"]);
+    }
+
+    [Fact]
+    public void BuildRenderVars_Preset15m_RateInterval_Uebersteht_60s_Kadenz()
+    {
+        // Regression: 15-min-Fenster → step 7,5 s → alter Floor ließ
+        // __rate_interval auf 1m fallen. rate(…[1m]) enthält bei 60-s-OTLP-
+        // Export-Kadenz meist nur EINEN Sample (rate braucht ≥ 2) → Panels
+        // zeigten „Keine Daten im Zeitraum", obwohl 1 h Daten hatte (dort
+        // 4×30s=2m). Der 4m-Floor (Grafana-Heuristik 4×Scrape) übersteht auch
+        // feinste Steps + Jitter.
+        long now = 10_000L * NanosPerSecond;
+        var prep = GrafanaDashboardRender.BuildRenderVars(Dash(), null, "15m", null, null, now);
+
+        Assert.Equal(7_500L, prep.StepMs);                       // 900_000 / 120
+        Assert.Equal("7s", prep.RenderVars["__interval"]);
+        Assert.Equal("4m", prep.RenderVars["__rate_interval"]);  // war 1m → leere Panels
     }
 
     // === BuildRenderVars: Template-Variablen ==============================

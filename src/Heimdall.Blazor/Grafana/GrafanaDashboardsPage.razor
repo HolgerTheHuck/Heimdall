@@ -8,7 +8,10 @@
 <HeimdallDocument Title="@I18n.T("page.title.grafanaList")" BasePath="@BasePath">
     <h1>@I18n.T("page.title.grafanaList")</h1>
     <p class="hmd-dim">@I18n.T("grafana.list.subtitle")</p>
-    <p><a class="hmd-btn" href="@(BasePath + "/dashboards/import")">@I18n.T("grafana.list.import")</a></p>
+    <p>
+        <a class="hmd-btn" href="@(BasePath + "/dashboards/import")">@I18n.T("grafana.list.import")</a>
+        <a class="hmd-btn" href="@(BasePath + "/dashboards/new")">@I18n.T("grafana.edit.new")</a>
+    </p>
 
     @if (_list.Count == 0)
     {

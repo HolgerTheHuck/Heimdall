@@ -31,6 +31,14 @@ public interface IGrafanaDashboardStore
     string? GetRaw(string uid);
     /// <summary>Speichert das JSON; Uid/Title werden aus dem (geparsten) JSON ermittelt.</summary>
     string Save(string rawJson);
+    /// <summary>
+    /// Speichert das JSON UNTER DER GEBENEN Uid (unabhaengig vom JSON-Inhalt).
+    /// Fuer den Editor: Dashboard-Dateien ohne <c>uid</c>-Feld bekommen im Parser
+    /// eine Fallback-Uid aus Titel + Panelzahl — nach einem Panel-Add aendert sich
+    /// die Panelzahl und damit die Fallback-Uid, die Datei wuerde wechseln. Die
+    /// Uid-ueberladung pinnt den Dateinamen an die Route.
+    /// </summary>
+    string Save(string uid, string rawJson);
     /// <summary>Loescht das Dashboard zur Uid (no-op, falls nicht vorhanden).</summary>
     void Delete(string uid);
 }
@@ -98,13 +106,23 @@ public sealed class FileGrafanaDashboardStore : IGrafanaDashboardStore
         if (string.IsNullOrWhiteSpace(rawJson)) throw new ArgumentException("JSON fehlt", nameof(rawJson));
         var dash = GrafanaDashboardModel.Parse(rawJson)
             ?? throw new ArgumentException("Dashboard-JSON ungueltig", nameof(rawJson));
+        return Save(dash.Uid, rawJson);
+    }
+
+    /// <inheritdoc />
+    public string Save(string uid, string rawJson)
+    {
+        if (string.IsNullOrWhiteSpace(uid)) throw new ArgumentException("Uid fehlt", nameof(uid));
+        if (string.IsNullOrWhiteSpace(rawJson)) throw new ArgumentException("JSON fehlt", nameof(rawJson));
+        if (GrafanaDashboardModel.Parse(rawJson) is null)
+            throw new ArgumentException("Dashboard-JSON ungueltig", nameof(rawJson));
         EnsureDir();
-        var path = PathFor(dash.Uid);
+        var path = PathFor(uid);
         lock (_gate)
         {
             File.WriteAllText(path, rawJson);
         }
-        return dash.Uid;
+        return uid;
     }
 
     /// <inheritdoc />

@@ -322,12 +322,13 @@ public class HeimdallUiTests : HostBootTestBase
             null);
 
     /// <summary>
-    /// Die Service-Combobox listet die Discovery-Menge aus Logs UND Spans —
-    /// ein Service, der nur Traces schickt („traceonly"), taucht ebenfalls auf.
+    /// Die Service-Combobox der Logs-Seite listet NUR Services mit Logs —
+    /// ein Service, der nur Traces schickt („traceonly"), wird nicht angeboten
+    /// (Auswahl würde leer laufen; die Traces-Seite bleibt bei der Union).
     /// Kein Haken gesetzt = „alle" (kein svc=-Param, kein Count-Badge).
     /// </summary>
     [Fact]
-    public async Task LogsSeite_ServiceChips_ListetServicesAusLogsUndSpans()
+    public async Task LogsSeite_ServiceChips_NurServicesMitLogs()
     {
         var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
         var t = SeedNowNs();
@@ -340,10 +341,14 @@ public class HeimdallUiTests : HostBootTestBase
         Assert.DoesNotContain("<select name=\"svc\"", body);      // altes Dropdown ist weg
         Assert.DoesNotContain("hmd-msel-search", body);           // Canari: kein Suchfeld im Panel
         Assert.Contains("type=\"checkbox\" name=\"svc\"", body);
-        Assert.Contains("value=\"shop\"", body);                  // Log-seitiger Discovery-Zweig
-        Assert.Contains("value=\"traceonly\"", body);             // Span-seitiger Discovery-Zweig
+        Assert.Contains("value=\"shop\"", body);                  // Log-seitiger Service
+        Assert.DoesNotContain("value=\"traceonly\"", body);       // Trace-only nicht angeboten
         Assert.Contains("data-hmd-msel-all", body);               // Summary „alle" via data-Attribut
         Assert.DoesNotContain("data-hmd-msel-count>1", body);      // kein Count-Badge ohne Auswahl
+
+        // Traces-Seite bleibt bei der Union (Logs ∪ Spans).
+        var traces = await (await Client.GetAsync("/otel/traces")).Content.ReadAsStringAsync();
+        Assert.Contains("value=\"traceonly\"", traces);
     }
 
     /// <summary>

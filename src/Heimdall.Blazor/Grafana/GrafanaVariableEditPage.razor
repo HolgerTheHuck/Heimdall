@@ -1,0 +1,80 @@
+@* Template-Variablen-Editor (Formular auf rohem JSON via GrafanaDashboardEditor).
+   VarKey leer = neue Variable (templating.list wird beim Speichern angelegt). *@
+@using Heimdall.Blazor.Grafana
+@inject IGrafanaDashboardStore Store
+@inject Heimdall.Blazor.IHeimdallI18n I18n
+
+<HeimdallDocument Title="@Heading" BasePath="@BasePath">
+    <h1>@Heading</h1>
+    <p class="hmd-dim">
+        <a href="@(BasePath + "/dashboards/" + Uid + "/edit")">@I18n.T("grafana.view.back")</a>
+        <text> · </text><span class="hmd-mono">@Uid</span>
+ @if (_missing)
+        {
+            <text> · </text><span class="hmd-mono">@VarKey</span>
+        }
+    </p>
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <p class="hmd-err-msg" role="alert">@Error</p>
+    }
+    @if (_missing)
+    {
+        <p class="hmd-empty" role="status">@I18n.T("grafana.view.notfound", Uid)</p>
+    }
+    else
+    {
+        <form class="hmd-form" method="post" action="@(BasePath + "/dashboards/" + Uid + "/var/save")">
+            <input type="hidden" name="varKey" value="@VarKey" />
+            <fieldset>
+                <legend>@I18n.T("grafana.edit.legend.vars")</legend>
+                <label>@I18n.T("grafana.edit.var.name") <input type="text" name="name" value="@_form.Name" required /></label>
+                <label>@I18n.T("grafana.edit.var.type")
+                    <select name="type">
+                        @foreach (var t in VarTypes)
+                        {
+                            <option value="@t" selected="@(t == _form.Type)">@t</option>
+                        }
+                    </select>
+                </label>
+                <label>@I18n.T("grafana.edit.var.query") <input type="text" name="query" value="@_form.Query" spellcheck="false" /></label>
+                <label>@I18n.T("grafana.edit.var.current") <input type="text" name="current" value="@_form.CurrentValue" /></label>
+                <label class="hmd-check"><input type="checkbox" name="includeAll" value="1" checked="@_form.IncludeAll" /> @I18n.T("grafana.edit.var.includeAll")</label>
+                <label class="hmd-check"><input type="checkbox" name="multi" value="1" checked="@_form.Multi" /> @I18n.T("grafana.edit.var.multi")</label>
+            </fieldset>
+            <div class="hmd-form-actions">
+                <button type="submit" class="hmd-btn">@I18n.T("grafana.edit.save")</button>
+                <a class="hmd-btn hmd-btn-ghost" href="@(BasePath + "/dashboards/" + Uid + "/edit")">@I18n.T("grafana.edit.cancel")</a>
+            </div>
+        </form>
+    }
+</HeimdallDocument>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+    [Parameter] public string Uid { get; set; } = "";
+    /// <summary>Pfad-Key in templating.list ("v2") oder null = neue Variable.</summary>
+    [Parameter] public string? VarKey { get; set; }
+    [Parameter] public string? Error { get; set; }
+
+    private static readonly string[] VarTypes = { "query", "custom", "datasource" };
+
+    private GrafanaDashboardEditor.VariableForm _form =
+        new("", "query", "", null, false, false);
+    private bool _missing;
+
+    private string Heading => VarKey is null
+        ? I18n.T("grafana.edit.var.heading.new")
+        : I18n.T("grafana.edit.var.heading.edit");
+
+    protected override void OnInitialized()
+    {
+        if (VarKey is null) return;
+        var raw = Store.GetRaw(Uid);
+        if (raw is null) { _missing = true; return; }
+        var form = GrafanaDashboardEditor.ReadVariable(raw, VarKey);
+        if (form is null) { _missing = true; return; }
+        _form = form;
+    }
+}
