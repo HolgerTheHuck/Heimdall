@@ -5,8 +5,11 @@ using System.Threading.Tasks;
 using Google.Protobuf;
 using Heimdall;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 
 namespace Heimdall.Otlp;
 
@@ -61,17 +64,24 @@ public static class OtlpEndpointExtensions
     private static async Task<IResult> TraceHandler(HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter)
     {
         // Admission-Control (C1): Parsing+Write hinter dem Cap, sofort 429 bei vollem Limiter.
-        if (!limiter.TryEnter(out var lease)) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+        if (!limiter.TryEnter(out var lease))
+        { LogDrop(ctx, "traces", "Admission-Limiter voll — Batch abgewiesen (429)"); return Results.StatusCode(StatusCodes.Status429TooManyRequests); }
         try
         {
             var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Trace.V1.ExportTraceServiceRequest.Parser);
-            if (req is null) return Results.BadRequest();
+            if (req is null) { LogDrop(ctx, "traces", "Body nicht parsebar — Batch abgewiesen (400)"); return Results.BadRequest(); }
             try
             {
                 var spans = OtlpConvert.ToSpans(req);
                 if (spans.Count > 0) sink.WriteSpans(spans);
             }
-            catch { return Results.BadRequest(); }
+            catch (Exception ex)
+            {
+                // Der OTLP-Exporter wiederholt NICHT bei 400 — diese Batches sind endgültig
+                // verloren. Ohne Log-Eintrag war der Verlust unsichtbar.
+                LogDrop(ctx, "traces", "Sink-Write fehlgeschlagen — Batch endgültig verloren (400)", ex);
+                return Results.BadRequest();
+            }
             return Respond(ctx, new OpenTelemetry.Proto.Collector.Trace.V1.ExportTraceServiceResponse());
         }
         finally { lease?.Dispose(); }
@@ -79,17 +89,22 @@ public static class OtlpEndpointExtensions
 
     private static async Task<IResult> LogsHandler(HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter)
     {
-        if (!limiter.TryEnter(out var lease)) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+        if (!limiter.TryEnter(out var lease))
+        { LogDrop(ctx, "logs", "Admission-Limiter voll — Batch abgewiesen (429)"); return Results.StatusCode(StatusCodes.Status429TooManyRequests); }
         try
         {
             var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Logs.V1.ExportLogsServiceRequest.Parser);
-            if (req is null) return Results.BadRequest();
+            if (req is null) { LogDrop(ctx, "logs", "Body nicht parsebar — Batch abgewiesen (400)"); return Results.BadRequest(); }
             try
             {
                 var logs = OtlpConvert.ToLogs(req);
                 if (logs.Count > 0) sink.WriteLogs(logs);
             }
-            catch { return Results.BadRequest(); }
+            catch (Exception ex)
+            {
+                LogDrop(ctx, "logs", "Sink-Write fehlgeschlagen — Batch endgültig verloren (400)", ex);
+                return Results.BadRequest();
+            }
             return Respond(ctx, new OpenTelemetry.Proto.Collector.Logs.V1.ExportLogsServiceResponse());
         }
         finally { lease?.Dispose(); }
@@ -97,11 +112,12 @@ public static class OtlpEndpointExtensions
 
     private static async Task<IResult> MetricsHandler(HttpContext ctx, IHeimdallSink sink, OtlpAdmissionLimiter limiter)
     {
-        if (!limiter.TryEnter(out var lease)) return Results.StatusCode(StatusCodes.Status429TooManyRequests);
+        if (!limiter.TryEnter(out var lease))
+        { LogDrop(ctx, "metrics", "Admission-Limiter voll — Batch abgewiesen (429)"); return Results.StatusCode(StatusCodes.Status429TooManyRequests); }
         try
         {
             var req = await ParseAsync(ctx, OpenTelemetry.Proto.Collector.Metrics.V1.ExportMetricsServiceRequest.Parser);
-            if (req is null) return Results.BadRequest();
+            if (req is null) { LogDrop(ctx, "metrics", "Body nicht parsebar — Batch abgewiesen (400)"); return Results.BadRequest(); }
             try
             {
                 var metrics = OtlpConvert.ToMetrics(req, out var rejected);
@@ -120,10 +136,16 @@ public static class OtlpEndpointExtensions
                         RejectedDataPoints = Math.Max(1, rejected),
                         ErrorMessage = "ExponentialHistogram and Summary metrics are not supported; only Counter/Sum/Gauge/Histogram are stored.",
                     };
+                    LogDrop(ctx, "metrics",
+                        rejected + " Metric(s) verworfen (ExponentialHistogram/Summary nicht unterstützt) — partial_success gemeldet");
                 }
                 return Respond(ctx, resp);
             }
-            catch { return Results.BadRequest(); }
+            catch (Exception ex)
+            {
+                LogDrop(ctx, "metrics", "Sink-Write fehlgeschlagen — Batch endgültig verloren (400)", ex);
+                return Results.BadRequest();
+            }
         }
         finally { lease?.Dispose(); }
     }
@@ -165,5 +187,22 @@ public static class OtlpEndpointExtensions
         if (ct.Contains("json", StringComparison.OrdinalIgnoreCase))
             return Results.Text(JsonFormatter.Default.Format(resp), "application/json", Encoding.UTF8);
         return Results.Bytes(resp.ToByteArray(), "application/x-protobuf");
+    }
+
+    /// <summary>
+    /// Protokolliert jeden Datenverlust am Empfänger (429/400/partial_success).
+    /// Ohne diese Einträge war Ingest-Verlust von außen nicht von „Daten wurden
+    /// nie gesendet“ unterscheidbar — ein stiller 400 beim SQLite-Write kostet
+    /// z. B. eine ganze Export-Batch, weil der OTLP-Exporter bei 400 nicht
+    /// wiederholt. Logger wird pro Request aus DI aufgelöst (kein statisches Feld).
+    /// </summary>
+    private static void LogDrop(HttpContext ctx, string signal, string message, Exception? ex = null)
+    {
+        var logger = ctx.RequestServices.GetService<ILoggerFactory>()?.CreateLogger("Heimdall.Otlp");
+        if (logger is null) return;
+        if (ex is not null)
+            logger.LogWarning(ex, "OTLP-Ingest {Signal}: {Message}", signal, message);
+        else
+            logger.LogWarning("OTLP-Ingest {Signal}: {Message}", signal, message);
     }
 }
