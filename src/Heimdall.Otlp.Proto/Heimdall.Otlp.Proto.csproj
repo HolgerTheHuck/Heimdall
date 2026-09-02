@@ -19,8 +19,8 @@
          liegen im selben ProtoRoot, werden hier aber NICHT kompiliert (nur Heimdall.Otlp.Grpc
          kompiliert sie mit GrpcServices="Server"). So gibt es genau einen Ort für die
          Message-Typen → keine Typ-Kollision zwischen den Assemblies. -->
-    <PackageReference Include="Google.Protobuf" Version="3.30.2" />
-    <PackageReference Include="Grpc.Tools" Version="2.71.0" PrivateAssets="all" />
+    <PackageReference Include="Google.Protobuf" Version="3.36.1" />
+    <PackageReference Include="Grpc.Tools" Version="2.83.0" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

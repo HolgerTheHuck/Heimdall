@@ -20,7 +20,7 @@
     <!-- Microsoft.Data.Sqlite buendelt SQLite mit FTS5 aktiviert (e_sqlite3, SQLITE_ENABLE_FTS5).
          8.0.30 zieht SQLitePCLRaw.bundle_e_sqlite3 2.1.12 (SQLite 3.53.3) — Fix fuer
          CVE-2025-6965 / GHSA-2m69-gcr7-jv3q (NU1903, SQLite < 3.50.2, Memory-Corruption). -->
-    <PackageReference Include="Microsoft.Data.Sqlite" Version="8.0.30" />
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.11" />
   </ItemGroup>
 
 </Project>

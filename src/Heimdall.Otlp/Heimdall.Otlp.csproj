@@ -22,7 +22,7 @@
          die OtlpEndpointExtensions für den HTTP-Parse-Pfad nutzt. Die OTLP-Message-Typen
          selbst kommen transitiv aus Heimdall.Otlp.Proto. Grpc.Tools wird hier nicht
          mehr benötigt (keine Proto-Kompilierung mehr — HTTP-only). -->
-    <PackageReference Include="Google.Protobuf" Version="3.30.2" />
+    <PackageReference Include="Google.Protobuf" Version="3.36.1" />
   </ItemGroup>
 
   <ItemGroup>
