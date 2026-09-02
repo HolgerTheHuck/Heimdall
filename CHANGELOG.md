@@ -5,7 +5,30 @@ Alle nennenswerten Änderungen an Heimdall werden in dieser Datei dokumentiert.
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionierung
 folgt [Semantic Versioning](https://semver.org/lang/de/).
 
+## [Unreleased]
+
+### Behoben
+- **Alert-Store-Falle: „Dashboard ohne Alerting" killte den gesamten Host beim
+  ersten Request.** Ein Host, der nur `AddHeimdallDashboard(sink)` +
+  `MapHeimdallDashboard("/otel")` aufruft (ohne `AddHeimdallAlerting`), bekam
+  ab dem ersten Request auf JEDER Route einen 500: Die `/alerts`-POST-Endpoints
+  deklarieren `IAlertRuleStore`/`IAlertStateStore` als Handler-Parameter, beide
+  Dienste wurden aber ausschließlich in `AddHeimdallAlerting` registriert — die
+  `RequestDelegateFactory` warf bei der lazy Routing-Initialisierung
+  („Failure to infer one or more parameters") und riss die komplette
+  Routing-Tabelle mit. Zweifach behoben: (1) `AddHeimdallDashboard` registriert
+  die dateibasierten Stores + Default-`HeimdallAlertingOptions` jetzt selbst
+  (`TryAddSingleton`, Verzeichnisse = Options-Defaults; eine explizite
+  `AddHeimdallAlerting`-Registrierung mit eigenen Dirs gewinnt, der Evaluator
+  bleibt Opt-in). (2) `MapHeimdallDashboard` wirft Fail-Fast mit
+  Handlungsanweisung, wenn die Stores fehlen (Mapping ohne jede Registrierung)
+  — Startzeit-Fehler statt Lazy-500. Regressionstests in
+  `DashboardWithoutAlertingTests` (Minimalkonfiguration → 200 auf beliebigen
+  Pfaden; Mapping ohne Stores → sofortige `InvalidOperationException`).
+
 ## [1.3.0] — 2026-09-02
+
+### Hinzugefügt
 
 ### Hinzugefügt
 - **`Heimdall:Ui:TrustedOrigins`:** Trust-Anchor-Liste für den CSRF-Same-Origin-

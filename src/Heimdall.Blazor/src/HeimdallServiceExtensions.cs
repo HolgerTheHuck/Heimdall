@@ -4,6 +4,7 @@ using Heimdall.Blazor.Alerts;
 using Heimdall.Blazor.Grafana;
 using Heimdall.Prometheus;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging;
 
@@ -27,6 +28,21 @@ public static class HeimdallServiceExtensions
         services.AddScoped<IHeimdallI18n, HeimdallI18nService>();
         services.AddRazorComponents();          // EndpointHtmlRenderer fuer RazorComponentResult
         services.AddSingleton(query);
+
+        // Alert-Store-Defaults (TryAdd — eine explizite AddHeimdallAlerting-
+        // Registrierung mit eigenen Verzeichnissen gewinnt). Die /alerts-Endpoints
+        // und die AlertsPage deklarieren IAlertRuleStore/IAlertStateStore/
+        // HeimdallAlertingOptions als Handler-Parameter bzw. @inject — fehlen sie,
+        // wirft die RequestDelegateFactory beim ERSTEN Request („Failure to infer
+        // one or more parameters") und reißt die komplette Routing-Tabelle des
+        // Hosts mit. Verzeichnisse = HeimdallAlertingOptions-Defaults.
+        var alertDefaults = new HeimdallAlertingOptions();
+        services.TryAddSingleton<IAlertRuleStore>(new FileAlertRuleStore(alertDefaults.RulesDir));
+        services.TryAddSingleton<IAlertStateStore>(new FileAlertStateStore(alertDefaults.StateDir));
+        // Options: TryAdd (Default Enabled=false, nur UI-Datenbasis); ruft der Host
+        // später AddHeimdallAlerting auf, wird dessen KONFIGURIERTES Options-Objekt
+        // zusätzlich registriert — GetService löst die letzte Registrierung auf.
+        services.TryAddSingleton(alertDefaults);
         return services;
     }
 

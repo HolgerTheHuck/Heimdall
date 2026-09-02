@@ -693,6 +693,24 @@ public static class HeimdallEndpointExtensions
             return Results.Redirect(retUrl);
         });
 
+        // Fail-Fast statt Lazy-500: Die /alerts-POSTs deklarieren IAlertRuleStore/
+        // IAlertStateStore als Handler-Parameter, die AlertsPage @inject-ed beide +
+        // HeimdallAlertingOptions. Fehlen diese Dienste im Container, wirft die
+        // RequestDelegateFactory erst beim ERSTEN Request („Failure to infer one
+        // or more parameters") — und reißt die komplette Routing-Tabelle mit: kein
+        // Endpunkt des Hosts antwortet mehr, auch komplett unbeteiligte. Hier
+        // sofort werfen, mit Handlungsanweisung (Startzeit-Fehler statt Lazy-500).
+        // Normalfall: AddHeimdallDashboard registriert die Defaults — nur wer
+        // MapHeimdallDashboard OHNE AddHeimdallDashboard aufruft, landet hier.
+        if (endpoints.ServiceProvider.GetService<IAlertRuleStore>() is null ||
+            endpoints.ServiceProvider.GetService<IAlertStateStore>() is null)
+            throw new InvalidOperationException(
+                "Heimdall dashboard maps /alerts endpoints that require IAlertRuleStore and " +
+                "IAlertStateStore. Call AddHeimdallDashboard(sink) (registers defaults) or " +
+                "AddHeimdallAlerting(...) — otherwise routing initialization fails at first " +
+                "request with 'Failure to infer one or more parameters' for every route of " +
+                "the host.");
+
         return group;
     }
 
