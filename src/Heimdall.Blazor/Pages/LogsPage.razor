@@ -50,6 +50,14 @@
             </select>
         </label>
         <label>@I18n.T("metrics.filter.limit") <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
+        @* Alternative Ansicht (Opt-in): view=svc gruppiert die Treffer je Service
+           unter eine Service-Ueberschrift. Default bleibt die flache Liste. *@
+        <label>@I18n.T("logs.view")
+            <select name="view">
+                <option value="" selected="@(View != "svc")">@I18n.T("logs.view.list")</option>
+                <option value="svc" selected="@(View == "svc")">@I18n.T("logs.view.svc")</option>
+            </select>
+        </label>
         <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
         <button type="submit">@I18n.T("logs.filter.submit")</button>
         <label class="hmd-inline-chk"><input type="checkbox" name="expand" value="1" checked="@Expand" /> @I18n.T("logs.expand")</label>
@@ -72,16 +80,43 @@
             }
         </section>
     }
+    else if (_grouped)
+    {
+        @* Gruppierte Ansicht (view=svc): je Service eine Sektion mit Ueberschrift
+           (Name + Trefferzahl) und der gewohnten Log-Tabelle. Gruppenreihenfolge =
+           Reihenfolge des ersten Treffers in der aktuellen Sortierung (Default:
+           zuletzt aktiver Service zuerst). Limit begrenzt die Treffer GESAMT, das
+           Paging entfaellt — Offset wird ignoriert. *@
+        @foreach (var g in _groups)
+        {
+            <section class="hmd-log-group">
+                <h2 class="hmd-subhead">@g.Service <span class="hmd-dim">(@g.Logs.Count)</span></h2>
+                <div class="hmd-list-scroll">
+                <table class="hmd-table hmd-logs">
+                    <caption>@g.Service</caption>
+                    <thead><tr><th class="hmd-col-ts" scope="col">@I18n.T("table.time")</th><th class="hmd-col-sev" scope="col">@I18n.T("table.sev")</th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
+                    <tbody>
+                    @foreach (var l in g.Logs)
+                    {
+                        <HeimdallLogRow Log="@l" BasePath="@BasePath" Expand="@Expand" />
+                    }
+                    </tbody>
+                </table>
+                </div>
+            </section>
+        }
+        <p class="hmd-count">@I18n.T("logs.count", _logs.Count, Query.CountLogs())</p>
+    }
     else
     {
         <div class="hmd-list-scroll">
         <table class="hmd-table hmd-logs">
             <caption>@I18n.T("page.title.logs")</caption>
-            <thead><tr><th class="hmd-col-ts" scope="col" aria-sort="@AriaSort("time")"><a href="@SortUrl("time")" title="@I18n.T("sort.aria", I18n.T("table.time"))">@I18n.T("table.time")@SortIndicator("time")</a></th><th class="hmd-col-sev" scope="col" aria-sort="@AriaSort("severity")"><a href="@SortUrl("severity")" title="@I18n.T("sort.aria", I18n.T("table.sev"))">@I18n.T("table.sev")@SortIndicator("severity")</a></th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
+            <thead><tr><th class="hmd-col-ts" scope="col" aria-sort="@AriaSort("time")"><a href="@SortUrl("time")" title="@I18n.T("sort.aria", I18n.T("table.time"))">@I18n.T("table.time")@SortIndicator("time")</a></th><th class="hmd-col-svc" scope="col">@I18n.T("logs.filter.service")</th><th class="hmd-col-sev" scope="col" aria-sort="@AriaSort("severity")"><a href="@SortUrl("severity")" title="@I18n.T("sort.aria", I18n.T("table.sev"))">@I18n.T("table.sev")@SortIndicator("severity")</a></th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
             <tbody>
             @foreach (var l in _logs)
             {
-                <HeimdallLogRow Log="@l" BasePath="@BasePath" Expand="@Expand" />
+                <HeimdallLogRow Log="@l" BasePath="@BasePath" Expand="@Expand" ShowService="true" />
             }
             </tbody>
         </table>
@@ -97,21 +132,23 @@
     <script>
     // Ganze Zeile klappt den Log auf/zu (Progressive Enhancement). Klick auf einen
     // Link (Trace-Detail) und Textauswahl werden nicht als Toggle gewertet; ohne
-    // JS bleibt der native <summary>-Toggle der <details>-Zelle nutzbar.
+    // JS bleibt der native <summary>-Toggle der <details>-Zelle nutzbar. In der
+    // gruppierten Ansicht gibt es MEHRERE Tabellen — alle verdrahten.
     (function () {
-        var table = document.querySelector('table.hmd-logs');
-        if (!table) return;
-        table.addEventListener('click', function (e) {
-            if (e.target.closest('a')) return;
-            var tr = e.target.closest('tbody tr');
-            if (!tr) return;
-            var d = tr.querySelector('details.hmd-log-details');
-            if (!d) return;
-            var sel = window.getSelection && window.getSelection();
-            if (sel && !sel.isCollapsed) return;   // Textauswahl nicht als Toggle
-            e.preventDefault();                    // native summary-Schaltung unterbinden
-            d.open = !d.open;
-        });
+        var tables = document.querySelectorAll('table.hmd-logs');
+        for (var i = 0; i < tables.length; i++) {
+            tables[i].addEventListener('click', function (e) {
+                if (e.target.closest('a')) return;
+                var tr = e.target.closest('tbody tr');
+                if (!tr) return;
+                var d = tr.querySelector('details.hmd-log-details');
+                if (!d) return;
+                var sel = window.getSelection && window.getSelection();
+                if (sel && !sel.isCollapsed) return;   // Textauswahl nicht als Toggle
+                e.preventDefault();                    // native summary-Schaltung unterbinden
+                d.open = !d.open;
+            });
+        }
     })();
     </script>
 </HeimdallDocument>
@@ -134,8 +171,12 @@
     [Parameter] public long? To { get; set; }
     [Parameter] public string? Sort { get; set; }
     [Parameter] public string? Dir { get; set; }
+    // Alternative Ansicht: "svc" gruppiert die Treffer je Service (Opt-in).
+    [Parameter] public string? View { get; set; }
 
     private List<Heimdall.LogRow> _logs = new();
+    // Gruppierte Ansicht: (Service, Logs) in Reihenfolge des ersten Treffers.
+    private List<(string Service, List<Heimdall.LogRow> Logs)> _groups = new();
     private List<string> _services = new();
     // Sanitierte Service-Auswahl (Schnitt mit Discovery-Liste, dedupliziert,
     // Reihenfolge erhalten). Leere Liste = kein Haken = alle Services.
@@ -144,6 +185,7 @@
     private int _offset;
     private int _pageSize;
     private bool _hasMore;
+    private bool _grouped;
     // LogQL-Syntax als Tooltip auf dem Suchfeld (statt Absatz darunter, der
     // Platz wegnimmt und das Filter-Layout unruhig macht).
     private string LogqlHint =>
@@ -158,12 +200,14 @@
     {
         var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano());
 
-        // Chip-Wertemengen (Logs ∪ Spans, im aufgeloesten Zeitraum). Sanitierung:
-        // Werte ausserhalb der Discovery-Liste (alte Bookmarks, Tippfehler, stale
-        // ver nach Service-Wechsel im noch nicht neu geladenen DOM) fallen raus —
-        // leere Auswahl = „alle", sonst irritiert ein stummer Filter mit leerem
-        // Ergebnis.
-        _services = new List<string>(Query.ListServiceNames(range.From, range.To));
+        // Chip-Wertemengen im aufgeloesten Zeitraum — NUR AUS LOGS: ein Service,
+        // der nur Traces schickt, wuerde im Filter angeboten und bei Auswahl eine
+        // leere Liste liefern (Traces-Seite bleibt bei der Logs∪Spans-Union).
+        // Sanitierung: Werte ausserhalb der Discovery-Liste (alte Bookmarks,
+        // Tippfehler, stale ver nach Service-Wechsel im noch nicht neu geladenen
+        // DOM) fallen raus — leere Auswahl = „alle", sonst irritiert ein stummer
+        // Filter mit leerem Ergebnis.
+        _services = new List<string>(Query.ListServiceNames(range.From, range.To, includeSpans: false));
         if (ServiceNames is not null)
         {
             foreach (var sn in ServiceNames)
@@ -172,7 +216,8 @@
         // Version nur bei GENAU EINEM gewaehlten Service (Paar-Semantik).
         if (_svcSel.Count == 1)
         {
-            _versions = new List<string>(Query.ListServiceVersions(_svcSel[0], range.From, range.To));
+            // Versionen ebenfalls nur aus Logs (konsistent zur Service-Liste).
+            _versions = new List<string>(Query.ListServiceVersions(_svcSel[0], range.From, range.To, includeSpans: false));
             if (ServiceVersion is not null && !_versions.Contains(ServiceVersion)) ServiceVersion = null;
         }
         else ServiceVersion = null;
@@ -197,6 +242,8 @@
 
         _pageSize = Limit < 1 ? 200 : Limit;
         _offset = Offset < 0 ? 0 : Offset;
+        _grouped = string.Equals(View, "svc", System.StringComparison.OrdinalIgnoreCase);
+        if (_grouped) _offset = 0;   // Gruppiert seitenlos: Limit begrenzt gesamt, Offset entfaellt.
         _sort = Sort switch { "time" or "severity" => Sort, _ => "time" };
         _dir = string.Equals(Dir, "asc", System.StringComparison.OrdinalIgnoreCase) ? "asc" : "desc";
 
@@ -219,6 +266,27 @@
         _logs = new List<Heimdall.LogRow>(Query.SearchLogs(s));
         // Volle Seite = wahrscheinlich weitere (ältere) Logs vorhanden.
         _hasMore = _logs.Count >= _pageSize;
+
+        // Gruppierte Ansicht: je Service (LogRow.ServiceName aus dem Attr-Index;
+        // ohne Service → Platzhalter-Gruppe am Ende) die Treffer in Reihenfolge
+        // des ersten Vorkommens sammeln — Gruppenreihenfolge folgt der aktuellen
+        // Sortierung (time desc = zuletzt aktiver Service zuerst).
+        _groups = new List<(string, List<Heimdall.LogRow>)>();
+        if (_grouped)
+        {
+            var byService = new Dictionary<string, List<Heimdall.LogRow>>(System.StringComparer.Ordinal);
+            foreach (var l in _logs)
+            {
+                var svc = string.IsNullOrEmpty(l.ServiceName) ? I18n.T("logs.group.none") : l.ServiceName!;
+                if (!byService.TryGetValue(svc, out var list))
+                {
+                    list = new List<Heimdall.LogRow>();
+                    byService[svc] = list;
+                    _groups.Add((svc, list));
+                }
+                list.Add(l);
+            }
+        }
     }
 
     /// <summary>Baut die Logs-URL mit neuem Offset und erhält alle Filter-Params
@@ -263,6 +331,8 @@
         parts.Add("limit=" + _pageSize.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (o > 0) parts.Add("offset=" + o.ToString(System.Globalization.CultureInfo.InvariantCulture));
         if (Expand) parts.Add("expand=1");
+        // Ansicht nur schreiben, wenn gruppiert (Default = flache Liste).
+        if (_grouped) parts.Add("view=svc");
         if (!string.IsNullOrEmpty(Preset)) parts.Add("preset=" + System.Uri.EscapeDataString(Preset));
         else
         {

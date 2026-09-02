@@ -18,9 +18,13 @@ namespace Heimdall.Storage.SQLite;
 
 public sealed partial class SQLiteTelemetrySink
 {
-    public IReadOnlyList<string> ListServiceNames(long? fromUnixNano = null, long? toUnixNano = null)
+    public IReadOnlyList<string> ListServiceNames(long? fromUnixNano = null, long? toUnixNano = null,
+        bool includeSpans = true)
     {
         // UNION (nicht UNION ALL): derselbe Service kann Logs UND Spans schicken.
+        // includeSpans=false schneidet die Span-Seite ab — die Logs-Seite soll nur
+        // Services anbieten, die im Zeitraum wirklich LOGS haben (ein Trace-only
+        // Service wuerde sonst angeboten und lieferte bei Auswahl leer).
         var sb = SqlBuilder();
         var ps = new List<SqliteParameter>();
 
@@ -34,16 +38,19 @@ public sealed partial class SQLiteTelemetrySink
         }
         sb.Append(" WHERE a.key IN ('service.name','service_name')");
 
-        sb.Append(" UNION ");
-
-        sb.Append("SELECT DISTINCT a.value FROM heim_span_attrs a");
-        if (fromUnixNano is not null || toUnixNano is not null)
+        if (includeSpans)
         {
-            sb.Append(" JOIN heim_spans s ON s.rowid = a.span_rowid");
-            if (fromUnixNano is not null) { sb.Append(" AND s.start_unix_nano >= @sfrom"); ps.Add(Param("@sfrom", fromUnixNano.Value)); }
-            if (toUnixNano is not null) { sb.Append(" AND s.start_unix_nano <= @sto"); ps.Add(Param("@sto", toUnixNano.Value)); }
+            sb.Append(" UNION ");
+
+            sb.Append("SELECT DISTINCT a.value FROM heim_span_attrs a");
+            if (fromUnixNano is not null || toUnixNano is not null)
+            {
+                sb.Append(" JOIN heim_spans s ON s.rowid = a.span_rowid");
+                if (fromUnixNano is not null) { sb.Append(" AND s.start_unix_nano >= @sfrom"); ps.Add(Param("@sfrom", fromUnixNano.Value)); }
+                if (toUnixNano is not null) { sb.Append(" AND s.start_unix_nano <= @sto"); ps.Add(Param("@sto", toUnixNano.Value)); }
+            }
+            sb.Append(" WHERE a.key IN ('service.name','service_name')");
         }
-        sb.Append(" WHERE a.key IN ('service.name','service_name')");
         sb.Append(" ORDER BY 1");
 
         var names = new List<string>();
@@ -55,7 +62,7 @@ public sealed partial class SQLiteTelemetrySink
     }
 
     public IReadOnlyList<string> ListServiceVersions(string serviceName,
-        long? fromUnixNano = null, long? toUnixNano = null)
+        long? fromUnixNano = null, long? toUnixNano = null, bool includeSpans = true)
     {
         if (string.IsNullOrEmpty(serviceName)) return Array.Empty<string>();
 
@@ -72,12 +79,15 @@ public sealed partial class SQLiteTelemetrySink
         AppendServiceVersionPredicates(sb, ps, serviceName, suffix: "", baseTable: "heim_logs",
             rowIdCol: "log_rowid", tsCol: "ts_unix_nano", fromUnixNano, toUnixNano);
 
-        sb.Append(" UNION ");
+        if (includeSpans)
+        {
+            sb.Append(" UNION ");
 
-        sb.Append("SELECT DISTINCT v.value FROM heim_span_attrs v " +
-                  "JOIN heim_span_attrs s ON s.span_rowid = v.span_rowid");
-        AppendServiceVersionPredicates(sb, ps, serviceName, suffix: "2", baseTable: "heim_spans",
-            rowIdCol: "span_rowid", tsCol: "start_unix_nano", fromUnixNano, toUnixNano);
+            sb.Append("SELECT DISTINCT v.value FROM heim_span_attrs v " +
+                      "JOIN heim_span_attrs s ON s.span_rowid = v.span_rowid");
+            AppendServiceVersionPredicates(sb, ps, serviceName, suffix: "2", baseTable: "heim_spans",
+                rowIdCol: "span_rowid", tsCol: "start_unix_nano", fromUnixNano, toUnixNano);
+        }
 
         sb.Append(" ORDER BY 1");
 

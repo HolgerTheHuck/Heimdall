@@ -5,11 +5,28 @@
    Body ist ein <details>: <summary> zeigt den Log-Text als Einzeiler (mit Ellipsis,
    solange zugeklappt) — so bleiben viele Logs kompakt übereinander; aufgeklappt
    erscheinen die strukturierten Attribute + Trace/Span/Scope/Severity darunter.
-   TraceId-Spalte ist ein Link auf das Trace-Detail. Rein nativ, kein JS. *@
+   TraceId-Spalte ist ein Link auf das Trace-Detail. Rein nativ, kein JS.
+   Spalten (ShowService=false): Zeit | Sev | Body | Trace. Mit ShowService=true
+   (flache Logs-Liste) kommt der Service zwischen Zeit und Sev. *@
 @using System.Collections.Generic
 @inject Heimdall.Blazor.IHeimdallI18n I18n
 <tr class="@SevClass()">
     <td class="hmd-mono">@HeimdallFmt.Ts(Log.TimeUnixNano)</td>
+    @if (ShowService)
+    {
+        @* Service-Spalte (Opt-in, Logs-Liste): service.name aus dem Attr-Index.
+           In der gruppierten Ansicht entfaellt sie (steht in der Gruppenueberschrift). *@
+        <td class="hmd-mono hmd-log-svc">
+            @if (!string.IsNullOrEmpty(Log.ServiceName))
+            {
+                @Log.ServiceName
+            }
+            else
+            {
+                <span class="hmd-dim">—</span>
+            }
+        </td>
+    }
     <td><span class="hmd-badge">@HeimdallFmt.Sev(Log.Severity)</span></td>
     <td class="hmd-log-body-cell">
         <details class="hmd-log-details" open="@Expand">
@@ -56,6 +73,9 @@
     [Parameter] public string BasePath { get; set; } = "/otel";
     /// <summary><c>true</c> → <c>&lt;details open&gt;</c> (alle aufgeklappt).</summary>
     [Parameter] public bool Expand { get; set; }
+    /// <summary><c>true</c> → zusätzliche Service-Spalte (service.name). Opt-in
+    /// für die flache Logs-Liste; Trace-Detail/Dashboard-Panels bleiben unverändert.</summary>
+    [Parameter] public bool ShowService { get; set; }
 
     private IReadOnlyList<HeimdallCharting.AttrKv> _attrs = Array.Empty<HeimdallCharting.AttrKv>();
 

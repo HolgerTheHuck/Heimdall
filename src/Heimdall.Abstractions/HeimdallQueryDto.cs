@@ -9,13 +9,21 @@ namespace Heimdall;
 // ---------------------------------------------------------------------------
 
 /// <summary>Eine Trace-Gruppe (Aggregation ueber trace_id).</summary>
+/// <remarks>
+/// RootName/RootService identifizieren den Trace in Listen (Tempo-Semantik):
+/// Root-Name = Name des Spans OHNE Parent (Fallback: fruehester Span),
+/// Root-Service = dessen service.name. Defaults leer (Backend liefert sie,
+/// wenn bekannt — SQLite befuellt beide).
+/// </remarks>
 public sealed record TraceSummary(
     string TraceId,
     long FirstStartUnixNano,
     long LastEndUnixNano,
     long DurationNs,        // Letzter End - Erster Start (Wall-Clock)
     int SpanCount,
-    bool HasError);
+    bool HasError,
+    string RootName = "",
+    string RootService = "");
 
 /// <summary>Ein flacher Span (rohe Zeile); der Baum wird daraus in app gebaut.</summary>
 public sealed record SpanRow(
@@ -43,7 +51,8 @@ public sealed record LogRow(
     string? SeverityText,
     string? Body,
     string AttrsJson,
-    string? ScopeName);
+    string? ScopeName,
+    string? ServiceName = null);   // resource-attr service.name (Backend-gefuellt, gruppiert die Logs-Ansicht)
 
 /// <summary>Ein Metrik-Punkt (rohe Zeile).</summary>
 public sealed record MetricRow(
@@ -164,18 +173,22 @@ public interface IHeimdallQuery
         => System.Array.Empty<string>();
 
     /// <summary>Alle distinkten <c>service.name</c>-Werte (Logs UND Spans) im
-    /// Zeitfenster (null = global). Default-Implementierung leer (für Backends
+    /// Zeitfenster (null = global). Mit <paramref name="includeSpans"/> = false nur
+    /// Services mit LOGS — die Logs-Seite bietet sonst Trace-only Services an,
+    /// deren Auswahl leer läuft. Default-Implementierung leer (für Backends
     /// ohne Discovery) -> additiv, nicht-brechend für bestehende Implementierer.
     /// Basis für das Service-Dropdown der UI.</summary>
-    IReadOnlyList<string> ListServiceNames(long? fromUnixNano = null, long? toUnixNano = null)
+    IReadOnlyList<string> ListServiceNames(long? fromUnixNano = null, long? toUnixNano = null,
+        bool includeSpans = true)
         => System.Array.Empty<string>();
 
     /// <summary>Alle <c>service.version</c>-Werte, die für genau diesen
     /// <c>service.name</c> vorkommen (Paar-Semantik: beide Keys auf derselben
-    /// Log-/Span-Zeile). Leerer/null-Service -> leere Liste. Default-Implementierung
+    /// Log-/Span-Zeile). Leerer/null-Service -> leere Liste. Mit
+    /// <paramref name="includeSpans"/> = false nur aus Logs. Default-Implementierung
     /// leer -> additiv, nicht-brechend. Basis für das abhängige Versions-Dropdown.</summary>
     IReadOnlyList<string> ListServiceVersions(string serviceName,
-        long? fromUnixNano = null, long? toUnixNano = null)
+        long? fromUnixNano = null, long? toUnixNano = null, bool includeSpans = true)
         => System.Array.Empty<string>();
 
     /// <summary>Anzahl Spans/Logs/Metrik-Punkte je Zeit-Bucket im Fenster

@@ -113,6 +113,39 @@ public class ServiceFilterTests
     }
 
     [Fact]
+    public void ListServiceNames_LogOnly_Schliesst_TraceOnly_Services_Aus()
+    {
+        // includeSpans=false (Logs-Seite): ein Service, der nur Traces schickt,
+        // wuerde im Filter angeboten und bei Auswahl eine leere Liste liefern.
+        var path = NewDbPath();
+        try
+        {
+            using var sink = NewSql(path);
+            sink.WriteLogs(new[] { Log(NowNs, "msg-a", "shop", "v1") });
+            sink.WriteSpans(new[]
+            {
+                Span(1, 1, "traceonly", "v9"),
+                Span(2, 2, "both", "v2"),
+            });
+            sink.WriteLogs(new[] { Log(NowNs, "msg-b", "both", "v1") });
+
+            var logOnly = sink.ListServiceNames(includeSpans: false);
+            Assert.Contains("shop", logOnly);
+            Assert.Contains("both", logOnly);
+            Assert.DoesNotContain("traceonly", logOnly);   // Span-seitiger Zweig ab
+
+            // Union bleibt der Default (Traces-Seite).
+            var union = sink.ListServiceNames();
+            Assert.Contains("traceonly", union);
+
+            // Versionen analog: log-only kennt nur die Log-Versionen des Service.
+            Assert.Equal(new[] { "v1", "v2" }, sink.ListServiceVersions("both"));
+            Assert.Equal(new[] { "v1" }, sink.ListServiceVersions("both", includeSpans: false));
+        }
+        finally { TryDelete(path); }
+    }
+
+    [Fact]
     public void ListServiceNames_RespektiertZeitraum()
     {
         var path = NewDbPath();

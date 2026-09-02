@@ -67,6 +67,8 @@
         <table class="hmd-table hmd-dense">
             <caption>@I18n.T("page.title.traces")</caption>
             <thead><tr>
+                <th scope="col">@I18n.T("traces.col.name")</th>
+                <th scope="col">@I18n.T("traces.col.service")</th>
                 <th scope="col">@I18n.T("table.trace.id")</th>
                 <th scope="col" aria-sort="@AriaSort("start")"><a href="@SortUrl("start")" title="@I18n.T("sort.aria", I18n.T("table.start"))">@I18n.T("table.start")@SortIndicator("start")</a></th>
                 <th scope="col" aria-sort="@AriaSort("duration")"><a href="@SortUrl("duration")" title="@I18n.T("sort.aria", I18n.T("table.duration"))">@I18n.T("table.duration")@SortIndicator("duration")</a></th>
@@ -77,6 +79,12 @@
             @foreach (var t in _traces)
             {
                 <tr class="@(t.HasError ? "hmd-err" : "")">
+                    @* Tempo-Semantik: Root-Span-Name + Root-Service machen den Trace
+                       lesbar („GET /api/...“ · „ModuleStore_v2_Int“). Fehlt die
+                       Anreicherung (altes Backend), fällt die Zelle auf den Platzhalter. *@
+                    <td><a href="@(BasePath + "/trace/" + t.TraceId)">
+                        @(string.IsNullOrEmpty(t.RootName) ? HeimdallFmt.Truncate(t.TraceId, 16) : t.RootName)</a></td>
+                    <td>@(string.IsNullOrEmpty(t.RootService) ? "—" : t.RootService)</td>
                     <td class="hmd-mono"><a href="@(BasePath + "/trace/" + t.TraceId)">@HeimdallFmt.Truncate(t.TraceId, 16)</a></td>
                     <td>@HeimdallFmt.Ts(t.FirstStartUnixNano)</td>
                     <td>@HeimdallFmt.Dur(t.DurationNs)</td>

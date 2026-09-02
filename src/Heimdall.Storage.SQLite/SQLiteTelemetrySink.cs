@@ -322,6 +322,96 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                     r.GetInt32(3), r.GetInt32(4) == 1));
             }
         }
+
+        return EnrichTraceRoots(list);
+    }
+
+    /// <summary>
+    /// Befaehlt die Seite mit Root-Name + Root-Service je Trace (Tempo-Semantik
+    /// fuer die Traces-Liste): Wurzel = Span OHNE Parent (parent_id IS NULL oder
+    /// leer, fruehester Start bei mehreren), sonst der frueheste Span des Trace
+    /// (verwaiste Spans, deren Parent nicht im Store liegt). Root-Service =
+    /// dessen service.name aus heim_span_attrs (beide Schreibweisen, wie der
+    /// Service-Filter). Ein zweiter Query nur ueber die Trace-IDs der Seite
+    /// haelt die Haupt-Gruppierung schmal; fehlgeschlagene Anreicherung bleibt
+    /// tolerant (Felder leer, Liste unveraendert).
+    /// </summary>
+    private List<TraceSummary> EnrichTraceRoots(List<TraceSummary> list)
+    {
+        if (list.Count == 0) return list;
+        try
+        {
+            var rootName = new Dictionary<string, string>(list.Count, StringComparer.Ordinal);
+            var rootSvc = new Dictionary<string, string>(list.Count, StringComparer.Ordinal);
+
+            // Basis-Selektor: Kandidaten-Spans der Seiten-Traces. parentless-Spans
+            // sind Wurzelkandidaten; alles andere nur im Fallback-Pass (Pass 2).
+            const string sql =
+                "SELECT trace_id, name, parent_id, " +
+                "(SELECT a.value FROM heim_span_attrs a WHERE a.span_rowid = t.rowid " +
+                " AND a.key IN ('service.name','service_name') LIMIT 1) " +
+                "FROM heim_spans t WHERE t.trace_id IN ";
+            const string parentless = " AND (parent_id IS NULL OR parent_id = '') ORDER BY trace_id, start_unix_nano";
+
+            using var rc = OpenReadConnection();
+            // IN-Chunks zu <= 500 IDs (SQLITE_MAX_VARIABLE_NUMBER ist historisch
+            // 999 — 500 bleibt defensiv sicher und haelt die Pläne klein).
+            for (int off = 0; off < list.Count; off += 500)
+            {
+                var chunk = list.GetRange(off, Math.Min(500, list.Count - off));
+                var inSql = new StringBuilder(chunk.Count * 8).Append('(');
+                for (int i = 0; i < chunk.Count; i++)
+                    inSql.Append(i == 0 ? "@tr" : ",@tr").Append(off + i);
+                inSql.Append(')');
+
+                // Pass 1: parentless-Spans (echte Wurzel, Tempo-Semantik).
+                var pending = new HashSet<string>(StringComparer.Ordinal);
+                using (var cmd = new SqliteCommand(sql + inSql + parentless, rc))
+                {
+                    for (int i = 0; i < chunk.Count; i++)
+                        cmd.Parameters.AddWithValue("@tr" + (off + i), chunk[i].TraceId);
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read())
+                    {
+                        string tid = r.GetString(0);
+                        if (rootName.TryAdd(tid, r.GetString(1)))
+                            rootSvc[tid] = r.IsDBNull(3) ? "" : r.GetString(3);
+                    }
+                }
+                foreach (var t in chunk) if (!rootName.ContainsKey(t.TraceId)) pending.Add(t.TraceId);
+
+                // Pass 2: Traces ohne parentless-Span → fruehester Span als Wurzel.
+                if (pending.Count == 0) continue;
+                var pIds = new List<string>(pending);
+                var pIn = new StringBuilder(pIds.Count * 8).Append('(');
+                for (int i = 0; i < pIds.Count; i++)
+                    pIn.Append(i == 0 ? "@tr" : ",@tr").Append(off + i);
+                pIn.Append(')');
+                using (var cmd = new SqliteCommand(sql + pIn + " ORDER BY trace_id, start_unix_nano", rc))
+                {
+                    for (int i = 0; i < pIds.Count; i++)
+                        cmd.Parameters.AddWithValue("@tr" + (off + i), pIds[i]);
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read())
+                    {
+                        string tid = r.GetString(0);
+                        if (rootName.TryAdd(tid, r.GetString(1)))
+                            rootSvc[tid] = r.IsDBNull(3) ? "" : r.GetString(3);
+                    }
+                }
+            }
+
+            for (int i = 0; i < list.Count; i++)
+            {
+                if (rootName.TryGetValue(list[i].TraceId, out var nm))
+                    list[i] = list[i] with { RootName = nm, RootService = rootSvc.GetValueOrDefault(list[i].TraceId, "") };
+            }
+        }
+        catch
+        {
+            // Anreicherung ist Convenience — eine fehlgeschlagene Suche darf die
+            // Liste nicht leeren; die Felder bleiben dann leer.
+        }
         return list;
     }
 
@@ -383,7 +473,10 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             search = search with { AttrFilters = filters };
         }
         var sb = SqlBuilder();
-        sb.Append("SELECT ts_unix_nano, trace_id, span_id, severity, severity_text, body, attrs_json, scope_name FROM heim_logs WHERE 1=1");
+        sb.Append("SELECT ts_unix_nano, trace_id, span_id, severity, severity_text, body, attrs_json, scope_name, " +
+                  "(SELECT a.value FROM heim_log_attrs a WHERE a.log_rowid = heim_logs.rowid " +
+                  " AND a.key IN ('service.name','service_name') LIMIT 1) AS service_name " +
+                  "FROM heim_logs WHERE 1=1");
         var ps = new List<SqliteParameter>();
         if (!string.IsNullOrWhiteSpace(search.Text))
         {
@@ -644,7 +737,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
 
     private static LogRow ReadLog(SqliteDataReader r) => new LogRow(
         r.GetInt64(0), NStr(r, 1), NStr(r, 2), r.GetInt32(3), NStr(r, 4), NStr(r, 5),
-        NStr(r, 6) ?? "{}", NStr(r, 7));
+        NStr(r, 6) ?? "{}", NStr(r, 7), NStr(r, 8));
 
     private static string? NStr(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
     private static long? NLong(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : (long)r.GetValue(i);

@@ -97,6 +97,53 @@ public class SQLiteTelemetrySinkTests
     }
 
     [Fact]
+    public void ListTraces_Anreichert_RootName_und_RootService()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+
+            // Trace 1: Multi-Service wie in Produktion — Root (parentless) aus
+            // "ModuleStore_v2_Int", Kinder (Customer_v2-POSTs) hängen unter ihm.
+            var (t1, t1hex) = Tid(1);
+            var (t2, t2hex) = Tid(2);
+            var (root, _) = Sid(1);
+            var (c1, _) = Sid(2);
+            var (c2, _) = Sid(3);
+            long now = NowNs;
+            sink.WriteSpans(new[]
+            {
+                new HSpan(t1, root, null, "GET /int/Customer", HSpanKind.Server, now, now+5_000_000, HStatusCode.Ok, null,
+                    Array.Empty<HAttribute>(), Array.Empty<HSpanEvent>(), Array.Empty<HSpanLink>(),
+                    Res("ModuleStore_v2_Int"), null),
+                new HSpan(t1, c1, root, "POST /Customer/Save", HSpanKind.Client, now+1_000_000, now+2_000_000, HStatusCode.Ok, null,
+                    Array.Empty<HAttribute>(), Array.Empty<HSpanEvent>(), Array.Empty<HSpanLink>(),
+                    Res("Customer_v2"), null),
+                new HSpan(t1, c2, root, "POST /Customer/Save", HSpanKind.Client, now+2_000_000, now+3_000_000, HStatusCode.Ok, null,
+                    Array.Empty<HAttribute>(), Array.Empty<HSpanEvent>(), Array.Empty<HSpanLink>(),
+                    Res("Customer_v2"), null),
+                // Trace 2: verwaist — Parent nicht im Store → Fallback fruehester Span.
+                new HSpan(t2, Sid(4).id, Sid(99).id, "orphan child", HSpanKind.Server, now, now+1_000_000, HStatusCode.Ok, null,
+                    Array.Empty<HAttribute>(), Array.Empty<HSpanEvent>(), Array.Empty<HSpanLink>(),
+                    Res("lost"), null),
+            });
+
+            var traces = sink.ListTraces(new TraceFilter { Limit = 100 });
+            Assert.Equal(2, traces.Count);
+
+            var multi = traces.Single(t => t.TraceId == t1hex);
+            Assert.Equal("ModuleStore_v2_Int", multi.RootService);   // Root-Service, NICHT der Kind-Service
+            Assert.Equal("GET /int/Customer", multi.RootName);
+
+            var orphan = traces.Single(t => t.TraceId == t2hex);
+            Assert.Equal("orphan child", orphan.RootName);           // Fallback: fruehester Span
+            Assert.Equal("lost", orphan.RootService);
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
     public void Fulltext_Match_On_Span_Name()
     {
         var path = NewDbPath();
@@ -116,6 +163,35 @@ public class SQLiteTelemetrySinkTests
             var matches = sink.ListTraces(new TraceFilter { NameContains = "checkout", Limit = 50 });
             Assert.Single(matches);
             Assert.Equal(t1hex, matches[0].TraceId);
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
+    public void SearchLogs_Befuellt_ServiceName_Aus_ResourceAttrs()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            // service.name sitzt — wie im OTLP-Fall — in den Resource-Attrs, NICHT in
+            // den Log-Attrs (deshalb liest die Suche den heim_log_attrs-Index, nicht
+            // attrs_json). Zwei Services, eine Zeile ohne Resource (Fallback null).
+            sink.WriteLogs(new[]
+            {
+                new HLogRecord(NowNs, HSeverity.Info, "INFO", "m1: request handled", null, null,
+                    Array.Empty<HAttribute>(), Res("ModuleStore_v2_Int"), null),
+                new HLogRecord(NowNs + 1, HSeverity.Error, "ERROR", "c1: save failed", null, null,
+                    Array.Empty<HAttribute>(), Res("Customer_v2"), null),
+                new HLogRecord(NowNs + 2, HSeverity.Info, "INFO", "x1: no resource", null, null,
+                    Array.Empty<HAttribute>(), null, null),
+            });
+
+            var logs = sink.SearchLogs(new LogSearch { Limit = 100 });
+            Assert.Equal(3, logs.Count);
+            Assert.Equal("ModuleStore_v2_Int", logs.Single(l => l.Body!.StartsWith("m1")).ServiceName);
+            Assert.Equal("Customer_v2", logs.Single(l => l.Body!.StartsWith("c1")).ServiceName);
+            Assert.Null(logs.Single(l => l.Body!.StartsWith("x1")).ServiceName);
         }
         finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
     }
