@@ -7,6 +7,8 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.3.1] — 2026-09-02
+
 ### Behoben
 - **Alert-Store-Falle: „Dashboard ohne Alerting" killte den gesamten Host beim
   ersten Request.** Ein Host, der nur `AddHeimdallDashboard(sink)` +
