@@ -23,7 +23,9 @@ namespace Heimdall.AspNetCore;
 ///   (<c>{PrometheusPrefix}/api/v1/*</c>): API-Key via Header
 ///   <c>x-heimdall-key</c> (Header only — kein Query-Fallback, da Query-Strings
 ///   in Access-Logs landen); zeitkonstanter Vergleich (<see cref="SecretComparer"/>)
-///   gegen <see cref="HeimdallAuthOptions.ApiKey"/> → sonst 401.</item>
+///   gegen <see cref="HeimdallAuthOptions.ApiKey"/> → sonst 401. Bleibt der
+///   ApiKey leer konfiguriert, werden die API-Pfade ohne Key durchgelassen
+///   (offener Ingest — UI login-geschützt, OTel-Sender ohne Key).</item>
 /// <item>UI / Rest (innerhalb des geschützten Subtree): Basic-Auth gegen
 ///   <see cref="HeimdallAuthOptions.Username"/> + <see cref="HeimdallAuthOptions.Password"/>
 ///   (Username nur geprüft, wenn konfiguriert) → sonst 401 +
@@ -123,13 +125,20 @@ public sealed class HeimdallAuthMiddleware
         var promApi = EnsureSlash(_auth.PrometheusPrefix) + "api/v1/";
 
         // API-Pfade (OTLP/HTTP + Prom-API): API-Key via Header (kein Cookie,
-        // kein Redirect — API-Clients folgen keinen Redirects). 401 bei fehlendem/
-        // ungültigem Key.
+        // kein Redirect — API-Clients folgen keinen Redirects). 401 bei
+        // fehlendem/ungültigem Key. ApiKey leer konfiguriert → offener Ingest
+        // (UI bleibt login-geschützt, OTel-Sender senden ohne Key — siehe
+        // HeimdallAuthOptions).
         if (path.StartsWith(otlpApi, StringComparison.OrdinalIgnoreCase) ||
             path.StartsWith(promApi, StringComparison.OrdinalIgnoreCase))
         {
+            if (string.IsNullOrEmpty(_auth.ApiKey))
+            {
+                await _next(context);
+                return;
+            }
             var key = req.Headers["x-heimdall-key"].FirstOrDefault();
-            if (string.IsNullOrEmpty(_auth.ApiKey) || !SecretComparer.Equals(key, _auth.ApiKey))
+            if (!SecretComparer.Equals(key, _auth.ApiKey))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 return;

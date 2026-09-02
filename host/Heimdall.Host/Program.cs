@@ -94,7 +94,8 @@ if (opts.Otlp.Grpc.Enabled)
 {
     // gRPC-Auth + Admission-Control: Host mapt Auth → HeimdallOtlpGrpcOptions (inline-Check in den *ServiceImpl).
     var grpcOpts = new HeimdallOtlpGrpcOptions { MaxConcurrentRequests = opts.Otlp.Grpc.MaxConcurrentRequests };
-    if (opts.Auth.Enabled) { grpcOpts.AuthEnabled = true; grpcOpts.ApiKey = opts.Auth.ApiKey; }
+    if (opts.Auth.Enabled && !string.IsNullOrEmpty(opts.Auth.ApiKey))
+    { grpcOpts.AuthEnabled = true; grpcOpts.ApiKey = opts.Auth.ApiKey; }
     builder.Services.AddHeimdallOtlpGrpc(sink, grpcOpts);
 }
 if (opts.Prometheus.Enabled) builder.Services.AddHeimdallPrometheus(metricSource, query);
@@ -136,6 +137,11 @@ if (opts.DashboardsStore.SeedExample) HeimdallSeeder.SeedExampleDashboard(app.Se
 if (opts.Auth.Enabled) app.UseHeimdallAuth(opts.Auth);
 
 app.UseStaticFiles();   // liefert /_content/Heimdall.Blazor/{css,js}
+
+// no-store auf allen dynamischen Antworten — ohne Cache-Header cachen Middle-Boxen
+// (IIS Output Caching/ARR vor dem Host) Panel-/API-GETs eigenmächtig, und Panels
+// „frieren“ auf alten Zeitfenstern ein (siehe UseHeimdallNoCache-Doku).
+app.UseHeimdallNoCache();
 
 // --- Bedingte Endpoint-Mappings --------------------------------------------
 // Health-Endpoint (/healthz) — vor Auth, immer anonymous (Compose-Healthcheck,
@@ -197,11 +203,11 @@ static void ValidateOptions(HeimdallHostOptions o)
                 $"Heimdall:Storage:Rollup:RawDays „{rollup.RawDays}“ > MetricsDaysEffective „{metricsDays}“ — " +
                 "Rollup-Fenster wäre leer (Raw wird vor dem Rollen gelöscht).");
     }
-    // Auth-Baseline (shared Lib-Validierung: Enabled erfordert Password) +
-    // Host-spezifischer ApiKey-Zwang (der Host exponiert immer OTLP/HTTP).
+    // Auth-Baseline (shared Lib-Validierung: Enabled erfordert Password). Der
+    // ApiKey ist seit dem offenen-Ingest-Modus OPTIONAL: leer konfiguriert sind
+    // die API-Pfade (OTLP/HTTP, Prom-API, gRPC) ohne Key offen — nur die UI
+    // steht hinter dem Login. Wer den Ingest mit schützen will, setzt ApiKey.
     o.Auth.Validate();
-    if (o.Auth.Enabled && string.IsNullOrEmpty(o.Auth.ApiKey))
-        throw new InvalidOperationException("Heimdall:Auth:Enabled=true erfordert ApiKey (x-heimdall-key) — der Host exponiert immer OTLP/HTTP + Prom-API.");
     if (o.Otlp.Http.MaxConcurrentRequests < 0)
         throw new InvalidOperationException("Heimdall:Otlp:Http:MaxConcurrentRequests darf nicht negativ sein (0 = unbegrenzt).");
     if (o.Otlp.Grpc.MaxConcurrentRequests < 0)

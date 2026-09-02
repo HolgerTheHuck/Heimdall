@@ -131,7 +131,8 @@ public static class HeimdallEmbeddedExtensions
         if (opts.EnableOtlpGrpc)
         {
             var grpcOpts = new HeimdallOtlpGrpcOptions { MaxConcurrentRequests = opts.OtlpGrpcMaxConcurrent };
-            if (opts.Auth.Enabled) { grpcOpts.AuthEnabled = true; grpcOpts.ApiKey = opts.Auth.ApiKey; }
+            if (opts.Auth.Enabled && !string.IsNullOrEmpty(opts.Auth.ApiKey))
+            { grpcOpts.AuthEnabled = true; grpcOpts.ApiKey = opts.Auth.ApiKey; }
             services.AddHeimdallOtlpGrpc(writeSink, grpcOpts);
         }
         if (opts.EnablePrometheus) services.AddHeimdallPrometheus(sink, sink);

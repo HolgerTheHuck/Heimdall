@@ -38,11 +38,15 @@ public sealed class HeimdallAuthOptions
     public string? Password { get; set; }
 
     /// <summary>
-    /// Shared API-Key für OTLP/HTTP- und Prom-API-Pfade (Header
+    /// Shared API-Key für OTLP/HTTP-, Prom-API- und OTLP/gRPC-Pfade (Header
     /// <c>x-heimdall-key</c> — Header only, kein Query-Fallback, da Query-Strings
-    /// in Access-Logs landen). Vergleich zeitkonstant. null/leer bei
-    /// <see cref="Enabled"/>=true → API-Pfade liefern 401 (sicherer Default);
-    /// der Host fordert ApiKey zusätzlich ein (siehe Host-ValidateOptions).
+    /// in Access-Logs landen). Vergleich zeitkonstant. GESetzt bei
+    /// <see cref="Enabled"/>=true → API-Pfade verlangen den Key (401 sonst).
+    /// <b>Leer gelassen</b> → API-Pfade sind OHNE Key offen (offener Ingest):
+    /// die UI bleibt per Username/Password login-geschützt, während die
+    /// OTel-Sender (SDK-Exporter, gRPC-Clients) keinen Key mitsenden müssen —
+    /// z. B. wenn Ingest im geschützten Netz erfolgt und nur die UI geschützt
+    /// werden soll.
     /// </summary>
     public string? ApiKey { get; set; }
 

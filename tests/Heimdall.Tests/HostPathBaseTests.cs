@@ -1,7 +1,9 @@
 #if NET10_0
+using System.Collections.Generic;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Heimdall.Tests;
@@ -87,6 +89,124 @@ public class HostPathBaseTests : HostBootTestBase
         Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
         var loc = resp.Headers.Location?.ToString() ?? string.Empty;
         Assert.StartsWith("/otel/otel/dashboards/import?err=", loc);
+    }
+
+    /// <summary>Regression: die Panel-Editor-POSTs (Erfolg UND Fehler-Redirect)
+    /// muessen die PathBase mitfuehren wie die übrigen Dashboard-POSTs.</summary>
+    [Fact]
+    public async Task Dashboard_Panel_Post_Redirectet_Mit_PathBase()
+    {
+        var store = Services.GetRequiredService<Heimdall.Blazor.Grafana.IGrafanaDashboardStore>();
+        store.Save("pb-panel-test", @"{ ""uid"": ""pb-panel-test"", ""title"": ""PathBase Panel"", ""panels"": [] }");
+
+        using var form = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["panelKey"] = "", ["title"] = "Neu", ["type"] = "stat",
+            ["gridX"] = "0", ["gridY"] = "0", ["gridW"] = "6", ["gridH"] = "4",
+            ["tgtCount"] = "1", ["t0Expr"] = "up", ["thrCount"] = "0",
+        });
+        var resp = await CreateClient(new Uri("http://localhost/otel/"), allowAutoRedirect: false)
+            .PostAsync("otel/dashboards/pb-panel-test/panel/save", form);
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
+        Assert.Equal("/otel/otel/dashboards/pb-panel-test", resp.Headers.Location?.ToString());
+    }
+}
+
+/// <summary>
+/// CSRF-Check mit TrustedOrigins (Reverse-Proxy mit abweichender TLD): der Browser
+/// sendet beim Form-POST unausweisbar Origin/Referer mit der EXTERNEN Origin; reicht
+/// der Proxy Host/X-Forwarded-Host nicht 1:1 durch (IIS-ARR setzt X-Forwarded-Host
+/// nicht von selbst), schlägt der Authority-Vergleich fehl. Die Config-Liste
+/// <c>Heimdall:Ui:TrustedOrigins</c> listet diese externen Origins als Trust-Anchor.
+/// </summary>
+public class HostTrustedOriginTests : HostBootTestBase
+{
+    private const string External = "https://portal.example.com";
+
+    public HostTrustedOriginTests()
+    {
+        // Externes Frontend-Origin als Trust-Anchor eintragen (Env-Syntax wie die
+        // übrigen Config-Keys; die Section wird lazy pro Request gelesen).
+        SetEnv("Heimdall__Ui__TrustedOrigins__0", External);
+        UsePathBase("/otel");
+    }
+
+    private HttpClient PostClient()
+    {
+        var c = CreateClient(new Uri("http://localhost/otel/"), allowAutoRedirect: false);
+        c.DefaultRequestHeaders.Add("Origin", External);
+        return c;
+    }
+
+    /// <summary>Regression: getrusteter externer Origin → Import-POST geht durch
+    /// (302 auf die View, PathBase mitgetragen) statt 400 cross-origin.</summary>
+    [Fact]
+    public async Task Import_Post_Mit_Getrustetem_Externen_Origin_Geht_Durch()
+    {
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(
+            @"{ ""uid"": ""trusted-origin-test"", ""title"": ""Trusted Origin"", ""panels"": [] }"),
+            "file", "dashboard.json");
+
+        using var client = PostClient();
+        var resp = await client.PostAsync("otel/dashboards/import", form);
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
+        Assert.Equal("/otel/otel/dashboards/trusted-origin-test", resp.Headers.Location?.ToString());
+    }
+
+    /// <summary>Import-POST mit fremdem Origin bleibt abgewiesen (CSRF-Schutz intakt).</summary>
+    [Fact]
+    public async Task Import_Post_Mit_Fremdem_Origin_Bleibt_400()
+    {
+        using var form = new MultipartFormDataContent();
+        form.Add(new StringContent(@"{ ""uid"": ""evil-origin-test"", ""title"": ""x"", ""panels"": [] }"),
+            "file", "dashboard.json");
+
+        using var client = CreateClient(new Uri("http://localhost/otel/"), allowAutoRedirect: false);
+        client.DefaultRequestHeaders.Add("Origin", "https://evil.example.net");
+
+        var resp = await client.PostAsync("otel/dashboards/import", form);
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
+    }
+
+    /// <summary>Panel-Editor-POSTs unterliegen demselben CSRF-Check: getruster
+    /// externer Origin geht durch (302, PathBase mitgetragen) …</summary>
+    [Fact]
+    public async Task Panel_Post_Mit_Getrustetem_Externen_Origin_Geht_Durch()
+    {
+        var store = Services.GetRequiredService<Heimdall.Blazor.Grafana.IGrafanaDashboardStore>();
+        store.Save("trusted-panel-test", @"{ ""uid"": ""trusted-panel-test"", ""title"": ""Trusted Panel"", ""panels"": [] }");
+
+        using var form = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["panelKey"] = "", ["title"] = "Neu", ["type"] = "stat",
+            ["gridX"] = "0", ["gridY"] = "0", ["gridW"] = "6", ["gridH"] = "4",
+            ["tgtCount"] = "1", ["t0Expr"] = "up", ["thrCount"] = "0",
+        });
+        using var client = PostClient();
+        var resp = await client.PostAsync("otel/dashboards/trusted-panel-test/panel/save", form);
+        Assert.Equal(HttpStatusCode.Redirect, resp.StatusCode);
+        Assert.Equal("/otel/otel/dashboards/trusted-panel-test", resp.Headers.Location?.ToString());
+    }
+
+    /// <summary>… und ein fremder Origin bleibt auch hier abgewiesen (400).</summary>
+    [Fact]
+    public async Task Panel_Post_Mit_Fremdem_Origin_Bleibt_400()
+    {
+        var store = Services.GetRequiredService<Heimdall.Blazor.Grafana.IGrafanaDashboardStore>();
+        store.Save("evil-panel-test", @"{ ""uid"": ""evil-panel-test"", ""title"": ""Evil Panel"", ""panels"": [] }");
+
+        using var form = new FormUrlEncodedContent(new Dictionary<string, string>
+        {
+            ["panelKey"] = "", ["title"] = "Neu", ["type"] = "stat",
+            ["gridX"] = "0", ["gridY"] = "0", ["gridW"] = "6", ["gridH"] = "4",
+            ["tgtCount"] = "1", ["t0Expr"] = "up", ["thrCount"] = "0",
+        });
+        using var client = CreateClient(new Uri("http://localhost/otel/"), allowAutoRedirect: false);
+        client.DefaultRequestHeaders.Add("Origin", "https://evil.example.net");
+
+        var resp = await client.PostAsync("otel/dashboards/evil-panel-test/panel/save", form);
+        Assert.Equal(HttpStatusCode.BadRequest, resp.StatusCode);
     }
 }
 
