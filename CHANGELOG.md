@@ -7,6 +7,97 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Hinzugefügt
+- **`Heimdall:Ui:TrustedOrigins`:** Trust-Anchor-Liste für den CSRF-Same-Origin-
+  Check aller zustandsändernden POST-Endpoints (Login/Logout, Dashboard-
+  Import/Delete, Alert-Save/Delete, /lang). Deployment hinter einem Reverse-
+  Proxy/ARR mit abweichender TLD schlägt sonst fehl: Der Browser sendet beim
+  Form-POST unausweisbar Origin/Referer mit der EXTERNEN Origin, während der
+  Check gegen Request.Host bzw. X-Forwarded-Host läuft — reicht der Proxy die
+  externe Authority nicht durch (IIS-ARR setzt X-Forwarded-Host nicht von
+  selbst), wird jeder legitime POST mit 400 „cross-origin POST rejected"
+  abgewiesen. Einträge sind vollständige Origins (z. B.
+  `"https://portal.example.de"`); Scheme/Host case-insensitive, Ports
+  default-normalisiert. Alternativ am IIS: URL-Rewrite-Server-Variable
+  `HTTP_X_FORWARDED_HOST = {HTTP_HOST}` setzen (oder ARR „Preserve host
+  header"). Regressionstests in `HostTrustedOriginTests` (getruster Origin
+  → 302, fremder Origin → 400).
+- **Offener Ingest: `Heimdall:Auth:ApiKey` ist jetzt OPTIONAL.** Bisher warf die
+  Host-Validierung bei `Enabled=true` ohne ApiKey, und die API-Pfade lieferten
+  bei leerem Key pauschal 401. Jetzt: ApiKey **gesetzt** → API-Pfade (OTLP/HTTP,
+  Prom-API, gRPC) verlangen den Key wie bisher; ApiKey **leer gelassen** →
+  API-Pfade ohne Key offen (offener Ingest), während die UI weiterhin per
+  Username/Password login-geschützt ist — für Sender (SDK-Exporter, gRPC-
+  Clients) im geschützten Netz, die keinen Key mitsenden sollen. Betrifft
+  `HeimdallAuthMiddleware`, das gRPC-Auth-Wiring (Host + Embedded) und die
+  Host-`ValidateOptions` (ApiKey-Zwang entfernt). Neue Tests
+  `HostOpenIngestTests` (OTLP/Prom ohne Key → 200, UI → Login-Redirect, UI mit
+  Basic → 200).
+- **Dashboard-Editor (Lossless, Panel-Ebenen):** Importierte Grafana-Dashboards
+  sind jetzt in der UI editierbar, ohne das JSON anzufassen. Kern ist
+  `GrafanaDashboardEditor`: Mutationen laufen auf dem ROHEN JSON (JsonNode) —
+  parser-fremde Felder (datasource.uid, fieldConfig.overrides, options,
+  schemaVersion, transformations, Target-format/interval) überleben jeden
+  Save (Lossless-Vertrag). Routen: Edit-Hub, Panel-Neu/-Edit/-Delete, Var-
+  Neu/-Edit/-Delete, JSON-Rohtag, Rename, Duplicate, Create-New. Das Editieren
+  findet auf PANEL-Ebene statt (wie Grafana): Jedes gerenderte Panel trägt
+  einen ✎-Edit-Link (Pfad-Key via `MatchRenderKeys`, Repeat-Kopien teilen den
+  Key), der Panel-Editor zeigt Live-Vorschau des ungespeicherten Standes
+  (GET-Form-Submit, nichts persistiert), Targets/Thresholds sind pro Zeile
+  entfernbar, neue Panels bekommen eine freie Grid-Position vorgeschlagen
+  (`SuggestNewPos`), überlappende Saves werden geblockt (Meldung mit dem
+  kollidierenden Panel-Titel; „Überlappung erlauben"-Haken für Ausnahmen).
+  PromQL/LogQL-Target-Textareas bekommen Syntax-Highlighting (JS-Overlay,
+  progressive Enhancement). Der Parser sammelt jetzt auch die Kinder
+  kollabierter Rows flacher Panels-Arrays (zuvor wurden sie weder gerendert
+  noch gelistet). Neue Tests `GrafanaDashboardEditorTests` +
+  `GrafanaDashboardEditPageTests` (inkl. Lossless-Roundtrip auf HTTP-Ebene).
+- **Multi-Var-Combobox für Template-Variablen:** Dashboards rendern Multi-
+  Template-Variablen als Checkbox-Combobox (`HeimdallServiceMultiSelect`,
+  generalisiert via `FieldName`/`AllText`) statt als meterhohes natives
+  `<select multiple>`; Single-Variablen bleiben natives Dropdown.
+- **no-store auf allen dynamischen Antworten (`UseHeimdallNoCache`):** Ohne
+  Cache-Header cachen Middle-Boxen (IIS Output Caching/ARR vor dem Host)
+  Panel-/API-GETs eigenmächtig — Panels „frieren" auf alten Zeitfenstern ein.
+  Zusätzlich Cache-Buster (`_=ms-Timestamp`) in den Panel-URLs und
+  `cache: "no-store"` in den JS-Fetches gegen Boxen, die no-store ignorieren.
+- **Service-Spalte in der Logs-Liste:** `HeimdallLogRow` kann per `ShowService`
+  den `service.name` je Log-Zeile zeigen (Logs-Seite opt-in; Trace-Detail,
+  Dashboard-Log-Panels unverändert). Die Discovery (`ListServiceNames`/
+  `ListServiceVersions`) hat einen `includeSpans`-Parameter — die Logs-Seite
+  bietet nur noch Services mit LOGS an (Trace-only Services lieferten sonst
+  eine leere Auswahl); die Traces-Seite bleibt Union.
+- **Trace-Root-Name/-Service in der Trace-Liste (Tempo-Semantik):**
+  `TraceSummary` trägt `RootName` (Name des Spans ohne Parent, Fallback
+  frühester Span) und `RootService` (dessen service.name) — die Liste zeigt
+  „GET /api/…" statt gekürzter Trace-IDs; fehlende Anreicherung (altes
+  Backend) fällt auf den Platzhalter zurück.
+- **OTLP-Drop-Logging:** Verworfene Batches sind jetzt sichtbar — 429
+  (Admission-Limiter voll), 400 (Body nicht parsebar) und Sink-Write-Fehler
+  (endgültiger Verlust, der OTLP-Exporter wiederholt nicht bei 400) loggen
+  mit Service/Grund statt still zu verschwinden.
+
+### Behoben
+- **Auto-Refresh wirft den User aus der Listen-Position:** Die Log-/Trace-
+  Liste scrollt im eigenen Container (`.hmd-list-scroll`, `overflow:auto` +
+  Sticky-Header) — `location.reload()` des Auto-Refresh stellt nur die
+  Fenster-Scroll-Position wieder her, die des Listen-Containers ging verloren
+  (Sprung nach oben bei jedem Refresh). Fix: `heimdall.js` sichert vor dem
+  Reload die Container-Position (scrollTop/scrollLeft) in `sessionStorage`
+  (Key = URL ohne `refresh`-Param) und stellt sie nach dem Load wieder her —
+  nur bei identischer Query, Filter-Änderungen starten bewusst oben. Live
+  verifiziert (Playwright gegen Heimdall.Host): scrollTop 9674 → 9674 nach
+  Reload bei `refresh=5s`.
+- **`$__rate_interval`-Floor 1m → 4m (leere Panels bei kleinen Zeiträumen):**
+  Bei 15-min-Zeitraum fiel `__rate_interval` auf den alten 1m-Floor (Step
+  7,5 s → 4×7,5s=30s). `rate(…[1m])` enthält bei typischer 60-s-OTLP-Export-
+  Kadenz meist nur EINEN Sample — `rate()` braucht ≥ 2 → leere Serie → Panels
+  zeigten „Keine Daten im Zeitraum“, obwohl der 1h-Zeitraum Daten hatte (dort
+  4×30s=2m → 2–3 Samples). Fix: Floor auf 4m (Grafana-Heuristik „4×
+  Scrape-Intervall“) in `GrafanaTemplating.BuiltIns` — übersteht feine Steps
+  und Export-Jitter. Regressionstest `BuildRenderVars_Preset15m_…` +
+  aktualisierte Asserts in `GrafanaTemplatingTests`/`GrafanaDashboardRenderTests`.
+
 ## [1.2.0] — 2026-08-24
 
 **Stand-alone-Host über OTLP/HTTP + OTLP/gRPC validiert (e2e, inkl. Docker). Bugfix-Release: gRPC+Auth, /healthz unter Auth, SelfTelemetry-Route-Filter.**
