@@ -5,7 +5,7 @@ Alle nennenswerten Änderungen an Heimdall werden in dieser Datei dokumentiert.
 Format: [Keep a Changelog](https://keepachangelog.com/de/1.1.0/), Versionierung
 folgt [Semantic Versioning](https://semver.org/lang/de/).
 
-## [Unreleased]
+## [1.3.0] — 2026-09-02
 
 ### Hinzugefügt
 - **`Heimdall:Ui:TrustedOrigins`:** Trust-Anchor-Liste für den CSRF-Same-Origin-
