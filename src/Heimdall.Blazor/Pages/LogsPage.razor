@@ -93,7 +93,7 @@
                 <h2 class="hmd-subhead">@g.Service <span class="hmd-dim">(@g.Logs.Count)</span></h2>
                 <div class="hmd-list-scroll">
                 <table class="hmd-table hmd-logs">
-                    <caption>@g.Service</caption>
+                    <caption class="hmd-vh">@g.Service</caption>
                     <thead><tr><th class="hmd-col-ts" scope="col">@I18n.T("table.time")</th><th class="hmd-col-sev" scope="col">@I18n.T("table.sev")</th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
                     <tbody>
                     @foreach (var l in g.Logs)
@@ -111,7 +111,9 @@
     {
         <div class="hmd-list-scroll">
         <table class="hmd-table hmd-logs">
-            <caption>@I18n.T("page.title.logs")</caption>
+            @* hmd-vh: Das <h1> über der Filterleiste heißt bereits "Logs" — das
+               Caption ist nur Screenreader-Futter, kostet sonst eine Zeile. *@
+            <caption class="hmd-vh">@I18n.T("page.title.logs")</caption>
             <thead><tr><th class="hmd-col-ts" scope="col" aria-sort="@AriaSort("time")"><a href="@SortUrl("time")" title="@I18n.T("sort.aria", I18n.T("table.time"))">@I18n.T("table.time")@SortIndicator("time")</a></th><th class="hmd-col-svc" scope="col">@I18n.T("logs.filter.service")</th><th class="hmd-col-sev" scope="col" aria-sort="@AriaSort("severity")"><a href="@SortUrl("severity")" title="@I18n.T("sort.aria", I18n.T("table.sev"))">@I18n.T("table.sev")@SortIndicator("severity")</a></th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
             <tbody>
             @foreach (var l in _logs)

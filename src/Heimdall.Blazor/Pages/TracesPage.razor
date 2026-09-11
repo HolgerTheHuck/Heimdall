@@ -65,7 +65,8 @@
     {
         <div class="hmd-list-scroll">
         <table class="hmd-table hmd-dense">
-            <caption>@I18n.T("page.title.traces")</caption>
+            @* hmd-vh: Das <h1> heißt bereits "Traces" — Caption nur für Screenreader. *@
+            <caption class="hmd-vh">@I18n.T("page.title.traces")</caption>
             <thead><tr>
                 <th scope="col">@I18n.T("traces.col.name")</th>
                 <th scope="col">@I18n.T("traces.col.service")</th>

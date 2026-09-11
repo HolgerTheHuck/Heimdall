@@ -53,7 +53,7 @@
             else
             {
                 <table class="hmd-table">
-                    <caption>@I18n.T("endpoint.col.controller")</caption>
+                    <caption class="hmd-vh">@I18n.T("endpoint.col.controller")</caption>
                     <thead><tr><th scope="col">@I18n.T("endpoint.col.controller")</th><th scope="col">@I18n.T("endpoint.col.calls")</th><th scope="col">∅/s</th><th scope="col">avg</th><th scope="col">min</th><th scope="col">max</th><th scope="col">p95</th><th scope="col">@I18n.T("endpoint.col.err")</th><th scope="col"><span class="hmd-vh">@I18n.T("table.actions")</span></th></tr></thead>
                     <tbody>
                     @foreach (var c in _rollup.Controllers)
@@ -85,7 +85,7 @@
             else
             {
                 <table class="hmd-table">
-                    <caption>@I18n.T("endpoint.heading.endpoints", eps.Count)</caption>
+                    <caption class="hmd-vh">@I18n.T("endpoint.heading.endpoints", eps.Count)</caption>
                     <thead><tr><th scope="col">Action</th><th scope="col">Route</th><th scope="col">@I18n.T("endpoint.col.calls")</th><th scope="col">avg</th><th scope="col">min</th><th scope="col">max</th><th scope="col">p50</th><th scope="col">p95</th><th scope="col">p99</th><th scope="col">@I18n.T("endpoint.col.err")</th><th scope="col"><span class="hmd-vh">@I18n.T("table.actions")</span></th></tr></thead>
                     <tbody>
                     @foreach (var e in eps)

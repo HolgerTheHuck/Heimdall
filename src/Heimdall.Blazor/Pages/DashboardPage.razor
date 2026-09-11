@@ -84,7 +84,7 @@
                 else
                 {
                     <table class="hmd-table hmd-logs">
-                        <caption>@I18n.T("dashboard.logs.heading", _logs.Count)</caption>
+                        <caption class="hmd-vh">@I18n.T("dashboard.logs.heading", _logs.Count)</caption>
                         <thead><tr><th class="hmd-col-ts" scope="col">@I18n.T("table.time")</th><th class="hmd-col-sev" scope="col">@I18n.T("table.sev")</th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
                         <tbody>
                         @foreach (var l in _logs)
@@ -104,7 +104,7 @@
                 else
                 {
                     <table class="hmd-table hmd-dense">
-                        <caption>@I18n.T("dashboard.traces.heading", _traces.Count)</caption>
+                        <caption class="hmd-vh">@I18n.T("dashboard.traces.heading", _traces.Count)</caption>
                         <thead><tr><th scope="col">@I18n.T("table.trace.id")</th><th scope="col">@I18n.T("table.start")</th><th scope="col">@I18n.T("table.duration")</th><th scope="col">@I18n.T("table.spans")</th><th scope="col">@I18n.T("table.status")</th></tr></thead>
                         <tbody>
                         @foreach (var t in _traces)
