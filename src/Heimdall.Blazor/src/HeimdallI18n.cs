@@ -146,6 +146,15 @@ public static class HeimdallI18n
         ["timerange.hint"]        = Lang("Zeiten werden beim Laden in Unix-ns umgerechnet.", "Times are converted to Unix-ns on load.", "Les heures sont converties en Unix-ns au chargement."),
         ["timerange.refresh"]     = Lang("Auto-Refresh", "Auto-refresh", "Auto-rafraîchissement"),
         ["timerange.refresh.off"] = Lang("aus", "off", "désactivé"),
+        // Preset-Labels: Key-Konvention timerange.preset.{PresetKey} (HeimdallRange.Presets);
+        // de wortwörtlich aus den vormals hart-codierten Preset.Label-Literalen übernommen.
+        ["timerange.preset.15m"]  = Lang("15 Minuten", "15 minutes", "15 minutes"),
+        ["timerange.preset.1h"]   = Lang("1 Stunde", "1 hour", "1 heure"),
+        ["timerange.preset.24h"]  = Lang("24 Stunden", "24 hours", "24 heures"),
+        ["timerange.preset.7d"]   = Lang("7 Tage", "7 days", "7 jours"),
+        ["timerange.preset.all"]  = Lang("Alles", "All", "Tout"),
+        // Fenster für explizite from/to (RangeLabel in DashboardPage/EndpointsPage).
+        ["timerange.window.ns"]   = Lang("von {0} bis {1} ns", "from {0} to {1} ns", "de {0} à {1} ns"),
 
         // --- Paging (HeimdallPager) ------------------------------------------
         ["pager.newer"]           = Lang("neuer", "newer", "plus récent"),

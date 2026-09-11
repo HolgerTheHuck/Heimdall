@@ -199,12 +199,14 @@
         return p.ToString("0.##", CultureInfo.InvariantCulture) + " %";
     }
 
-    private static string RangeLabel(string? preset, long? from, long? to)
+    private string RangeLabel(string? preset, long? from, long? to)
     {
         if (from is not null || to is not null)
-            return $"von {(from?.ToString(CultureInfo.InvariantCulture) ?? "—")} bis {(to?.ToString(CultureInfo.InvariantCulture) ?? "—")} ns";
+            return I18n.T("timerange.window.ns",
+                from?.ToString(CultureInfo.InvariantCulture) ?? "—",
+                to?.ToString(CultureInfo.InvariantCulture) ?? "—");
         var key = string.IsNullOrWhiteSpace(preset) ? "24h" : preset;
         var p = HeimdallRange.Presets.FirstOrDefault(x => x.Key == key);
-        return p?.Label ?? key;
+        return p is null ? key : I18n.T("timerange.preset." + p.Key);
     }
 }

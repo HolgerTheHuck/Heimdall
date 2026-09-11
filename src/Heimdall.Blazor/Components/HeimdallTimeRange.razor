@@ -13,7 +13,7 @@
         {
             var isOn = Preset == p.Key && From is null && To is null;
             <button type="submit" name="preset" value="@p.Key" class="hmd-range-btn"
-                    aria-pressed="@(isOn ? "true" : "false")">@p.Label</button>
+                    aria-pressed="@(isOn ? "true" : "false")">@I18n.T("timerange.preset." + p.Key)</button>
         }
     </div>
     <details class="hmd-range-custom">
