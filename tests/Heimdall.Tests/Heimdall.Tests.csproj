@@ -33,6 +33,7 @@
     <ProjectReference Include="..\..\src\Heimdall.Otlp.Grpc\Heimdall.Otlp.Grpc.csproj" />
     <ProjectReference Include="..\..\src\Heimdall.Prometheus\Heimdall.Prometheus.csproj" />
     <ProjectReference Include="..\..\src\Heimdall.AspNetCore\Heimdall.AspNetCore.csproj" />
+    <ProjectReference Include="..\..\src\Heimdall.Sinks.Serilog\Heimdall.Sinks.Serilog.csproj" />
     <ProjectReference Include="..\..\src\Heimdall.Blazor\Heimdall.Blazor.csproj" />
     <!-- Host ist net10-only (Microsoft.NET.Sdk.Web) -> ProjectReference bedingt, sonst net8/9-Compile-Bruch. -->
     <ProjectReference Include="..\..\host\Heimdall.Host\Heimdall.Host.csproj" Condition="'$(TargetFramework)' == 'net10.0'" />

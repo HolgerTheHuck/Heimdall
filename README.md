@@ -62,6 +62,7 @@ Signaturen ein. Version `1.1.0`, Target-Frameworks `net8.0;net9.0;net10.0`.
 | `Heimdall.Prometheus` | PromQL-Engine + Prometheus-HTTP-API (`/api/v1/*`) + RED-Ableitung aus Spans. Storage-agnostisch. |
 | `Heimdall.Blazor` | Die Web-UI: Traces/Logs/Metriken/Endpoints/Dashboards/Alerts, server-gerendert. **Enthält das Alarm-Subsystem.** |
 | `Heimdall.AspNetCore.Enrichment` | Dünne Middleware: taggt den OTel-Server-Span mit `aspnetmvc.controller/action/route` für den Controller/Endpoint-Drilldown. _(Paket-ID; Namespace bleibt `Heimdall.AspNetCore`.)_ |
+| `Serilog.Sinks.Heimdall` | Serilog-Sink für bestehende Serilog-Pipelines: `WriteTo.Heimdall(sink)` schreibt direkt in den `IHeimdallSink` (embedded), `WriteTo.HeimdallHttp(endpoint)` posted OTLP/Protobuf an einen Heimdall-Server. Interne Abbildung läuft über das OTLP-Datenmodell — Logs only (Traces/Metriken über das OTel-SDK). |
 
 ---
 

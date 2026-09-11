@@ -39,10 +39,13 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- OtlpConvert ist internal; sichtbar für die HTTP- und gRPC-Receiver sowie Tests. -->
+    <!-- OtlpConvert ist internal; sichtbar für die HTTP- und gRPC-Receiver, den
+         Serilog-Sink (gleiche OTLP→Heimdall-Konvertierung, keine zweite Abbildung)
+         sowie Tests. -->
     <InternalsVisibleTo Include="Heimdall.Tests" />
     <InternalsVisibleTo Include="Heimdall.Otlp" />
     <InternalsVisibleTo Include="Heimdall.Otlp.Grpc" />
+    <InternalsVisibleTo Include="Serilog.Sinks.Heimdall" />
   </ItemGroup>
 
 </Project>

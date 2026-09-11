@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFrameworks>net8.0;net9.0;net10.0</TargetFrameworks>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <!-- Assembly/PackageId folgt der Serilog-Sink-Konvention (Serilog.Sinks.*),
+         damit der Sink in Serilog-Listen und via dotnet add package gefunden wird;
+         der Ordnername folgt der Repo-Konvention Heimdall.* (Präzedenz:
+         Heimdall.AspNetCore → Heimdall.AspNetCore.Enrichment). -->
+    <RootNamespace>Serilog.Sinks.Heimdall</RootNamespace>
+    <AssemblyName>Serilog.Sinks.Heimdall</AssemblyName>
+    <IsPackable>true</IsPackable>
+    <PackageId>Serilog.Sinks.Heimdall</PackageId>
+    <Description>Serilog sink for Heimdall: WriteTo.Heimdall(sink) for the embedded in-process path (directly on IHeimdallSink) or WriteTo.HeimdallHttp(endpoint) for a standalone Heimdall server via OTLP/HTTP. Internally maps Serilog log events to the OTLP data model — the same one mapping layer as the OTLP receiver, no separate schema.</Description>
+    <PackageTags>serilog;serilog-sink;logging;heimdall;otel;opentelemetry;otlp;telemetry;embedded</PackageTags>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Serilog 4 hat natives Batching (IBatchedLogEventSink + WriteTo.Sink) —
+         Serilog.Sinks.PeriodicBatching ist nur noch Kompatibilitäts-Modus. -->
+    <PackageReference Include="Serilog" Version="4.4.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Heimdall.Abstractions\Heimdall.Abstractions.csproj" />
+    <!-- OTLP-DTOs + OtlpConvert (internal, via IVT): der Sink erzeugt in-memory
+         ExportLogs-Requests und füttert dieselbe Konvertierung wie die Receiver —
+         genau EINE Abbildungsschicht Serilog→OTLP→Heimdall. -->
+    <ProjectReference Include="..\Heimdall.Otlp.Proto\Heimdall.Otlp.Proto.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Tests greifen auf die internen Mapper-/Transmitter-Klassen zu. -->
+    <InternalsVisibleTo Include="Heimdall.Tests" />
+  </ItemGroup>
+
+</Project>

@@ -7,6 +7,24 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+### Hinzugefügt
+- **`Serilog.Sinks.Heimdall`** — Serilog-Sink für bestehende Serilog-Pipelines
+  (Adoption-Trichter; Serilog kann selbst keine Metriken und Traces nur über
+  die SerilogTracing-Brücke, deshalb deckt der Sink bewusst nur Logs ab).
+  Zwei Modi: `WriteTo.Heimdall(sink)` schreibt In-proc direkt in den
+  `IHeimdallSink` (embedded, kein Port/HTTP), `WriteTo.HeimdallHttp(endpoint)`
+  posted OTLP/Protobuf an die `/v1/logs`-URL eines Heimdall-Servers. Intern
+  mappt der Sink Serilog → OTLP-Datenmodell und füttert dieselbe
+  `OtlpConvert`-Konvertierung wie die Receiver — genau eine neue
+  Abbildungsschicht, kein zweiter Ingest-Pfad Richtung Storage. Batching über
+  Serilogs natives `IBatchedLogEventSink` (Serilog 4, kein
+  PeriodicBatching-Paket); werferfrei (Fehler gehen an `SelfLog`). Konventionen
+  an `Serilog.Sinks.OpenTelemetry` angelehnt: Body = gerenderte Message,
+  Template als `serilog.template`-Attribut, Exception über
+  `exception.type/message/stacktrace`, `SourceContext` → Scope-Name.
+  Dokumentierte Restverluste: decimal → double, ulong-Overflow → String,
+  Guid/DateTime/TimeSpan → String, null-Attribute entfallen.
+
 ## [1.4.0] — 2026-09-11
 
 ### Hinzugefügt
