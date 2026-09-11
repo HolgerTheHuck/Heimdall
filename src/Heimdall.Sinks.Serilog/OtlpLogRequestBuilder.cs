@@ -165,7 +165,10 @@ internal static class OtlpLogRequestBuilder
         _ => "FATAL",
     };
 
-    private static ulong ToUnixNano(DateTimeOffset ts) => (ulong)(ts.UtcTicks * 100);
+    // Unix-Epoche abziehen, sonst overflowt ticks*100 (Ticks zählen ab Jahr 1!)
+    // und die Logs landen bei ~1970 → im Zeitfilter unsichtbar.
+    private static ulong ToUnixNano(DateTimeOffset ts)
+        => (ulong)((ts.UtcTicks - DateTimeOffset.UnixEpoch.Ticks) * 100);
 
     // ---------------------------------------------------------------------
     // Wert-Mapping: LogEventPropertyValue → AnyValue

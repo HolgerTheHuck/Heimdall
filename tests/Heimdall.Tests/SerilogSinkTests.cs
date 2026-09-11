@@ -89,6 +89,18 @@ public class SerilogSinkTests
     }
 
     [Fact]
+    public void Timestamp_Is_Unix_Nano_Now_Not_Ticks_Overflow()
+    {
+        // Regression: ticks*100 ohne Epoch-Abzug overflowt ulong → Logs bei ~1970,
+        // im Zeitfilter unsichtbar. Erwartet: Unix-Ns des Event-Timestamps
+        // (2026-09-11T12:00:00Z), Größenordnung ~1.79e18 — nicht ein Wrap-around.
+        var ts = new DateTimeOffset(2026, 9, 11, 12, 0, 0, TimeSpan.Zero);
+        var r = MapOne(MakeEvent(LogEventLevel.Information, "x"));
+
+        Assert.Equal((ts.UtcTicks - DateTimeOffset.UnixEpoch.Ticks) * 100, r.TimeUnixNano);
+    }
+
+    [Fact]
     public void Body_Is_Rendered_Message_And_Template_Lands_As_Attribute()
     {
         var e = MakeEvent(LogEventLevel.Information, "Hello {Name}!", null,
