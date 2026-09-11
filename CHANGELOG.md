@@ -7,6 +7,56 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 
 ## [Unreleased]
 
+## [1.4.0] — 2026-09-11
+
+### Hinzugefügt
+- **Trace-Detail im Grafana-Stil: Zeitstrahl und Spans in einer Ansicht.** Der
+  separate SVG-Wasserfall über der Tabelle entfällt. Neu: die Spans-Tabelle
+  trägt eine Zeitstrahl-Spalte — Inline-Balken auf der gemeinsamen Trace-Achse
+  (Prozent-basiert, Span-Farben je Signal-Rolle: Server/Client/Producer/
+  Consumer, Fehler-Override), Zeilen in DFS-Preorder eingerückt (Parent vor
+  Child). Darüber ein per `<details>` einklappbares Histogramm der Span-Starts
+  (offen by default, native Tooltips). `HeimdallTraceWaterfall` ist damit
+  Layout-Helfer (Order/TraceRange/Histogram/BarStyle/Indent, invariant
+  formatiert, nie werfend) statt SVG-Renderer — mit eigenen Unit-Tests.
+- **Attribute in der Trace-Tabelle aufklappen: Klick in die ganze Zeile**, nicht
+  nur am ATTRS-Summary; das Spaltenlayout bleibt stabil (`table-layout: fixed`).
+  Der aufgeklappte Inhalt **wächst mit**: die Zeile bekommt per JS padding
+  in Panelhöhe, die Zeilen darunter werden nach unten geschoben statt
+  überlagert (Panel-Cap 60vh mit internem Scroll, Re-Messung bei
+  Fenstergrößenänderung; ohne JS schwebt das Panel wie bisher).
+- **Logs als eigener Top-Level-Tab in der Navigation.** Die Logs-Suche ist der
+  Hauptweg bei der Fehleranalyse und war hinter dem Drilldown-Sprungknoten
+  versteckt; jetzt direkt zwischen Endpoints und Drilldown. Der Drilldown
+  behält Traces + Metriken (Landing-Karte, Subtitle angepasst).
+- **DEBUG+ im Severity-Filter der Logs-Seite** (OTLP-Severity-Skala, Level 5,
+  vor INFO+ einsortiert).
+
+### Geändert
+- **Redundante Tabellen-Captions visuell versteckt** (bewährtes `hmd-vh`-Muster
+  aus der Alert-Detailseite): Captions, die eine unmittelbar darüber stehende
+  Überschrift wortgleich wiederholen (Drilldown-Tabellen unter ihrem `<h1>`,
+  Dashboard-/Home-Panels, Endpoints, Grafana-Editor unter gleichlautenden
+  `<legend>`s), kosteten eine Zeile ohne Information — in den Drilldowns fiel
+  die Doppelung „Logs → Filter → Logs" besonders auf. Captions bleiben für
+  Screenreader; sichtbar bleiben die informationshaltigen (Metrics
+  „Roh-Tabelle", Alerts „Alarmregeln").
+- **Zeit-Preset-Namen i18nisiert:** „15 Minuten", „1 Stunde" usw. hingen
+  hart-deutsch im Markup; jetzt Keys `timerange.preset.*` und
+  `timerange.window.ns` (de-Fassungen wortwörtlich aus den bisherigen
+  Literalen).
+
+### Behoben
+- **Statisches CSS/JS nach Updates: Browser-Cache zeigt alte Fassungen.** Die
+  Assets liefen nur über ETag/Last-Modified — Browser cachen heuristisch und
+  zeigen nach einem Deploy wochenlang alte Styles/Scripts (am IIS-Proxy kommt
+  ein Output-Cache hinzu, der `no-store` ignoriert). Die Asset-URLs in
+  `HeimdallHead`/`GrafanaPanelFragment` tragen jetzt `?v=<Assembly-Version>`
+  — jeder Release bricht den Cache automatisch.
+- **Service-Combobox ragte ~4px über die Nachbarfelder** der Filterleiste (das
+  `summary` erbte die Basis-`line-height` 1.55, native select/input rechnen
+  intern mit ~1.25) — auf gemeinsame Höhe angeglichen.
+
 ## [1.3.1] — 2026-09-02
 
 ### Behoben
