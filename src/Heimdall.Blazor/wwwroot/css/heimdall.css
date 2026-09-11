@@ -255,6 +255,10 @@ a:hover { text-decoration: underline; }
     border-radius: 4px;
     padding: .3rem .4rem;
     font-size: .85rem;
+    /* gleiche Höhe wie die nativen .hmd-filters-Controls: select/input rechnen
+       intern mit ~1.25 — die geerbte Basis-Zeilenhöhe (1.55) macht das Summary
+       sonst ~4px höher als die Nachbarfelder. */
+    line-height: 1.25;
     font-weight: 400;
     text-transform: none;
     letter-spacing: normal;
