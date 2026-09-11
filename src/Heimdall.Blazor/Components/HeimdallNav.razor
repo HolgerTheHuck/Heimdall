@@ -14,7 +14,10 @@
         <a href="@(BasePath + "/dashboard")" aria-current="@Active("/dashboard")">@I18n.T("nav.monitoring")</a>
         <a href="@(BasePath + "/dashboards")" aria-current="@Active("/dashboards")">@I18n.T("nav.dashboards")</a>
         <a href="@(BasePath + "/endpoints")" aria-current="@Active("/endpoints")">@I18n.T("nav.endpoints")</a>
-        <a href="@(BasePath + "/drilldown")" aria-current="@ActiveAny("/traces", "/logs", "/metrics")">@I18n.T("nav.drilldown")</a>
+        @* Logs als eigener Tab: Hauptweg bei der Fehleranalyse — nicht hinter
+           dem Drilldown-Sprungknoten verstecken (Grafana-Pendant: Explore). *@
+        <a href="@(BasePath + "/logs")" aria-current="@Active("/logs")">@I18n.T("nav.logs")</a>
+        <a href="@(BasePath + "/drilldown")" aria-current="@ActiveAny("/traces", "/metrics")">@I18n.T("nav.drilldown")</a>
         <a href="@(BasePath + "/alerts")" aria-current="@Active("/alerts")">@I18n.T("nav.alerts")</a>
     </nav>
     <div class="hmd-lang" role="group" aria-label="@I18n.T("nav.flag.group")">
@@ -81,7 +84,8 @@
     }
 
     /// <summary>Wie Active, markiert aber den Eltern-Tab, wenn EINER der
-    /// Sub-Pfade aktiv ist (Drilldown-Gruppe: Traces/Logs/Metriken).</summary>
+    /// Sub-Pfade aktiv ist (Drilldown-Gruppe: Traces/Metriken — Logs ist
+    /// eigener Tab).</summary>
     private string? ActiveAny(params string[] tabSuffixes)
     {
         foreach (var s in tabSuffixes)

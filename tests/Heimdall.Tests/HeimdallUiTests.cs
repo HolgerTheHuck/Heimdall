@@ -72,9 +72,10 @@ public class HeimdallUiTests : HostBootTestBase
     public async Task Nav_MarkiertAktivenTabLogs()
     {
         var body = await (await Client.GetAsync("/otel/logs")).Content.ReadAsStringAsync();
-        // Traces/Logs/Metriken hängen unter dem Drilldown-Tab (Gruppe); auf /logs
-        // ist der Drilldown-Tab aktiv, nicht ein eigener Logs-Tab.
-        Assert.Contains("href=\"/otel/drilldown\" aria-current=\"page\"", body);
+        // Logs ist eigener Top-Level-Tab (Hauptweg der Fehleranalyse); auf /logs
+        // ist dieser aktiv, nicht der Drilldown-Tab.
+        Assert.Contains("href=\"/otel/logs\" aria-current=\"page\"", body);
+        Assert.DoesNotContain("href=\"/otel/drilldown\" aria-current=\"page\"", body);
         // Übersicht-Tab (Root) darf auf /logs nicht aktiv sein.
         Assert.DoesNotContain("href=\"/otel\" aria-current=\"page\"", body);
     }

@@ -19,6 +19,9 @@
         <label>@I18n.T("logs.filter.severity")
             <select name="sev">
                 <option value="" selected="@(MinSeverity is null)">@I18n.T("traces.status.all")</option>
+                @* OTLP-Severity-Skala: Trace=1, Debug=5, Info=9, Warn=13, Error=17, Fatal=21.
+                   "X+" = Mindestlevel (Backend filtert >=). *@
+                <option value="5"  selected="@(MinSeverity == 5)">DEBUG+</option>
                 <option value="9"  selected="@(MinSeverity == 9)">INFO+</option>
                 <option value="13" selected="@(MinSeverity == 13)">WARN+</option>
                 <option value="17" selected="@(MinSeverity == 17)">ERROR+</option>

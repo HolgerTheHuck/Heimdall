@@ -45,6 +45,7 @@ public static class HeimdallI18n
         ["nav.monitoring"]      = Lang("Monitoring", "Monitoring", "Surveillance"),
         ["nav.dashboards"]      = Lang("Dashboards", "Dashboards", "Tableaux de bord"),
         ["nav.endpoints"]       = Lang("Endpoints", "Endpoints", "Endpoints"),
+        ["nav.logs"]            = Lang("Logs", "Logs", "Logs"),
         ["nav.drilldown"]       = Lang("Drilldown", "Drilldown", "Exploration"),
         ["nav.alerts"]          = Lang("Alerts", "Alerts", "Alertes"),
 
@@ -196,7 +197,7 @@ public static class HeimdallI18n
         ["endpoint.err.rulename"]       = Lang("Regelname fehlt", "Rule name missing", "Nom de règle manquant"),
 
         // --- Drilldown -------------------------------------------------------
-        ["drilldown.subtitle"]   = Lang("Signal-Detailseiten — Spans, Logs und Metriken einzeln inspizieren", "Signal detail pages — inspect spans, logs and metrics individually", "Pages de détail des signaux — inspecter spans, logs et métriques individuellement"),
+        ["drilldown.subtitle"]   = Lang("Signal-Detailseiten — Traces und Metriken einzeln inspizieren", "Signal detail pages — inspect traces and metrics individually", "Pages de détail des signaux — inspecter traces et métriques individuellement"),
 
         // --- Traces-Seite ----------------------------------------------------
         ["traces.filter.name"]    = Lang("Name enthält", "Name contains", "Le nom contient"),
