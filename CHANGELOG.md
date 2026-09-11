@@ -8,6 +8,26 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Depot-Übersicht (Storage-Stats) als eigener Nav-Tab** (`/depot`, embedded und
+  Host): KPI-Zeile (DB-Datei, WAL, Freelist, belegte Bytes gegen das Cap),
+  Verbrauch je Tabelle/-gruppe (Spans, Logs, Metrics, Serien, Rollup,
+  Attr-Indizes, FTS) und die effektive Retention-/Cap-Konfiguration — inkl.
+  Kennzeichnung des impliziten 5-GB-Host-Defaults für `MaxBytes`.
+  Neu: `IHeimdallQuery.GetDepotStats()` (additiv, `DepotStats`/`DepotTableStats`).
+  Größenermittlung bevorzugt `dbstat` (echte Pages je Objekt); das gebündelte
+  e_sqlite3 von Microsoft.Data.Sqlite bietet dbstat nicht — dann fällt die
+  Tabelle auf die logische Datenmenge je Tabelle zurück (SUM der Spaltenlängen,
+  in der UI als Schätzung gekennzeichnet; Datei-/PRAGMA-Werte bleiben exakt).
+- **`FullVacuumMinutes`** (SQLite-Options + Host `Heimdall:Storage`, Default 0 =
+  aus): periodisches Full-VACUUM nach dem Retention-Sweep (Opt-In) — defragmen-
+  tiert über die Freelist hinaus. Der normale `incremental_vacuum`-Reclaim bleibt
+  der Standardpfad; Full-VACUUM braucht ca. 2× Dateigröße freien Platz und den
+  exklusiven Schreiber. Zusätzlich checkpointet der Sweeper die WAL nach jedem
+  Reclaim (`wal_checkpoint(TRUNCATE)`), damit Lösch-Volume nicht in der -wal-
+  Datei stehen bleibt. Dauer des letzten VACUUMs als
+  `heimdall.host.vacuum.duration` (Gauge, Sekunden).
+- **`heimdall.storage.compression.saved`** (Gauge, Bytes): durch die Brotli-
+  Kompression eingesparte Bytes, kumulativ seit Start.
 - **`Serilog.Sinks.Heimdall`** — Serilog-Sink für bestehende Serilog-Pipelines
   (Adoption-Trichter; Serilog kann selbst keine Metriken und Traces nur über
   die SerilogTracing-Brücke, deshalb deckt der Sink bewusst nur Logs ab).
@@ -24,6 +44,21 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
   `exception.type/message/stacktrace`, `SourceContext` → Scope-Name.
   Dokumentierte Restverluste: decimal → double, ulong-Overflow → String,
   Guid/DateTime/TimeSpan → String, null-Attribute entfallen.
+
+### Geändert
+- **⚠ Format-Wechsel: JSON-Spalten als Brotli-komprimierte BLOBs
+  (`user_version=2`).** Attrs/Events/Links/Resource-JSONs von Spans und Logs
+  sowie die Histogramm-Spalten (`bucket_counts_json`, `explicit_bounds_json`
+  inkl. Rollup) werden ab sofort immer als Brotli-BLOB gespeichert (0x01-Magic
+  + Brotli-Stream) — typischerweise 80–95 % kleiner als TEXT; bei ~1 GB
+  Testbestand liegt der Großteil des Volumens in diesen Spalten. `heim_metric_
+  series` bleibt bewusst TEXT (byte-gleiche UNIQUE-Equality der Serien), FTS
+  ist unberührt (indiziert nur name/body). **Keine Migration vorgesehen:**
+  bestehende DBs (TEXT-Format) sind mit dem neuen Code nicht lesbar (strenger
+  BLOB-only-Pfad) und umgekehrt alte Binaries nicht mit neuen DBs (heimd_unzip
+  fehlt) — DB-Datei löschen und neu anfangen. Die Depot-Seite zeigt die Ratio
+  (Original → komprimiert) und die Attr-Index-Trigger dekomprimieren
+  transparent per `heimd_unzip`-UDF auf der Write-Verbindung.
 
 ## [1.4.0] — 2026-09-11
 

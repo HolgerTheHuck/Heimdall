@@ -152,6 +152,52 @@ public sealed record SignalVolumePoint(
     long Logs,
     long Metrics);
 
+/// <summary>Speicherverbrauch einer Tabelle/-gruppe im Depot.
+/// <c>Bytes = -1</c>, wenn das Backend keine Größenermittlung anbieten kann
+/// (z. B. fehlt <c>dbstat</c> in der gebundenen SQLite-Bibliothek) — die UI
+/// zeigt dann „—". <c>Rows = -1</c> bei gruppierten/kombinierten Einträgen
+/// (z. B. FTS-Shadow-Tabellen), deren Zeilenzahl nicht sinnvoll ist.</summary>
+public sealed record DepotTableStats(string Table, long Rows, long Bytes);
+
+/// <summary>Depot-Übersicht (Storage-Stats): Dateigrößen, Page-Statistik,
+/// Verbrauch je Tabelle/-gruppe und die effektive Retention-/Cap-Konfiguration
+/// (Host-Defaults eingerechnet — der 5-GB-Default des Hosts wird erst beim
+/// Sink-Bau gesetzt und ist in den Options-POCOs unsichtbar). Additiv als
+/// Default-Interface-Method -> nicht-brechend; Default-Implementierung liefert
+/// eine leere, als „nicht verfügbar" erkennbare Struktur.</summary>
+public sealed record DepotStats(
+    long FileBytes,
+    long WalBytes,
+    long PageSize,
+    long PageCount,
+    long FreelistCount,
+    long FreelistBytes,
+    long UsedBytes,
+    long TotalLogicalBytes,
+    IReadOnlyList<DepotTableStats> Tables,
+    bool DbStatAvailable,
+    /// <summary>Kompressions-Buchhaltung (Brotli auf JSON-Blobs): true = aktiv.</summary>
+    bool CompressionEnabled,
+    long CompressedStoredBytes,
+    long CompressedRawBytes,
+    /// <summary>Effektive Konfiguration (Cap/Retention/Sweep/Rollup) für die UI-Hinweise.</summary>
+    long MaxBytes,
+    int TracesDays,
+    int LogsDays,
+    int MetricsDays,
+    int SweepMinutes,
+    bool RollupEnabled,
+    int RollupSeconds)
+{
+    /// <summary>Leere Default-Implementierung (Backend ohne Depot-Sicht): alles 0/false,
+    /// DbStatAvailable=false — die UI erkennt daran den „nicht verfügbar"-Zustand.</summary>
+    public static DepotStats Empty { get; } = new(
+        0, 0, 0, 0, 0, 0, 0, 0,
+        System.Array.Empty<DepotTableStats>(), false,
+        false, 0, 0,
+        0, 0, 0, 0, 0, false, 0);
+}
+
 /// <summary>Leseseite; pro Backend eine Implementierung.</summary>
 public interface IHeimdallQuery
 {
@@ -198,4 +244,10 @@ public interface IHeimdallQuery
     IReadOnlyList<SignalVolumePoint> ListSignalVolume(
         long fromUnixNano, long toUnixNano, long bucketUnixNano)
         => System.Array.Empty<SignalVolumePoint>();
+
+    /// <summary>Depot-Übersicht: Dateigrößen (DB + WAL), Page-/Freelist-Statistik,
+    /// Verbrauch je Tabelle/-gruppe und die effektive Retention-/Cap-Konfiguration.
+    /// Basis für die Depot-Seite der UI. Default-Implementierung = <see cref="DepotStats.Empty"/>
+    /// -> additiv, nicht-brechend für bestehende Implementierer.</summary>
+    DepotStats GetDepotStats() => DepotStats.Empty;
 }

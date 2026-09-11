@@ -49,8 +49,10 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         names.Add(MRetentionEvicted);
         names.Add(MStorageBytes);
         names.Add(MStorageRows);
+        names.Add(MStorageCompSaved);
         names.Add(MHostIngest);
         names.Add(MHostSweepDuration);
+        names.Add(MHostVacuumDuration);
         return names;
     }
 
@@ -160,12 +162,12 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         {
             while (r.Read())
             {
-                var labels = ParseLabels(NStr(r, 12), NStr(r, 13));
+                var labels = ParseLabels(NStr(r, 12), NStr(r, 13));   // Serie: TEXT (unkomprimiert)
                 if (!Matches(labels, query.Matchers)) continue;
                 list.Add(new HMetricPointView(
                     r.GetString(0), NStr(r, 1), (HMetricType)r.GetInt32(2), (HTemporality)r.GetInt32(3), r.GetInt64(4), r.GetDouble(5),
                     NLong(r, 6), NDouble(r, 7), NDouble(r, 8), NDouble(r, 9),
-                    ParseLongs(NStr(r, 10)), ParseDoubles(NStr(r, 11)),
+                    ParseLongs(NJson(r, 10)), ParseDoubles(NJson(r, 11)),   // Histogramm-JSONs: Brotli-BLOB
                     labels, NStr(r, 14)));
             }
         }
@@ -346,15 +348,17 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
     private const string MRetentionEvicted = "heimdall.retention.evicted";
     private const string MStorageBytes = "heimdall.storage.bytes";
     private const string MStorageRows = "heimdall.storage.rows";
+    private const string MStorageCompSaved = "heimdall.storage.compression.saved";
     private const string MHostIngest = "heimdall.host.ingest";
     private const string MHostSweepDuration = "heimdall.host.sweep.duration";
+    private const string MHostVacuumDuration = "heimdall.host.vacuum.duration";
     private const string LSignal = "signal";
     private const string ScopeHeimdall = "heimdall";
 
     private static readonly HashSet<string> HeimdallMetricNames = new(StringComparer.Ordinal)
     {
         MRetentionDeleted, MRetentionEvicted, MStorageBytes, MStorageRows,
-        MHostIngest, MHostSweepDuration
+        MStorageCompSaved, MHostIngest, MHostSweepDuration, MHostVacuumDuration
     };
 
     private static bool IsHeimdallMetric(string name) => HeimdallMetricNames.Contains(name);
@@ -392,6 +396,17 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
                     AddSignalPoints(list, n, now, matchers, HMetricType.Gauge, HTemporality.Unspecified,
                         CountSpans(), CountLogs(), CountMetrics());
                     break;
+                case MStorageCompSaved:
+                {
+                    // Format v2: durch Brotli-Kompression eingesparte Bytes
+                    // (Original-JSON minus BLOB auf Platte, kumulativ seit Start).
+                    var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+                    if (Matches(labels, matchers))
+                        list.Add(new HMetricPointView(n, "By", HMetricType.Gauge, HTemporality.Unspecified,
+                            now, Math.Max(0, Interlocked.Read(ref _compRawBytes) - Interlocked.Read(ref _compStoredBytes)),
+                            null, null, null, null, null, null, labels, ScopeHeimdall));
+                    break;
+                }
                 case MHostIngest:
                     // C3: ingested-Volume pro Signal (Sum/Cumulative; Prom → *_total).
                     AddSignalPoints(list, n, now, matchers, HMetricType.Sum, HTemporality.Cumulative,
@@ -406,6 +421,19 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
                     if (Matches(labels, matchers))
                     {
                         double seconds = new TimeSpan(Interlocked.Read(ref _hostSweepDurationTicks)).TotalSeconds;
+                        list.Add(new HMetricPointView(n, "s", HMetricType.Gauge, HTemporality.Unspecified,
+                            now, seconds, null, null, null, null, null, null, labels, ScopeHeimdall));
+                    }
+                    break;
+                }
+                case MHostVacuumDuration:
+                {
+                    // Dauer des letzten Full-VACUUMs (Gauge, Sekunden; Prom → *_seconds).
+                    // 0, solange nie gelaufen (FullVacuumMinutes=0 oder Intervall nicht erreicht).
+                    var labels = new Dictionary<string, string>(StringComparer.Ordinal);
+                    if (Matches(labels, matchers))
+                    {
+                        double seconds = new TimeSpan(Interlocked.Read(ref _hostVacuumDurationTicks)).TotalSeconds;
                         list.Add(new HMetricPointView(n, "s", HMetricType.Gauge, HTemporality.Unspecified,
                             now, seconds, null, null, null, null, null, null, labels, ScopeHeimdall));
                     }

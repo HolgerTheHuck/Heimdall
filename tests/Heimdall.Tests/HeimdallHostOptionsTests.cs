@@ -41,6 +41,7 @@ public class HeimdallHostOptionsTests
         Assert.Equal(0, o.Storage.MaxBytes);              // 0 = unbegrenzt
         Assert.True(o.Storage.AutoVacuum);
         Assert.True(o.Storage.VacuumMigrateLegacy);
+        Assert.Equal(0, o.Storage.FullVacuumMinutes);     // Opt-In: aus
         Assert.True(o.Otlp.Http.Enabled);
         Assert.Equal("/otel", o.Otlp.Http.Prefix);
         Assert.True(o.Otlp.Grpc.Enabled);
@@ -72,6 +73,7 @@ public class HeimdallHostOptionsTests
               ""DataPath"": ""/data/otel.db"",
               ""RetentionDays"": 30,
               ""RetentionSweepMinutes"": 10,
+              ""FullVacuumMinutes"": 120,
               ""WalMode"": false
             },
             ""Otlp"": {
@@ -92,6 +94,7 @@ public class HeimdallHostOptionsTests
         Assert.Equal("/data/otel.db", o.Storage.DataPath);
         Assert.Equal(30, o.Storage.RetentionDays);
         Assert.Equal(10, o.Storage.RetentionSweepMinutes);
+        Assert.Equal(120, o.Storage.FullVacuumMinutes);
         Assert.False(o.Storage.WalMode);
 
         Assert.False(o.Otlp.Http.Enabled);

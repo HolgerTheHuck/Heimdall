@@ -188,6 +188,8 @@ static void ValidateOptions(HeimdallHostOptions o)
         throw new InvalidOperationException("Heimdall:Storage:MaxBytes darf nicht negativ sein (0 = unbegrenzt).");
     if (o.Storage.RetentionSweepMinutes < 0)
         throw new InvalidOperationException("Heimdall:Storage:RetentionSweepMinutes darf nicht negativ sein (0 = deaktiviert).");
+    if (o.Storage.FullVacuumMinutes < 0)
+        throw new InvalidOperationException("Heimdall:Storage:FullVacuumMinutes darf nicht negativ sein (0 = aus).");
     var rollup = o.Storage.Rollup;
     if (rollup is not null)
     {
@@ -237,6 +239,7 @@ static (IHeimdallSink Sink, IHeimdallQuery Query, IHeimdallMetricSource Metrics,
             },
             MaxBytes = o.Storage.MaxBytes > 0 ? o.Storage.MaxBytes : 5L * 1024 * 1024 * 1024,   // Default 5 GB, falls nicht gesetzt
             RetentionSweepMinutes = o.Storage.RetentionSweepMinutes,
+            FullVacuumMinutes = o.Storage.FullVacuumMinutes,
             WalMode = o.Storage.WalMode,
             AutoVacuum = o.Storage.AutoVacuum,
             VacuumMigrateLegacy = o.Storage.VacuumMigrateLegacy,

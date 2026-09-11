@@ -76,6 +76,14 @@ public sealed class HeimdallStorageOptions
     /// <summary>Intervall des Retention-Sweepers (Minuten). 0 = deaktiviert. Default 30.</summary>
     public int RetentionSweepMinutes { get; set; } = 30;
 
+    /// <summary>
+    /// SQLite: Intervall für periodisches Full-VACUUM (Minuten) nach dem
+    /// Retention-Sweep; 0 = aus (Default). incremental_vacuum bleibt der
+    /// Normalpfad — Full-VACUUM defragmentiert darüber hinaus, ist aber teuer
+    /// (ca. 2× Dateigröße freien Platz + exklusiven Schreiber). Opt-In.
+    /// </summary>
+    public int FullVacuumMinutes { get; set; }
+
     /// <summary>SQLite: WAL-Modus + foreign_keys. Default true.</summary>
     public bool WalMode { get; set; } = true;
 

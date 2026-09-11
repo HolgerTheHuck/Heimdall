@@ -48,4 +48,19 @@ internal static class HeimdallFmt
 
     public static string Truncate(string? s, int n) =>
         s is null ? string.Empty : (s.Length <= n ? s : s.Substring(0, n) + "…");
+
+    /// <summary>Byte-Zahl -> menschlich (B/KB/MB/GB/TB, binär 1024).
+    /// Negative Werte (Backend liefert -1 = nicht verfügbar) -> "—".</summary>
+    public static string Bytes(long b)
+    {
+        if (b < 0) return "—";
+        if (b < 1_024) return b.ToString(CultureInfo.InvariantCulture) + " B";
+        double kb = b / 1024.0;
+        if (kb < 1_024) return kb.ToString("0.##", CultureInfo.InvariantCulture) + " KB";
+        double mb = kb / 1024.0;
+        if (mb < 1_024) return mb.ToString("0.##", CultureInfo.InvariantCulture) + " MB";
+        double gb = mb / 1024.0;
+        if (gb < 1_024) return gb.ToString("0.##", CultureInfo.InvariantCulture) + " GB";
+        return (gb / 1024.0).ToString("0.###", CultureInfo.InvariantCulture) + " TB";
+    }
 }

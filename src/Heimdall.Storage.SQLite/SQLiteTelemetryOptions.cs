@@ -37,6 +37,16 @@ public sealed class SQLiteTelemetryOptions
     /// <summary>Intervall des Retention-Sweepers (Minuten). 0 = Sweep deaktiviert. Default 30.</summary>
     public int RetentionSweepMinutes { get; set; } = 30;
 
+    /// <summary>
+    /// Intervall für periodisches <c>VACUUM</c> (Minuten) nach dem Retention-Sweep;
+    /// 0 = aus (Default). <c>incremental_vacuum</c> bleibt der Normalpfad (gibt nur
+    /// Freelist-Pages zurück); ein Full-VACUUM defragmentiert darüber hinaus und
+    /// verkleinert die Datei auch bei Fragmentierung — ist aber teuer (braucht
+    /// ca. 2× Dateigröße freien Platz) und braucht exklusiven Schreibzugriff.
+    /// Darum Opt-In — Bestands-Deployments bleiben unverändert.
+    /// </summary>
+    public int FullVacuumMinutes { get; set; }
+
     /// <summary>SQLite-Verbindung zusatzlich geoeffnet mit foreign_keys=ON und WAL.</summary>
     public bool WalMode { get; set; } = true;
 
@@ -96,7 +106,7 @@ public sealed class SQLiteTelemetryOptions
 
     /// <summary>
     /// Wirft bei ungueltigen Werten. Authoritativ (deckt Embedded-Nutzung ohne
-    /// Host-Validierung). Negativ-Fristen, MaxBytes&lt;0, SweepMinutes&lt;0,
+    /// Host-Validierung). Negativ-Fristen, MaxBytes&lt;0, SweepMinutes&lt;0, FullVacuumMinutes&lt;0,
     /// Rollup-Auflösung/Raw-Tage, Raw&gt;MetricsDays.
     /// </summary>
     public void Validate()
@@ -116,6 +126,9 @@ public sealed class SQLiteTelemetryOptions
         if (RetentionSweepMinutes < 0)
             throw new InvalidOperationException(
                 $"Heimdall:Storage:RetentionSweepMinutes „{RetentionSweepMinutes}“ ungültig — negativ nicht erlaubt (0 = Sweep deaktiviert).");
+        if (FullVacuumMinutes < 0)
+            throw new InvalidOperationException(
+                $"Heimdall:Storage:FullVacuumMinutes „{FullVacuumMinutes}“ ungültig — negativ nicht erlaubt (0 = aus).");
         if (Rollup is not null)
         {
             if (Rollup.ResolutionSeconds <= 0)

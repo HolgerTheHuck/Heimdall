@@ -19,6 +19,9 @@
         <a href="@(BasePath + "/logs")" aria-current="@Active("/logs")">@I18n.T("nav.logs")</a>
         <a href="@(BasePath + "/drilldown")" aria-current="@ActiveAny("/traces", "/metrics")">@I18n.T("nav.drilldown")</a>
         <a href="@(BasePath + "/alerts")" aria-current="@Active("/alerts")">@I18n.T("nav.alerts")</a>
+        @* Depot als eigener Tab: Operator-Materie (Dateigrößen, Tabellen,
+           Retention/Cap) — auf der Übersicht zu dicht für die Signal-Sicht. *@
+        <a href="@(BasePath + "/depot")" aria-current="@Active("/depot")">@I18n.T("nav.depot")</a>
     </nav>
     <div class="hmd-lang" role="group" aria-label="@I18n.T("nav.flag.group")">
         @foreach (var l in Heimdall.Blazor.HeimdallI18n.Languages)

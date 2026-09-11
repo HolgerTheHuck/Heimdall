@@ -385,9 +385,34 @@ Alternativ nutzt ihr ein echtes Grafana mit Heimdall als Prometheus-Datenquelle
   Sweep-Latenz (`heimdall.host.sweep.duration`, Prom `*_seconds`); in-memory, nicht
   in `heim_metrics` gespeichert (kein Selbst-Feedback). Ergänzt A4
   (`heimdall.retention.*`/`heimdall.storage.*`).
+- **Depot-Übersicht:** eigener Nav-Tab `/depot` — Datei-/WAL-Größe, Freelist,
+  Belegung gegen das Cap, Verbrauch je Tabelle und die effektive
+  Retention-/Kompressions-Konfiguration auf einen Blick
+  (`IHeimdallQuery.GetDepotStats()`).
 - **Graceful Shutdown (C4):** Sink-Dispose nach Kestrel-Drain
   (`ApplicationStopped`); in-flight OTLP-Writes committen vor dem Verbindungs-
   Abbau; `IngestBuffer` draint beim Stopp vollständig.
+
+### Storage-Volumen (JSON-Kompression, Retention, VACUUM)
+
+Der dominierende Volumen-Faktor sind die JSON-Spalten (OTel-Attribute werden
+pro Zeile gespeichert). Heimdall speichert sie seit Format v2 **Brotli-
+komprimiert** (typisch 80–95 % kleiner als TEXT). Hinweise:
+
+- **Format v2 (`user_version=2`):** JSON-Spalten sind BLOBs — **keine
+  Abwärtskompatibilität**: eine bestehende DB (altes TEXT-Format) muss gelöscht
+  werden, ein Downgrade alter Binaries auf neue DBs funktioniert nicht.
+- **Retention** (`Heimdall:Storage:Retention:{Traces,Logs,Metrics}Days`, Default
+  im Host 3/14/30): TTL pro Signal; zusätzlich `MaxBytes` als hartes Cap mit
+  oldest-first-Eviction. Der Host setzt **implizit MaxBytes = 5 GB**, wenn nicht
+  konfiguriert. Nach jedem Reclaim: FTS-Rebuild, `incremental_vacuum` und
+  WAL-Checkpoint — die Datei schrumpft ohne manuelles Zutun.
+- **`FullVacuumMinutes`** (Default 0 = aus): periodisches Full-VACUUM nach dem
+  Sweep (Opt-In) für Fälle, in denen `incremental_vacuum` nicht genug
+  freischaufelt. Teuer (ca. 2× Dateigröße freien Platz, exklusiver Schreiber) —
+  Dauer als `heimdall.host.vacuum.duration` beobachtbar.
+- **Depot-Tab:** zeigt die Kompressions-Ratio (Original → BLOB, kumulativ seit
+  Start) und warnt bei großer WAL/Freelist bzw. drohender Cap-Erschöpfung.
 
 ---
 

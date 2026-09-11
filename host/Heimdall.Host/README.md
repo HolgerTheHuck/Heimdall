@@ -28,6 +28,7 @@ erhält den Bestand.
 | `Storage:RetentionDays` | `7` | 0 = unbegrenzt |
 | `Storage:WalMode` | `true` | SQLite WAL + foreign_keys |
 | `Storage:MaxBytes` | `0` (→ Host-Default 5 GB) | Harter Plafond über die DB-Datei; 0 = Host setzt 5 GB-Default (Plattenfüller-Schutz bei offenem Ingest), explizit 0 = unbegrenzt |
+| `Storage:FullVacuumMinutes` | `0` | Periodisches Full-VACUUM nach dem Retention-Sweep (Opt-In); 0 = aus. Teuer (2× Dateigröße freien Platz, exklusiver Schreiber) — `incremental_vacuum` bleibt der Normalpfad; Dauer: `heimdall.host.vacuum.duration` |
 | `Otlp:Http:Enabled` / `:Prefix` | `true` / `/otel` | OTLP/HTTP-Empfänger |
 | `Otlp:Http:MaxConcurrentRequests` | `32` | Admission-Control-Cap (C1); 0 = unbegrenzt; Überlauf → 429 |
 | `Otlp:Grpc:Enabled` | `true` | OTLP/gRPC-Empfänger (HTTP/2-Endpunkt 4317) |

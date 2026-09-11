@@ -46,6 +46,16 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     // heim_metrics gespeichert) — siehe SQLiteTelemetrySink.MetricSource.cs.
     private long _hostIngestSpans, _hostIngestLogs, _hostIngestMetrics;
     private long _hostSweepDurationTicks;   // Ticks des letzten realen Sweeps (Gauge).
+    private long _hostVacuumDurationTicks;  // Ticks des letzten Full-VACUUMs (Gauge).
+
+    // Kompressions-Buchhaltung (Format v2): Bytes der Brotli-BLOBs auf Platte
+    // (stored) vs. ursprüngliche JSON-Größe (raw) — Ratio → Depot-Seite +
+    // heimdall.storage.compression.saved. Nur Writes zählen (nach dem Decode).
+    private long _compStoredBytes, _compRawBytes;
+
+    // Letztes Full-VACUUM als UtcNow-Ticks (0 = noch nie) — Intervall-Gate für
+    // FullVacuumMinutes. Nur unter _gate berührt.
+    private long _lastFullVacuumUtcTicks;
 
     // Read-Connection-String mit Pooling=True: Reads nutzen gepoolte Verbindungen,
     // die WAL-konkurrent neben dem Writer laufen (vorher: eine Verbindung + globaler
@@ -89,6 +99,11 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             }
             return r.IsMatch(value);
         });
+        // Format v2: Dekompress-UDF für die Attr-Index-Trigger — json_each kann
+        // Brotli-BLOBs nicht lesen, drum zippt der Trigger per UDF zurück. Nur
+        // auf der Write-Verbindung nötig (Trigger feuern nur bei Writes); Reads
+        // dekomprimieren in C# (NJson), kein SQL-UDF im Read-Pfad.
+        _conn.CreateFunction("heimd_unzip", (object? v) => JsonBlob.Decode(v));
         if (_options.WalMode)
         {
             Exec("PRAGMA journal_mode=WAL;");
@@ -103,11 +118,12 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
 
         BootstrapSchema();
 
-        // Frische DB (jetzt mit Tabellen) auf user_version=1 heben. Legacy-DBs
-        // mit Notaus (nicht migriert) bleiben auf 0, damit sie spaeter noch
-        // migriert werden koennen.
+        // Frische DB (jetzt mit Tabellen) auf user_version=2 heben. Format-Marker:
+        // v2 = JSON-Spalten als Brotli-BLOB (JsonBlob). Legacy-DBs mit Notaus
+        // (nicht migriert) bleiben auf 0, damit sie spaeter noch migriert werden
+        // koennen; DBs auf v1 (TEXT-Format) sind NICHT kompatibel (kein Downgrade).
         if (_options.AutoVacuum && (int)PragmaLong("auto_vacuum") == 2 && PragmaLong("user_version") == 0)
-            Exec("PRAGMA user_version = 1;");
+            Exec("PRAGMA user_version = 2;");
 
         (_insSpan, _pSpan) = Prepare(SqlInsertSpan, 16);
         (_insLog, _pLog) = Prepare(SqlInsertLog, 10);
@@ -154,10 +170,10 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 _pSpan[7].Value = Math.Max(0, s.EndUnixNano - s.StartUnixNano);
                 _pSpan[8].Value = (int)s.StatusCode;
                 _pSpan[9].Value = (object?)s.StatusMessage ?? DBNull.Value;
-                _pSpan[10].Value = HeimdallJson.WriteAttributes(s.Attributes);
-                _pSpan[11].Value = HeimdallJson.WriteSpanEvents(s.Events);
-                _pSpan[12].Value = HeimdallJson.WriteSpanLinks(s.Links);
-                _pSpan[13].Value = s.Resource is null ? "{}" : HeimdallJson.WriteAttributes(s.Resource.Attributes);
+                _pSpan[10].Value = EncJson(HeimdallJson.WriteAttributes(s.Attributes));
+                _pSpan[11].Value = EncJson(HeimdallJson.WriteSpanEvents(s.Events));
+                _pSpan[12].Value = EncJson(HeimdallJson.WriteSpanLinks(s.Links));
+                _pSpan[13].Value = EncJson(s.Resource is null ? "{}" : HeimdallJson.WriteAttributes(s.Resource.Attributes));
                 _pSpan[14].Value = (object?)s.Scope?.Name ?? DBNull.Value;
                 _pSpan[15].Value = (object?)s.Scope?.Version ?? DBNull.Value;
                 _insSpan.ExecuteNonQuery();
@@ -184,8 +200,8 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 _pLog[3].Value = (int)l.Severity;
                 _pLog[4].Value = (object?)l.SeverityText ?? DBNull.Value;
                 _pLog[5].Value = (object?)l.Body ?? DBNull.Value;
-                _pLog[6].Value = HeimdallJson.WriteAttributes(l.Attributes);
-                _pLog[7].Value = l.Resource is null ? "{}" : HeimdallJson.WriteAttributes(l.Resource.Attributes);
+                _pLog[6].Value = EncJson(HeimdallJson.WriteAttributes(l.Attributes));
+                _pLog[7].Value = EncJson(l.Resource is null ? "{}" : HeimdallJson.WriteAttributes(l.Resource.Attributes));
                 _pLog[8].Value = (object?)l.Scope?.Name ?? DBNull.Value;
                 _pLog[9].Value = (object?)l.Scope?.Version ?? DBNull.Value;
                 _insLog.ExecuteNonQuery();
@@ -237,8 +253,8 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 _pMetric[7].Value = (object?)m.Sum ?? DBNull.Value;
                 _pMetric[8].Value = (object?)m.Min ?? DBNull.Value;
                 _pMetric[9].Value = (object?)m.Max ?? DBNull.Value;
-                _pMetric[10].Value = HeimdallJson.WriteLongs(m.BucketCounts);
-                _pMetric[11].Value = HeimdallJson.WriteDoubles(m.ExplicitBounds);
+                _pMetric[10].Value = EncJson(HeimdallJson.WriteLongs(m.BucketCounts));
+                _pMetric[11].Value = EncJson(HeimdallJson.WriteDoubles(m.ExplicitBounds));
                 _pMetric[12].Value = DBNull.Value;   // attrs_json — in heim_metric_series
                 _pMetric[13].Value = DBNull.Value;   // resource_json — in heim_metric_series
                 _pMetric[14].Value = DBNull.Value;   // scope_name — in heim_metric_series
@@ -582,7 +598,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 list.Add(new MetricRow(
                     r.GetString(0), NStr(r, 1), r.GetInt32(2), r.GetInt32(3), r.GetInt64(4),
                     r.GetDouble(5), NLong(r, 6), NDouble(r, 7), NDouble(r, 8), NDouble(r, 9),
-                    NStr(r, 10), NStr(r, 11), NStr(r, 12) ?? "{}"));
+                    NJson(r, 10), NJson(r, 11), NStr(r, 12) ?? "{}"));
             }
         }
         return list;
@@ -733,13 +749,30 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     private static SpanRow ReadSpan(SqliteDataReader r) => new SpanRow(
         r.GetString(0), r.GetString(1), NStr(r, 2) ?? string.Empty, r.GetString(3), r.GetInt32(4),
         r.GetInt64(5), r.GetInt64(6), r.GetInt64(7), r.GetInt32(8), NStr(r, 9),
-        NStr(r, 10) ?? "{}", NStr(r, 11) ?? "[]", NStr(r, 12) ?? "{}", NStr(r, 13));
+        NJson(r, 10) ?? "{}", NJson(r, 11) ?? "[]", NJson(r, 12) ?? "{}", NStr(r, 13));
 
     private static LogRow ReadLog(SqliteDataReader r) => new LogRow(
         r.GetInt64(0), NStr(r, 1), NStr(r, 2), r.GetInt32(3), NStr(r, 4), NStr(r, 5),
-        NStr(r, 6) ?? "{}", NStr(r, 7), NStr(r, 8));
+        NJson(r, 6) ?? "{}", NJson(r, 7), NStr(r, 8));
 
     private static string? NStr(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
+
+    /// <summary>Format v2: JSON-Spalten lesen — Brotli-BLOB dekomprimieren
+    /// (C#-Pfad, kein SQL-UDF auf Read-Connections). NULL → null.</summary>
+    private static string? NJson(SqliteDataReader r, int i) =>
+        r.IsDBNull(i) ? null : JsonBlob.Decode(r.GetValue(i));
+
+    /// <summary>JSON-Spalte komprimiert binden (Format v2): string → Brotli-BLOB
+    /// (Microsoft.Data.Sqlite bindet byte[] als BLOB), null → NULL. Zählt die
+    /// Kompressions-Buchhaltung (stored/raw) für Depot + synth. Metrik.</summary>
+    private object? EncJson(string? json)
+    {
+        var blob = JsonBlob.Encode(json);
+        if (blob is null) return DBNull.Value;
+        Interlocked.Add(ref _compRawBytes, Encoding.UTF8.GetByteCount(json!));
+        Interlocked.Add(ref _compStoredBytes, blob.Length);
+        return blob;
+    }
     private static long? NLong(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : (long)r.GetValue(i);
     private static double? NDouble(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : (double)r.GetValue(i);
 
@@ -810,45 +843,52 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_log_attrs_kv ON heim_log_attrs(key, value)");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_log_attrs_log ON heim_log_attrs(log_rowid)");
         // AFTER INSERT: beide JSON-Spalten expandieren (log-Attrs + Resource-Attrs).
-        Exec("CREATE TRIGGER IF NOT EXISTS heim_log_attrs_ai AFTER INSERT ON heim_logs BEGIN " +
+        // Format v2: die Spalten sind Brotli-BLOBs — json_each liest sie via
+        // heimd_unzip-UDF (Write-Verbindung). DROP+CREATE statt IF NOT EXISTS:
+        // bestehende v1-Trigger (direktes json_each) würden sonst stehen bleiben.
+        Exec("DROP TRIGGER IF EXISTS heim_log_attrs_ai");
+        Exec("CREATE TRIGGER heim_log_attrs_ai AFTER INSERT ON heim_logs BEGIN " +
              "INSERT OR IGNORE INTO heim_log_attrs(log_rowid, key, value) " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.attrs_json) e " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.attrs_json)) e " +
              "UNION ALL " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.resource_json) e; END");
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.resource_json)) e; END");
         // AFTER DELETE: Cascade ueber log_rowid (heim_logs.rowid ist implizit).
         Exec("CREATE TRIGGER IF NOT EXISTS heim_log_attrs_ad AFTER DELETE ON heim_logs BEGIN " +
              "DELETE FROM heim_log_attrs WHERE log_rowid = old.rowid; END");
         // AFTER UPDATE: delete + reinsert (wie FTS5-Pattern).
-        Exec("CREATE TRIGGER IF NOT EXISTS heim_log_attrs_au AFTER UPDATE ON heim_logs BEGIN " +
+        Exec("DROP TRIGGER IF EXISTS heim_log_attrs_au");
+        Exec("CREATE TRIGGER heim_log_attrs_au AFTER UPDATE ON heim_logs BEGIN " +
              "DELETE FROM heim_log_attrs WHERE log_rowid = old.rowid; " +
              "INSERT OR IGNORE INTO heim_log_attrs(log_rowid, key, value) " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.attrs_json) e " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.attrs_json)) e " +
              "UNION ALL " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.resource_json) e; END");
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.resource_json)) e; END");
 
         // Span-Attr-Index: exaktes Pendant zu heim_log_attrs, expandiert Span- UND
         // Resource-Attribute (service.name/service.version sitzen in resource_json)
         // in eine Zeile pro (span_rowid, key, value). Basis fuer Service-/Version-
-        // Filter und -Discovery auf Traces. Additiv (CREATE IF NOT EXISTS, kein
-        // user_version-Bump); Bestands-DBs fuellt BackfillSpanAttrs() nach.
+        // Filter und -Discovery auf Traces. Format v2: heimd_unzip im Trigger,
+        // DROP+CREATE (siehe oben).
         Exec("CREATE TABLE IF NOT EXISTS heim_span_attrs (" +
              "span_rowid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, " +
              "PRIMARY KEY (span_rowid, key, value))");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_span_attrs_kv ON heim_span_attrs(key, value)");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_span_attrs_span ON heim_span_attrs(span_rowid)");
-        Exec("CREATE TRIGGER IF NOT EXISTS heim_span_attrs_ai AFTER INSERT ON heim_spans BEGIN " +
+        Exec("DROP TRIGGER IF EXISTS heim_span_attrs_ai");
+        Exec("CREATE TRIGGER heim_span_attrs_ai AFTER INSERT ON heim_spans BEGIN " +
              "INSERT OR IGNORE INTO heim_span_attrs(span_rowid, key, value) " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.attrs_json) e " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.attrs_json)) e " +
              "UNION ALL " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.resource_json) e; END");
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.resource_json)) e; END");
         Exec("CREATE TRIGGER IF NOT EXISTS heim_span_attrs_ad AFTER DELETE ON heim_spans BEGIN " +
              "DELETE FROM heim_span_attrs WHERE span_rowid = old.rowid; END");
-        Exec("CREATE TRIGGER IF NOT EXISTS heim_span_attrs_au AFTER UPDATE ON heim_spans BEGIN " +
+        Exec("DROP TRIGGER IF EXISTS heim_span_attrs_au");
+        Exec("CREATE TRIGGER heim_span_attrs_au AFTER UPDATE ON heim_spans BEGIN " +
              "DELETE FROM heim_span_attrs WHERE span_rowid = old.rowid; " +
              "INSERT OR IGNORE INTO heim_span_attrs(span_rowid, key, value) " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.attrs_json) e " +
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.attrs_json)) e " +
              "UNION ALL " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(new.resource_json) e; END");
+             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.resource_json)) e; END");
         BackfillSpanAttrs();
     }
 
@@ -873,9 +913,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             if (hasAttrs != 0) return;
 
             Exec("INSERT OR IGNORE INTO heim_span_attrs(span_rowid, key, value) " +
-                 "SELECT s.rowid, e.key, CAST(e.value AS TEXT) FROM heim_spans s, json_each(s.attrs_json) e " +
+                 "SELECT s.rowid, e.key, CAST(e.value AS TEXT) FROM heim_spans s, json_each(heimd_unzip(s.attrs_json)) e " +
                  "UNION ALL " +
-                 "SELECT s.rowid, e.key, CAST(e.value AS TEXT) FROM heim_spans s, json_each(s.resource_json) e");
+                 "SELECT s.rowid, e.key, CAST(e.value AS TEXT) FROM heim_spans s, json_each(heimd_unzip(s.resource_json)) e");
         }
         catch
         {
@@ -970,7 +1010,8 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     {
         // Guard by timer (SweepActive), aber doppelt-halten: auch ein manuell
         // angerufener Sweep (z. B. durch Tests) respektiert die Konfiguration.
-        if (!_options.AnyTimeRetention && _options.MaxBytes <= 0) return;
+        // FullVacuumMinutes > 0 allein (ohne Frist/Cap) ist auch ein Grund zu laufen.
+        if (!_options.AnyTimeRetention && _options.MaxBytes <= 0 && _options.FullVacuumMinutes <= 0) return;
         var sw = Stopwatch.StartNew();   // C3: Sweep-Latenz (host.sweep.duration)
         lock (_gate)
         {
@@ -1024,7 +1065,16 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 {
                     RebuildFtsIndexes();
                     RunIncrementalVacuum();
+                    // WAL nach dem Reclaim checkpointen (TRUNCATE): die -wal-Datei
+                    // wächst mit jedem Lösch-Write — ohne Checkpoint bleibt das
+                    // Volumen auch nach dem Freischaufeln auf Platte stehen.
+                    // Best-effort (kann scheitern, wenn ein Reader im Weg ist).
+                    try { Exec("PRAGMA wal_checkpoint(TRUNCATE);"); } catch { }
                 }
+
+                // 4. Periodisches Full-VACUUM (Opt-In, FullVacuumMinutes > 0):
+                // defragmentiert über die Freelist hinaus. Intervall-gegate.
+                MaybeFullVacuum();
             }
             catch { /* Sweeper darf nie den Host killen */ }
         }
@@ -1138,6 +1188,38 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         if (!_options.AutoVacuum) return;
         if (PragmaLong("auto_vacuum") != 2) return;
         Exec("PRAGMA incremental_vacuum;");
+    }
+
+    // A3/Retention: periodisches Full-VACUUM (Opt-In via FullVacuumMinutes > 0),
+    // vom Sweeper gerufen (läuft bereits unter _gate). Defragmentiert die DB
+    // über die Freelist hinaus — incremental_vacuum gibt freie Pages zurück,
+    // aber die Datei bleibt fragmentiert, wenn Pages quer gestreut wurden; ein
+    // Full-VACUUM baut die Datei physisch neu. Teuer (ca. 2× Dateigröße freier
+    // Platz + exklusiver Schreibzugriff), darum Intervall-gegate und try/catch
+    // (der Sweeper darf nie killen). Dauer → Gauge heimdall.host.vacuum.duration.
+    internal void MaybeFullVacuum()
+    {
+        int minutes = _options.FullVacuumMinutes;
+        if (minutes <= 0) return;
+        var now = DateTime.UtcNow;
+        long last = Interlocked.Read(ref _lastFullVacuumUtcTicks);
+        if (last != 0 && (now - new DateTime(last, DateTimeKind.Utc)).TotalMinutes < minutes) return;
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            // Checkpoint vorher: VACUUM schreibt in die WAL — je leerer, desto
+            // kleiner der Spike; TRUNCATE setzt die -wal-Datei auf 0 zurück.
+            Exec("PRAGMA wal_checkpoint(TRUNCATE);");
+            Exec("VACUUM;");
+            Interlocked.Exchange(ref _lastFullVacuumUtcTicks, now.Ticks);
+            Interlocked.Exchange(ref _hostVacuumDurationTicks, sw.Elapsed.Ticks);
+        }
+        catch
+        {
+            // Scheitern (z. B. 2×-Platz fehlt, Reader blockiert) tolerieren —
+            // Intervall NICHT vorschieben, nächster Sweep versucht wieder.
+        }
     }
 
     // A3: auto_vacuum vor Tabellen-Anlage setzen (frische DB) bzw. eine Legacy-

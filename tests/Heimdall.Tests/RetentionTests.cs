@@ -196,14 +196,15 @@ public class RetentionTests
     // -----------------------------------------------------------------------
 
     [Fact]
-    public void Frische_DB_Hat_AutoVacuum_Und_UserVersion_1()
+    public void Frische_DB_Hat_AutoVacuum_Und_UserVersion_2()
     {
         var path = NewDbPath();
         try
         {
             using var sink = NewSink(path);
             Assert.Equal(2, sink.PragmaLong("auto_vacuum"));   // INCREMENTAL
-            Assert.Equal(1, sink.PragmaLong("user_version"));
+            // Format v2: JSON-Spalten als Brotli-BLOB (JsonBlob).
+            Assert.Equal(2, sink.PragmaLong("user_version"));
         }
         finally { Cleanup(path); }
     }
@@ -275,6 +276,94 @@ public class RetentionTests
         finally { Cleanup(path); }
     }
 
+    [Fact]
+    public void FullVacuum_Am_Sweep_Setzt_Freelist_Auf_Null()
+    {
+        var path = NewDbPath();
+        try
+        {
+            // AutoVacuum=false: der normale Sweep-Reclaim (incremental_vacuum)
+            // greift nicht → Freelist bliebe nach DELETE stehen; der Sweep mit
+            // FullVacuumMinutes=1 vacuumt am Ende → Freelist 0.
+            using var sink = NewSink(path, o =>
+            {
+                o.AutoVacuum = false;
+                o.FullVacuumMinutes = 1;
+                o.RetentionDays = 5;
+            });
+
+            var spans = new List<HSpan>();
+            for (int i = 0; i < 300; i++) spans.Add(MakeSpan(DaysAgoNs(10) + i, "s" + i));
+            sink.WriteSpans(spans);
+            sink.SweepRetention();   // löscht alle (alt) + Full-VACUUM am Ende
+
+            Assert.Equal(0, sink.CountSpans());
+            Assert.Equal(0, sink.PragmaLong("freelist_count"));
+        }
+        finally { Cleanup(path); }
+    }
+
+    [Fact]
+    public void FullVacuum_Aus_Tut_Nichts()
+    {
+        var path = NewDbPath();
+        try
+        {
+            // Default (0 = aus): Freelist nach DELETE bleibt — weder der Sweep
+            // noch ein manuelles MaybeFullVacuum räumt auf.
+            using var sink = NewSink(path, o =>
+            {
+                o.AutoVacuum = false;
+                o.RetentionDays = 5;
+            });
+
+            var spans = new List<HSpan>();
+            for (int i = 0; i < 300; i++) spans.Add(MakeSpan(DaysAgoNs(10) + i, "s" + i));
+            sink.WriteSpans(spans);
+            sink.SweepRetention();
+            Assert.Equal(0, sink.CountSpans());
+
+            long freelist = sink.PragmaLong("freelist_count");
+            Assert.True(freelist > 0);
+            sink.MaybeFullVacuum();
+            Assert.Equal(freelist, sink.PragmaLong("freelist_count"));
+        }
+        finally { Cleanup(path); }
+    }
+
+    [Fact]
+    public void FullVacuum_Direkt_Gerufen_Baut_Datei_Neu_Und_Gatet_Erneut()
+    {
+        var path = NewDbPath();
+        try
+        {
+            // 1. Freelist erzeugen (AutoVacuum=false, kein Full-VACUUM am Sweep).
+            using (var a = NewSink(path, o => { o.AutoVacuum = false; o.RetentionDays = 5; }))
+            {
+                var spans = new List<HSpan>();
+                for (int i = 0; i < 300; i++) spans.Add(MakeSpan(DaysAgoNs(10) + i, "s" + i));
+                a.WriteSpans(spans);
+                a.SweepRetention();
+                Assert.True(a.PragmaLong("freelist_count") > 0);
+            }
+
+            // 2. Gleiche Datei neu öffnen, Full-VACUUM direkt anstoßen (erster
+            //    Lauf, Intervall-Gate offen) → Freelist 0.
+            using var b = NewSink(path, o => { o.AutoVacuum = false; o.FullVacuumMinutes = 60; });
+            Assert.True(b.PragmaLong("freelist_count") > 0);
+            b.MaybeFullVacuum();
+            Assert.Equal(0, b.PragmaLong("freelist_count"));
+
+            // 3. Zweiter Aufruf direkt danach: Intervall (60 min) nicht abgelaufen
+            //    → Skip (Zustand unverändert, kein Fehler).
+            b.MaybeFullVacuum();
+            Assert.Equal(0, b.PragmaLong("freelist_count"));
+            // Und die synthetisierte Dauer-Metrik ist gelistet.
+            Assert.Contains("heimdall.host.vacuum.duration", b.ListMetricNames());
+        }
+        finally { Cleanup(path); }
+    }
+
     // -----------------------------------------------------------------------
     // Validierung (authoritativ im Sink-ctor)
     // -----------------------------------------------------------------------
@@ -310,5 +399,13 @@ public class RetentionTests
         Assert.Throws<InvalidOperationException>(() =>
             new SQLiteTelemetrySink(new SQLiteTelemetryOptions
             { DataPath = NewDbPath(), RetentionDays = 0, RetentionSweepMinutes = -1 }));
+    }
+
+    [Fact]
+    public void Negatives_FullVacuumMinutes_Wirft_Im_Ctor()
+    {
+        Assert.Throws<InvalidOperationException>(() =>
+            new SQLiteTelemetrySink(new SQLiteTelemetryOptions
+            { DataPath = NewDbPath(), RetentionDays = 0, RetentionSweepMinutes = 0, FullVacuumMinutes = -5 }));
     }
 }

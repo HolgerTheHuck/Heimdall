@@ -130,6 +130,11 @@ public static class HeimdallEndpointExtensions
         group.MapGet("/drilldown", (HttpContext ctx) =>
             new RazorComponentResult<DrilldownPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix) }));
 
+        // Depot-Übersicht (Storage-Stats): Dateigrößen, Verbrauch je Tabelle,
+        // effektive Retention/Cap — Operator-Sicht, auch bei leerer DB.
+        group.MapGet("/depot", (HttpContext ctx) =>
+            new RazorComponentResult<DepotPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix) }));
+
         group.MapGet("/traces", (HttpContext ctx, string? name, string[]? svc, string? ver, string? err, string? limit, string? offset, string? sort, string? dir, string? preset, string? from, string? to) =>
             new RazorComponentResult<TracesPage>(new
             {

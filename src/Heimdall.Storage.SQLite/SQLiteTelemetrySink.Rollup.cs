@@ -116,7 +116,7 @@ public sealed partial class SQLiteTelemetrySink
                     (HMetricType)r.GetInt32(3), (HTemporality)r.GetInt32(4),
                     r.GetInt64(5), r.GetDouble(6),
                     NLong(r, 7), NDouble(r, 8), NDouble(r, 9), NDouble(r, 10),
-                    ParseLongs(NStr(r, 11)), ParseDoubles(NStr(r, 12))));
+                    ParseLongs(NJson(r, 11)), ParseDoubles(NJson(r, 12))));   // Format v2: Brotli-BLOB
             }
         }
         return rows;
@@ -156,8 +156,8 @@ public sealed partial class SQLiteTelemetrySink
                 cmd.Parameters.AddWithValue("@p8", (object?)a.Sum ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@p9", (object?)a.Min ?? DBNull.Value);
                 cmd.Parameters.AddWithValue("@p10", (object?)a.Max ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("@p11", a.BucketCountsJson ?? "[]");
-                cmd.Parameters.AddWithValue("@p12", a.ExplicitBoundsJson ?? "[]");
+                cmd.Parameters.AddWithValue("@p11", EncJson(a.BucketCountsJson ?? "[]"));
+                cmd.Parameters.AddWithValue("@p12", EncJson(a.ExplicitBoundsJson ?? "[]"));
                 cmd.Parameters.AddWithValue("@p13", DBNull.Value);   // attrs_json — in heim_metric_series
                 cmd.Parameters.AddWithValue("@p14", DBNull.Value);   // resource_json — in heim_metric_series
                 cmd.Parameters.AddWithValue("@p15", DBNull.Value);   // scope_name — in heim_metric_series

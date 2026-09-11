@@ -1,0 +1,144 @@
+@namespace Heimdall.Blazor
+@* Depot-Übersicht: Speicherbestand der Telemetrie-DB — KPIs (DB-Datei, WAL,
+   Freelist, belegte Pages), Verbrauch je Tabelle/-gruppe (dbstat) und die
+   effektive Retention-/Cap-Konfiguration (inkl. Hinweis auf den 5-GB-Host-
+   Default). Pure C#-Aggregation auf IHeimdallQuery.GetDepotStats(); die Seite
+   funktioniert auch bei komplett leerer DB (dann KPIs bei 0). Kein JS. *@
+@using System.Collections.Generic
+@inject Heimdall.IHeimdallQuery Query
+@inject Heimdall.Blazor.IHeimdallI18n I18n
+
+<HeimdallDocument Title="@I18n.T("page.title.depot")" BasePath="@BasePath">
+    <div class="hmd-page-head">
+        <h1>@I18n.T("page.title.depot")</h1>
+        <span class="hmd-dim">@I18n.T("depot.subtitle")</span>
+    </div>
+
+    @if (!_dbStat)
+    {
+        <p class="hmd-empty" role="status">@I18n.T("depot.hint.nodbstat")</p>
+    }
+
+    <div class="hmd-kpi-row">
+        <HeimdallKpi Value="@HeimdallFmt.Bytes(_stats.FileBytes)" Label="@I18n.T("depot.kpi.file")"
+                     Sub="@I18n.T("depot.kpi.sub.pages", _stats.PageCount, HeimdallFmt.Bytes(_stats.PageSize))"
+                     Tone="@_usedTone" ToneLabel="@I18n.T(_usedTone == "warn" ? "kpi.tone.warn" : "kpi.tone.ok")" />
+        <HeimdallKpi Value="@HeimdallFmt.Bytes(_stats.WalBytes)" Label="@I18n.T("depot.kpi.wal")"
+                     Sub="@(_stats.WalBytes > _walWarnBytes ? I18n.T("depot.hint.walbig") : "")"
+                     Tone="@(_stats.WalBytes > _walWarnBytes ? "warn" : "ok")" ToneLabel="@I18n.T(_stats.WalBytes > _walWarnBytes ? "kpi.tone.warn" : "kpi.tone.ok")" />
+        <HeimdallKpi Value="@HeimdallFmt.Bytes(_stats.FreelistBytes)" Label="@I18n.T("depot.kpi.free")"
+                     Sub="@_freePctStr" Tone="@(_stats.FreelistBytes > _freeWarnBytes ? "warn" : "ok")" ToneLabel="@I18n.T("depot.kpi.tone.free")" />
+        <HeimdallKpi Value="@HeimdallFmt.Bytes(_stats.UsedBytes)" Label="@I18n.T("depot.kpi.used")"
+                     Sub="@_usedSub" Tone="@_usedTone" ToneLabel="@I18n.T(_usedTone == "warn" ? "kpi.tone.warn" : "kpi.tone.ok")" />
+    </div>
+
+    <div class="hmd-panels">
+        <section class="hmd-panel">
+            <h2 class="hmd-subhead">@I18n.T("depot.section.tables")</h2>
+            <table class="hmd-table hmd-dense">
+                <caption class="hmd-vh">@I18n.T("depot.section.tables")</caption>
+                <thead>
+                    <tr>
+                        <th scope="col">@I18n.T("depot.col.table")</th>
+                        <th scope="col">@I18n.T("depot.col.rows")</th>
+                        <th scope="col">@I18n.T("depot.col.bytes")</th>
+                        <th scope="col">@I18n.T("depot.col.perrow")</th>
+                    </tr>
+                </thead>
+                <tbody>
+                @foreach (var t in _stats.Tables)
+                {
+                    <tr>
+                        <td class="hmd-mono">@t.Table</td>
+                        <td>@(t.Rows < 0 ? "—" : HeimdallCharting.FmtValue(t.Rows))</td>
+                        <td>@HeimdallFmt.Bytes(t.Bytes)</td>
+                        <td>@(t.Rows > 0 && t.Bytes >= 0 ? HeimdallFmt.Bytes(t.Bytes / t.Rows) : "—")</td>
+                    </tr>
+                }
+                </tbody>
+            </table>
+        </section>
+        <section class="hmd-panel">
+            <h2 class="hmd-subhead">@I18n.T("depot.section.hints")</h2>
+            <p>@_capText</p>
+            @if (_stats.CompressionEnabled && _stats.CompressedRawBytes > 0)
+            {
+                <p>@_compText</p>
+            }
+            <p>@I18n.T("depot.hint.retention", _tracesDays, _logsDays, _metricsDays)</p>
+            <p>@_sweepText</p>
+            <p>@_rollupText</p>
+        </section>
+    </div>
+</HeimdallDocument>
+
+@code {
+    [Parameter] public string BasePath { get; set; } = "/otel";
+
+    private Heimdall.DepotStats _stats = Heimdall.DepotStats.Empty;
+    private bool _dbStat;
+
+    // Hinweis-Schwellen: WAL > 10 % der DB-Datei gilt als „groß"; Freelist >
+    // 25 % der Pages bedeutet viel ungenutzten Platz in der Datei; Cap ab 80 %
+    // Auslastung warnen.
+    private long _walWarnBytes;
+    private long _freeWarnBytes;
+    private string _freePctStr = "", _usedSub = "", _usedTone = "ok", _capText = "", _sweepText = "", _rollupText = "", _compText = "";
+    private string _tracesDays = "", _logsDays = "", _metricsDays = "";
+
+    protected override void OnInitialized()
+    {
+        _stats = Query.GetDepotStats();
+        _dbStat = _stats.DbStatAvailable;
+        _walWarnBytes = Math.Max(_stats.FileBytes / 10, 64 * 1024 * 1024);   // 10 % der DB, min 64 MB
+        _freeWarnBytes = _stats.TotalLogicalBytes / 4;                       // 25 % Freelist
+
+        long freePages = _stats.PageCount > 0 ? _stats.PageCount : 1;
+        long freePct = Math.Clamp(_stats.FreelistCount * 100 / freePages, 0, 100);
+        _freePctStr = freePct + " %";
+
+        if (_stats.MaxBytes > 0)
+        {
+            // 5_368_709_120 = 5 GB: der implizite Host-Default aus Program.BuildSink —
+            // in den Options-POCOs unsichtbar, darum hier als solcher gekennzeichnet.
+            bool hostDefault = _stats.MaxBytes == 5_368_709_120L;
+            _capText = hostDefault
+                ? I18n.T("depot.hint.capHost", HeimdallFmt.Bytes(_stats.MaxBytes))
+                : I18n.T("depot.hint.cap", HeimdallFmt.Bytes(_stats.MaxBytes));
+            _usedSub = I18n.T("depot.kpi.sub.ofcap", HeimdallFmt.Bytes(_stats.MaxBytes));
+        }
+        else
+        {
+            _capText = I18n.T("depot.hint.nocap");
+            _usedSub = "";
+        }
+
+        // Belegungs-Tone: > 80 % des Caps warnen; ohne Cap neutral (ok).
+        _usedTone = _stats.MaxBytes > 0 && _stats.UsedBytes * 10 >= _stats.MaxBytes * 8 ? "warn" : "ok";
+
+        _sweepText = _stats.SweepMinutes > 0
+            ? I18n.T("depot.hint.sweep", _stats.SweepMinutes)
+            : I18n.T("depot.hint.nosweep");
+        _rollupText = _stats.RollupEnabled
+            ? I18n.T("depot.hint.rollup", _stats.RollupSeconds)
+            : I18n.T("depot.hint.norollup");
+
+        // Format v2: JSON-Spalten sind Brotli-BLOBs — Ratio anzeigen (seit
+        // Host-Start kumuliert; vor dem ersten Write bleibt die Zeile weg).
+        if (_stats.CompressedRawBytes > 0)
+        {
+            long savedPct = Math.Clamp(_stats.CompressedRawBytes == 0 ? 0 :
+                100 - _stats.CompressedStoredBytes * 100 / _stats.CompressedRawBytes, 0, 100);
+            _compText = I18n.T("depot.hint.compression",
+                HeimdallFmt.Bytes(_stats.CompressedRawBytes), HeimdallFmt.Bytes(_stats.CompressedStoredBytes), savedPct);
+        }
+
+        _tracesDays = RetentionDaysStr(_stats.TracesDays);
+        _logsDays = RetentionDaysStr(_stats.LogsDays);
+        _metricsDays = RetentionDaysStr(_stats.MetricsDays);
+    }
+
+    /// <summary>Retention-Tage anzeigefertig: 0 = unbegrenzt (ausgeschrieben).</summary>
+    private string RetentionDaysStr(int days)
+        => days > 0 ? I18n.T("depot.hint.days", days) : I18n.T("depot.hint.unlimited");
+}
