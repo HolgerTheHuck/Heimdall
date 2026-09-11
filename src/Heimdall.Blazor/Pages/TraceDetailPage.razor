@@ -1,6 +1,9 @@
 @namespace Heimdall.Blazor
-@* Trace-Detail: flache Span-Liste (Kind/Status/Dauer), verlinkt Parent. Attrs je Span
-   aufklappbar (<details>, nativ, kein JS) → volle Attribute + Events. *@
+@* Trace-Detail: kombinierte Span-Ansicht (Grafana-artig) — einklappbares Span-Start-
+   Histogramm (<details open>, nativ, kein JS) über einer Span-Tabelle, deren Zeitstrahl-
+   Spalte je Zeile einen auf die Trace-Dauer ausgerichteten Balken trägt (DFS-Preorder,
+   eingerückt nach Tiefe). Hover-Tooltips via heimdall.js (hmd-chart-pt/hmd-waterfall-bar).
+   Attrs je Span aufklappbar (<details>, nativ) → volle Attribute + Events. *@
 @using System.Collections.Generic
 @inject Heimdall.IHeimdallQuery Query
 @inject Heimdall.Blazor.IHeimdallI18n I18n
@@ -15,28 +18,59 @@
     }
     else
     {
-        @if (!string.IsNullOrEmpty(_waterfall))
-        {
-            <h2 class="hmd-subhead">@I18n.T("trace.timeline.heading")</h2>
-            <figure class="hmd-chart-wrap">@((MarkupString)_waterfall)</figure>
-        }
+        <details class="hmd-tl-hist" open>
+            <summary>@I18n.T("trace.timeline.heading") <span class="hmd-dim">@I18n.T("trace.span.count", _spans.Count)</span></summary>
+            <div class="hmd-tl-hist-scroll">
+                <div class="hmd-tl-hist-chart" role="img" aria-label="@I18n.T("trace.timeline.aria")">
+                    @for (var i = 0; i < _hist.Count; i++)
+                    {
+                        var b = _hist[i];
+                        <div class="hmd-tl-hist-col">
+                            @if (b.Count > 0)
+                            {
+                                <div class="hmd-tl-hist-bar"
+                                     style="height:@(HeimdallTraceWaterfall.Pct(b.Count * 100.0 / _histMax))%"
+                                     title="@I18n.T("trace.timeline.bucket", b.Count, HeimdallFmt.Dur(b.FromUnixNano - _range.StartUnixNano), HeimdallFmt.Dur(b.ToUnixNano - _range.StartUnixNano))"></div>
+                            }
+                        </div>
+                    }
+                </div>
+                <div class="hmd-tl-hist-axis" aria-hidden="true">
+                    @for (var i = 0; i <= 4; i++)
+                    {
+                        <span>+@HeimdallFmt.Dur((_range.EndUnixNano - _range.StartUnixNano) * i / 4)</span>
+                    }
+                </div>
+            </div>
+        </details>
 
         <h2 class="hmd-subhead">@I18n.T("trace.spans.heading")</h2>
-        <table class="hmd-table hmd-dense">
-            <caption>@I18n.T("trace.spans.heading")</caption>
-            <thead><tr><th scope="col">@I18n.T("trace.col.span")</th><th scope="col">@I18n.T("trace.col.kind")</th><th scope="col">@I18n.T("table.start")</th><th scope="col">@I18n.T("table.duration")</th><th scope="col">@I18n.T("table.status")</th><th scope="col">@I18n.T("metrics.col.attrs")</th></tr></thead>
+        <div class="hmd-list-scroll">
+        <table class="hmd-table hmd-dense hmd-trace-table">
+            <caption class="hmd-vh">@I18n.T("trace.spans.heading")</caption>
+            <thead><tr><th scope="col">@I18n.T("trace.col.span")</th><th scope="col" class="hmd-col-tl">@I18n.T("trace.col.timeline")</th><th scope="col">@I18n.T("trace.col.kind")</th><th scope="col">@I18n.T("table.start")</th><th scope="col">@I18n.T("table.duration")</th><th scope="col">@I18n.T("table.status")</th><th scope="col">@I18n.T("metrics.col.attrs")</th></tr></thead>
             <tbody>
-            @foreach (var s in _spans)
+            @foreach (var (s, depth) in _ordered)
             {
                 var attrs = HeimdallCharting.ParseAttrs(s.AttrsJson);
                 <tr class="@(s.StatusCode == 2 ? "hmd-err" : "")">
                     <td>
-                        <span class="hmd-mono">@HeimdallFmt.Truncate(s.SpanId, 8)</span>
-                        @s.Name
-                        @if (!string.IsNullOrEmpty(s.ParentSpanId))
-                        {
-                            <span class="hmd-dim" aria-hidden="true">↳ @HeimdallFmt.Truncate(s.ParentSpanId, 8)</span>
-                        }
+                        <span style="@HeimdallTraceWaterfall.Indent(depth)">
+                            <span class="hmd-mono">@HeimdallFmt.Truncate(s.SpanId, 8)</span>
+                            @s.Name
+                            @if (!string.IsNullOrEmpty(s.ParentSpanId))
+                            {
+                                <span class="hmd-dim" aria-hidden="true">↳ @HeimdallFmt.Truncate(s.ParentSpanId, 8)</span>
+                            }
+                        </span>
+                    </td>
+                    <td class="hmd-col-tl">
+                        <div class="hmd-tl-track">
+                            <div class="hmd-tl-bar hmd-chart-pt hmd-waterfall-bar"
+                                 style="@HeimdallTraceWaterfall.BarStyle(s, _range.StartUnixNano, _range.EndUnixNano - _range.StartUnixNano)"
+                                 data-t="@s.StartUnixNano" data-v="@s.DurationNs" data-label="@s.Name"
+                                 aria-hidden="true"></div>
+                        </div>
                     </td>
                     <td>@((Heimdall.HSpanKind)s.Kind)</td>
                     <td>@HeimdallFmt.Ts(s.StartUnixNano)</td>
@@ -80,6 +114,7 @@
             }
             </tbody>
         </table>
+        </div>
     }
 
     <h2 class="hmd-subhead">@I18n.T("trace.logs.heading")</h2>
@@ -90,7 +125,7 @@
     else
     {
         <table class="hmd-table hmd-logs">
-            <caption>@I18n.T("trace.logs.heading")</caption>
+            <caption class="hmd-vh">@I18n.T("trace.logs.heading")</caption>
             <thead><tr><th class="hmd-col-ts" scope="col">@I18n.T("table.time")</th><th class="hmd-col-sev" scope="col">@I18n.T("table.sev")</th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
             <tbody>
             @foreach (var l in _logs)
@@ -108,13 +143,20 @@
 
     private List<Heimdall.SpanRow> _spans = new();
     private List<Heimdall.LogRow> _logs = new();
-    private string _waterfall = string.Empty;
+    private IReadOnlyList<(Heimdall.SpanRow Span, int Depth)> _ordered = System.Array.Empty<(Heimdall.SpanRow, int)>();
+    private (long StartUnixNano, long EndUnixNano) _range;
+    private IReadOnlyList<(int Count, long FromUnixNano, long ToUnixNano)> _hist = System.Array.Empty<(int, long, long)>();
+    private int _histMax = 1;
 
     protected override void OnInitialized()
     {
         if (string.IsNullOrEmpty(TraceId)) return;
         _spans = new List<Heimdall.SpanRow>(Query.GetTrace(TraceId));
-        _waterfall = HeimdallTraceWaterfall.RenderWaterfallSvg(_spans);
+        // Zeitstrahl: DFS-Reihenfolge + gemeinsame Trace-Spanne (Tabelle + Histogramm).
+        _ordered = HeimdallTraceWaterfall.Order(_spans);
+        _range = HeimdallTraceWaterfall.TraceRange(_spans);
+        _hist = HeimdallTraceWaterfall.Histogram(_spans, _range);
+        foreach (var h in _hist) if (h.Count > _histMax) _histMax = h.Count;
         // Korrelation Traces↔Logs: LogSearch.TraceId existiert im Modell — direkter
         // Join über die Trace-ID, kein Zeitfenster nötig (Trace ist selbst begrenzt).
         _logs = new List<Heimdall.LogRow>(Query.SearchLogs(new Heimdall.LogSearch

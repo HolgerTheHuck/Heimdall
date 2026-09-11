@@ -1,51 +1,30 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Text;
 
 namespace Heimdall.Blazor;
 
 /// <summary>
-/// Server-seitiger SVG-Bau eines Trace-Wasserfalls (Gantt/Flame): jede Span wird als
-/// horizontaler Balken positioniert nach Start/Dauer relativ zur Trace-Spanne, eingerückt
-/// nach Tiefe aus der Parent-Chain (DFS-Preorder = Render-Reihenfolge, Parent vor Child).
+/// Layout-Helfer für den Span-Zeitstrahl (Tabelle + Histogramm, rein SSR): Zeilen-
+/// Reihenfolge aus der Parent-Chain (DFS-Preorder = Parent vor Child), Trace-Spanne
+/// (Wall-Clock), Span-Start-Histogramm und %-Positionierung der Balken-Spalte.
 /// Farbe nach <see cref="HSpanKind"/> (Server/Client/Internal/Producer/Consumer), Fehler-
-/// Spans (<see cref="HStatusCode.Error"/>) override rot. Balken tragen <c>data-*</c>-Attribute,
-/// sodass das bestehende Hover-Tooltip (<c>heimdall.js</c>) greift — kein extra JS. Bewusst
-/// intern (via IVT für Tests sichtbar) und wirft niemals (kaputte Spans legen die UI nicht).
+/// Spans (<see cref="HStatusCode.Error"/>) override rot. Bewusst intern (via IVT für
+/// Tests sichtbar) und wirft niemals (kaputte Spans legen die UI nicht).
 /// </summary>
 internal static class HeimdallTraceWaterfall
 {
     /// <summary>
-    /// Erzeugt das Wasserfall-SVG für die gegebenen Spans. Liefert einen leeren String bei
-    /// ≤1 Span (Aufrufer zeigt stattdessen einen Hinweis). <paramref name="width"/> ist die
-    /// viewBox-Breite; das SVG skaliert via <c>width:100%</c>.
+    /// DFS-Preorder mit Tiefe aus der Parent-Chain (Render-Reihenfolge der Span-Tabelle:
+    /// Parent vor Child, Kinder nach Startzeit). Sicherheitsnetz für Zyklen/Verwaiste:
+    /// nicht erreichte Spans hängen bei Tiefe 0 an. Wirft nie.
     /// </summary>
-    public static string RenderWaterfallSvg(IReadOnlyList<Heimdall.SpanRow> spans, int width = 1000, string? ariaLabel = null)
+    public static IReadOnlyList<(Heimdall.SpanRow Span, int Depth)> Order(
+        IReadOnlyList<Heimdall.SpanRow>? spans)
     {
-        if (spans is null || spans.Count <= 1) return string.Empty;
+        var ordered = new List<(Heimdall.SpanRow Span, int Depth)>();
+        if (spans is null || spans.Count == 0) return ordered;
 
-        const double padLeft = 230;   // Label-Bereich (Span-Name)
-        const double padRight = 16;
-        const double padTop = 26;     // Zeitachse
-        const double padBottom = 6;
-        const double rowH = 24;
-        const double barH = 16;
-
-        double plotW = width - padLeft - padRight;
-        if (plotW < 80) plotW = 80;
-
-        // Trace-Spanne (Wall-Clock).
-        long tStart = long.MaxValue, tEnd = long.MinValue;
-        foreach (var s in spans)
-        {
-            if (s.StartUnixNano < tStart) tStart = s.StartUnixNano;
-            if (s.EndUnixNano > tEnd) tEnd = s.EndUnixNano;
-        }
-        if (tEnd <= tStart) tEnd = tStart + 1;
-        double span = tEnd - tStart;
-
-        // DFS-Preorder mit Tiefe aus der Parent-Chain.
         var byId = new Dictionary<string, Heimdall.SpanRow>(StringComparer.Ordinal);
         var children = new Dictionary<string, List<Heimdall.SpanRow>>(StringComparer.Ordinal);
         var roots = new List<Heimdall.SpanRow>();
@@ -72,8 +51,6 @@ internal static class HeimdallTraceWaterfall
         foreach (var kv in children)
             kv.Value.Sort((a, b) => a.StartUnixNano.CompareTo(b.StartUnixNano));
 
-        // Preorder-Traversal → geordnete Liste mit Tiefe.
-        var ordered = new List<(Heimdall.SpanRow Span, int Depth)>(spans.Count);
         void Dfs(Heimdall.SpanRow node, int depth)
         {
             ordered.Add((node, depth));
@@ -89,67 +66,94 @@ internal static class HeimdallTraceWaterfall
             foreach (var s in spans)
                 if (!seen.Contains(s.SpanId)) ordered.Add((s, 0));
         }
-
-        double height = padTop + ordered.Count * rowH + padBottom;
-        var sb = new StringBuilder(ordered.Count * 128);
-        sb.Append("<svg viewBox=\"0 0 ").Append(width).Append(' ').Append(F(height))
-          .Append("\" class=\"hmd-chart hmd-waterfall\" role=\"img\" aria-label=\"")
-          .Append(Esc(ariaLabel ?? "Trace-Wasserfall")).Append("\" preserveAspectRatio=\"xMidYMid meet\">");
-
-        // Zeitachse (5 relative Ticks).
-        for (int i = 0; i <= 4; i++)
-        {
-            double x = padLeft + plotW * i / 4.0;
-            long off = (long)(span * i / 4.0);
-            sb.Append("<line class=\"hmd-chart-grid\" x1=\"").Append(F(x)).Append("\" y1=\"")
-              .Append(F(padTop)).Append("\" x2=\"").Append(F(x)).Append("\" y2=\"")
-              .Append(F(height - padBottom)).Append("\"/>");
-            sb.Append("<text class=\"hmd-chart-label hmd-chart-xlabel\" x=\"").Append(F(x))
-              .Append("\" y=\"").Append(F(padTop - 8)).Append("\" text-anchor=\"")
-              .Append(i == 0 ? "start" : i == 4 ? "end" : "middle").Append("\">+")
-              .Append(Esc(HeimdallFmt.Dur(off))).Append("</text>");
-        }
-
-        // Balken je Span (DFS-Reihenfolge).
-        for (int i = 0; i < ordered.Count; i++)
-        {
-            var (s, depth) = ordered[i];
-            double y = padTop + i * rowH;
-            double barY = y + (rowH - barH) / 2.0;
-            double bx = padLeft + (s.StartUnixNano - tStart) / span * plotW;
-            double bw = Math.Max(2, (s.EndUnixNano - s.StartUnixNano) / span * plotW);
-            if (s.EndUnixNano <= s.StartUnixNano) bw = 2;
-            string color = ColorFor(s);
-            double labelIndent = 6 + depth * 16;
-
-            // Name links (eingerückt).
-            sb.Append("<text class=\"hmd-chart-label hmd-waterfall-name\" x=\"").Append(F(labelIndent))
-              .Append("\" y=\"").Append(F(barY + barH * 0.75)).Append("\" text-anchor=\"start\">")
-              .Append(Esc(Trunc(s.Name, 26))).Append("</text>");
-
-            // Balken (mit data-* für Hover-Tooltip; data-v = DurationNs → JS fmtDur).
-            sb.Append("<rect class=\"hmd-chart-pt hmd-waterfall-bar\" x=\"").Append(F(bx))
-              .Append("\" y=\"").Append(F(barY)).Append("\" width=\"").Append(F(bw))
-              .Append("\" height=\"").Append(F(barH)).Append("\" rx=\"2\" fill=\"").Append(color)
-              .Append("\" data-t=\"").Append(s.StartUnixNano.ToString(CultureInfo.InvariantCulture))
-              .Append("\" data-v=\"").Append(s.DurationNs.ToString(CultureInfo.InvariantCulture))
-              .Append("\" data-label=\"").Append(Esc(s.Name)).Append("\"/>");
-
-            // Dauer-Label im/rechts am Balken, wenn breit genug.
-            if (bw > 34)
-            {
-                sb.Append("<text class=\"hmd-chart-label hmd-waterfall-dur\" x=\"").Append(F(bx + 3))
-                  .Append("\" y=\"").Append(F(barY + barH * 0.75)).Append("\" text-anchor=\"start\">")
-                  .Append(Esc(HeimdallFmt.Dur(s.DurationNs))).Append("</text>");
-            }
-        }
-
-        sb.Append("</svg>");
-        return sb.ToString();
+        return ordered;
     }
 
-    private static string ColorFor(Heimdall.SpanRow s)
+    /// <summary>
+    /// Trace-Spanne (Wall-Clock: min Start .. max End). Garantiert End &gt; Start
+    /// (Fallback Start+1). Wirft nie (null/leer → (0,1)).
+    /// </summary>
+    public static (long StartUnixNano, long EndUnixNano) TraceRange(
+        IReadOnlyList<Heimdall.SpanRow>? spans)
     {
+        if (spans is null || spans.Count == 0) return (0, 1);
+        long tStart = long.MaxValue, tEnd = long.MinValue;
+        foreach (var s in spans)
+        {
+            if (s.StartUnixNano < tStart) tStart = s.StartUnixNano;
+            if (s.EndUnixNano > tEnd) tEnd = s.EndUnixNano;
+        }
+        if (tEnd <= tStart) tEnd = tStart + 1;
+        return (tStart, tEnd);
+    }
+
+    /// <summary>
+    /// Span-Start-Histogramm: gleichmäßige Buckets über die Trace-Spanne, Buckets mit
+    /// Count 0 bleiben enthalten (leere Säule). Wirft nie.
+    /// </summary>
+    public static IReadOnlyList<(int Count, long FromUnixNano, long ToUnixNano)> Histogram(
+        IReadOnlyList<Heimdall.SpanRow>? spans,
+        (long StartUnixNano, long EndUnixNano) range,
+        int buckets = 20)
+    {
+        if (buckets < 1) buckets = 1;
+        var result = new (int Count, long FromUnixNano, long ToUnixNano)[buckets];
+        long span = range.EndUnixNano - range.StartUnixNano;
+        if (span <= 0) span = 1;
+        for (var i = 0; i < buckets; i++)
+        {
+            var from = range.StartUnixNano + span * i / buckets;
+            var to = range.StartUnixNano + span * (i + 1) / buckets;
+            if (to <= from) to = from + 1;
+            result[i] = (0, from, to);
+        }
+        if (spans is null) return result;
+        foreach (var s in spans)
+        {
+            var idx = (int)((s.StartUnixNano - range.StartUnixNano) * (double)buckets / span);
+            if (idx < 0) idx = 0;
+            if (idx >= buckets) idx = buckets - 1;
+            result[idx].Count++;
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Inline-Style des Balkens: "left:X%;width:Y%;background:COLOR" — Prozentwerte
+    /// invariant formatiert (deutsches Komma würde CSS brechen), geclampt auf [0..100] %,
+    /// Mindestbreite 0.5 % (plus CSS min-width:2px). Farbe via <see cref="ColorFor"/>
+    /// (Fehler-Override). Wirft nie (rangeSpanNs ≤ 0 → Vollbreite).
+    /// </summary>
+    public static string BarStyle(Heimdall.SpanRow s,
+        long rangeStartUnixNano, long rangeSpanNs)
+    {
+        double left = 0, width = 100;
+        if (rangeSpanNs > 0 && s is not null)
+        {
+            left = (s.StartUnixNano - rangeStartUnixNano) / (double)rangeSpanNs * 100.0;
+            width = (s.EndUnixNano - s.StartUnixNano) / (double)rangeSpanNs * 100.0;
+            if (left < 0) left = 0;
+            if (left > 100) left = 100;
+            if (width < 0.5) width = 0.5;
+            if (left + width > 100) width = 100 - left;
+            if (width < 0.5) width = 0.5;
+        }
+        return "left:" + Pct(left) + "%;width:" + Pct(width) + "%;background:" + ColorFor(s);
+    }
+
+    /// <summary>Einrückung für die Tabelle: "margin-left:{depth*0.9}rem" (invariant),
+    /// "" bei Tiefe 0. Wirft nie.</summary>
+    public static string Indent(int depth)
+    {
+        if (depth <= 0) return string.Empty;
+        return "margin-left:" + (depth * 0.9).ToString("0.#", CultureInfo.InvariantCulture) + "rem";
+    }
+
+    /// <summary>CSS-Farbe (Token/Literal) je Span — Kind-Farben, Fehler-Override
+    /// var(--hmd-err). null → var(--hmd-warn). Wirft nie.</summary>
+    public static string ColorFor(Heimdall.SpanRow? s)
+    {
+        if (s is null) return "var(--hmd-warn)";
         if (s.StatusCode == (int)Heimdall.HStatusCode.Error) return "var(--hmd-err)";
         return ((Heimdall.HSpanKind)s.Kind) switch
         {
@@ -161,23 +165,6 @@ internal static class HeimdallTraceWaterfall
         };
     }
 
-    private static string F(double d) => d.ToString("0.#", CultureInfo.InvariantCulture);
-    private static string Trunc(string s, int n) => s.Length <= n ? s : s.Substring(0, n) + "…";
-    private static string Esc(string? s)
-    {
-        if (string.IsNullOrEmpty(s)) return string.Empty;
-        var sb = new StringBuilder(s.Length);
-        foreach (var c in s)
-        {
-            switch (c)
-            {
-                case '<': sb.Append("&lt;"); break;
-                case '>': sb.Append("&gt;"); break;
-                case '&': sb.Append("&amp;"); break;
-                case '"': sb.Append("&quot;"); break;
-                default: sb.Append(c); break;
-            }
-        }
-        return sb.ToString();
-    }
+    /// <summary>Prozentzahl invariant ("12.5", nie "12,5"). Wirft nie.</summary>
+    public static string Pct(double p) => p.ToString("0.##", CultureInfo.InvariantCulture);
 }

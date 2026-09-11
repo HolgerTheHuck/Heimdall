@@ -8,6 +8,7 @@
 //   5. Signal-Band (Übersicht): Crosshair + Tooltip je Lane (.hmd-band-chart mit data-vals).
 //   6. Service-Multi-Select (details.hmd-msel): Aussen-Klick/Escape schliessen,
 //      Summary + Count-Badge live aktualisieren (Uebersetzungen via data-Attribute).
+//   7. Trace-Spans: Klick in die Tabellenzeile klappt den Attrs-<details> auf/zu.
 //
 // Charts/Punkte werden server-seitig als SVG gerendert (HeimdallCharting); dieses Script
 // reichert sie nur client-seitig an. Theme-Tokens (--hmd-*) kommen aus dem Heimdall-CSS.
@@ -708,6 +709,58 @@
             })(tas[i]);
         }
     }
+
+    // === Trace-Spans: Klick in die Zeile klappt die Attribute auf/zu ======================
+
+    // Der Attrs-<details> sitzt in der letzten Spalte — Klick irgendwo in die Zeile
+    // togglet ihn (nicht nur am Summary). Klicks auf Bedienelemente bleiben nativ:
+    // Summary (eigenes Toggle), Links, aufgeklappter Inhalt (Textauswahl/verschachtelte
+    // Details). Ohne JS bleibt das Summary der einzige Schalter — die Seite bleibt nutzbar.
+    document.addEventListener("click", function (e) {
+        var row = e.target.closest ? e.target.closest(".hmd-trace-table tbody tr") : null;
+        if (!row) return;
+        var details = row.querySelector("td > details.hmd-log-details");
+        if (!details) return;
+        if (e.target.closest("summary, a, .hmd-log-full")) return;
+        details.open = !details.open;
+    });
+
+    // Wachstum: Der aufgeklappte Inhalt soll die Zeilen darunter nach unten schieben,
+    // nicht überlagern. Die Zeile bekommt per padding-bottom (auf dem Attrs-td, tr
+    // kennt selbst kein Padding) genau die Höhe des Panels; das an der Zeile hängende
+    // absolute Panel wird per bottom:0 an den (nun tieferen) Zeilenboden gerückt und
+    // füllt die Freifläche exakt. toggle bubblt nicht — Capture-Phase am document
+    // fängt auch die nativen Summary-Toggles. Ohne JS schwebt das Panel weiter
+    // (Degradation, das Summary funktioniert nativ).
+    function syncRowGrowth(details) {
+        var panel = details.querySelector(".hmd-log-full");
+        var td = details.closest("td");
+        if (!panel || !td) return;
+        if (!details.open) {
+            td.style.paddingBottom = "";
+            panel.style.top = "";
+            panel.style.bottom = "";
+            return;
+        }
+        // Nach dem Toggle ein Frame Layout anlassen, dann die Paneelhöhe messen.
+        requestAnimationFrame(function () {
+            if (!details.open) return;
+            var h = panel.getBoundingClientRect().height;
+            td.style.paddingBottom = h + "px";
+            panel.style.top = "auto";
+            panel.style.bottom = "0";
+        });
+    }
+    document.addEventListener("toggle", function (e) {
+        var details = e.target;
+        if (!details.matches || !details.matches(".hmd-trace-table td > details.hmd-log-details")) return;
+        syncRowGrowth(details);
+    }, true);
+    // Panelhöhe ist mit 60vh gekappt — bei Fenstergrößenänderung neu vermessen.
+    window.addEventListener("resize", function () {
+        var open = document.querySelectorAll(".hmd-trace-table .hmd-log-details[open]");
+        for (var i = 0; i < open.length; i++) syncRowGrowth(open[i]);
+    });
 
     function initAll() { restoreListScroll(); initTimePicker(); initLazyPanels(); initQlHighlight(); }
 

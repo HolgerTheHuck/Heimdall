@@ -22,5 +22,6 @@
     [Parameter] public string? EditUrl { get; set; }
 
     private string AssetPath =>
-        HeimdallUiPaths.AssetBase(Http.HttpContext) + "/_content/Heimdall.Blazor/css/heimdall.css";
+        HeimdallUiPaths.AssetBase(Http.HttpContext) + "/_content/Heimdall.Blazor/css/heimdall.css"
+        + "?v=" + (typeof(GrafanaPanelFragment).Assembly.GetName().Version?.ToString() ?? "dev");
 }

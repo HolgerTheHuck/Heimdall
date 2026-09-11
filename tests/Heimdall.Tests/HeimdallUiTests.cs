@@ -115,10 +115,21 @@ public class HeimdallUiTests : HostBootTestBase
         var resp = await Client.GetAsync("/otel/trace/" + tid);
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         var body = await resp.Content.ReadAsStringAsync();
-        Assert.Contains("hmd-waterfall", body);
-        Assert.Contains("hmd-waterfall-bar", body);
-        // Zwei Spans → zwei Wasserfall-Balken.
-        Assert.Equal(2, CountOccurrences(body, "hmd-waterfall-bar"));
+        // Zeitstrahl-Spalte: 2 Spans → 2 Spuren + 2 Balken (Tooltip-Klasse bleibt).
+        Assert.Equal(2, CountOccurrences(body, "hmd-tl-track"));
+        Assert.Equal(2, CountOccurrences(body, "hmd-tl-bar"));
+        Assert.Equal(2, CountOccurrences(body, "hmd-waterfall-bar"));   // Tooltip-Klasse erhalten
+        // Histogramm: <details open>; Root (0ms) und Child (50ms von 500ms) landen in
+        // verschiedenen Buckets → 2 belegte Buckets.
+        Assert.Contains("<details class=\"hmd-tl-hist\" open>", body);
+        Assert.Contains("hmd-tl-hist-chart", body);
+        Assert.Equal(2, CountOccurrences(body, "hmd-tl-hist-bar"));
+        // Kein SVG-Wasserfall mehr (Klassen des SVG-Baus verschwunden).
+        Assert.DoesNotContain("hmd-waterfall-name", body);
+        Assert.DoesNotContain("hmd-waterfall-dur", body);
+        // DFS-Preorder: Root vor Child.
+        Assert.True(body.IndexOf("GET /api/orders", System.StringComparison.Ordinal)
+                  < body.IndexOf("db.query", System.StringComparison.Ordinal));
     }
 
     // === Chart-Datenpayload (Block 4: Crosshair/Brushing-Basis) ==========

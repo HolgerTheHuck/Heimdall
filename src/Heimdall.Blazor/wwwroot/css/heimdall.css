@@ -884,10 +884,7 @@ a:hover { text-decoration: underline; }
 .hmd-crosshair-tip { white-space: nowrap; }
 .hmd-crosshair-tip > div + div { margin-top: .15rem; }
 
-/* --- Trace-Wasserfall -------------------------------------------------- */
-.hmd-waterfall { background: var(--hmd-panel); border: 1px solid var(--hmd-border); box-shadow: var(--hmd-shadow-sm); }
-.hmd-waterfall-name { fill: var(--hmd-fg); font-size: 10px; }
-.hmd-waterfall-dur { fill: var(--hmd-chart-ink); font-size: 9px; font-weight: 600; }
+/* --- Trace-Zeitstrahl: Balken in der Span-Tabelle (Tooltip via heimdall.js) --- */
 .hmd-waterfall-bar { transition: opacity var(--hmd-tx); }
 .hmd-waterfall-bar:hover { opacity: .8; }
 
@@ -1177,3 +1174,55 @@ a:hover { text-decoration: underline; }
 .hmd-grid-pos { display: flex; flex-wrap: wrap; gap: .8rem 1.2rem; }
 .hmd-grid-pos label { flex-direction: row; align-items: center; gap: .4rem; }
 .hmd-grid-pos input[type="number"] { width: 4.2rem; }
+
+/* === Trace-Detail: Zeitstrahl (Histogramm + Balkenspalte, rein SSR) === */
+/* Tabelle im hmd-list-scroll-Panel (wie Logs/Traces): nur die Liste scrollt bei
+   schmalen Viewports, der Header klebt am Panel-Oberrand (top:0), nie unter der Nav. */
+
+/* Pro Zeile: relative Spur, absolut positionierter Balken (inline left/width in %). */
+.hmd-col-tl { width: 18%; min-width: 9rem; }
+.hmd-tl-track { position: relative; height: 14px;
+    background: var(--hmd-bg); border: 1px solid var(--hmd-line-soft);
+    border-radius: var(--hmd-radius-sm); }
+.hmd-tl-bar { position: absolute; top: 1px; bottom: 1px;
+    min-width: 2px; border-radius: 2px; }   /* Farbe inline via ColorFor */
+
+/* Feste Spaltenbreiten (table-layout:fixed) + schwebendes Attrs-Panel: das Aufklappen
+   verändert weder Spaltenbreiten noch Zeilenhöhe — der Klick-Treffer bleibt unter dem
+   Cursor und die Zeile lässt sich sofort wieder zuklappen. Klick irgendwo in die Zeile
+   klappt auf/zu (heimdall.js), nicht nur am Summary. */
+.hmd-trace-table { table-layout: fixed; width: 100%; }   /* Zeitstrahl: .hmd-col-tl (18 %) */
+.hmd-trace-table th:nth-child(3) { width: 4.5rem; }   /* Kind */
+.hmd-trace-table th:nth-child(4) { width: 11rem; }   /* Start */
+.hmd-trace-table th:nth-child(5) { width: 5rem; }   /* Dauer */
+.hmd-trace-table th:nth-child(6) { width: 7.5rem; }   /* Status */
+.hmd-trace-table th:nth-child(7) { width: 9.5rem; }   /* Attrs (nur das Summary) */
+.hmd-trace-table td { overflow-wrap: anywhere; }
+.hmd-trace-table tbody tr { cursor: pointer; }
+/* Aufgeklappter Inhalt schwebt über die Zeilenbreite (position:absolute an der Zeile,
+   die Zeilenhöhe bleibt unverändert) statt die Attrs-Spalte einzuklemmen. Höhe wächst
+   mit der Fensterhöhe mit (vh-Cap, keine feste px-Grenze); darüber scrollt der Inhalt. */
+.hmd-trace-table tbody tr { position: relative; }
+.hmd-trace-table .hmd-log-details[open] .hmd-log-full {
+    position: absolute; left: .65rem; right: .65rem; top: 100%; z-index: 5;
+    margin: .15rem 0 0; max-height: 60vh; overflow: auto;
+    background: var(--hmd-panel); box-shadow: var(--hmd-shadow);
+}
+
+/* Histogramm der Span-Starts: <details open>, nativ zuklappbar, kein JS. */
+.hmd-tl-hist { background: var(--hmd-panel); border: 1px solid var(--hmd-border);
+    border-radius: var(--hmd-radius); box-shadow: var(--hmd-shadow-sm); margin: 0 0 1rem; }
+.hmd-tl-hist > summary { cursor: pointer; padding: .5rem .75rem; color: var(--hmd-dim);
+    font-size: .78rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; }
+.hmd-tl-hist > summary:hover { color: var(--hmd-fg); }
+.hmd-tl-hist-scroll { overflow-x: auto; scrollbar-width: thin;
+    scrollbar-color: var(--hmd-border) transparent; }
+.hmd-tl-hist-chart { display: flex; align-items: flex-end; gap: 2px;
+    height: 3.5rem; padding: .35rem .75rem 0; min-width: 22rem; }
+.hmd-tl-hist-col { flex: 1 1 0; min-width: 2px; height: 100%;
+    display: flex; align-items: flex-end; }
+.hmd-tl-hist-bar { width: 100%; min-height: 2px; background: var(--hmd-accent);
+    opacity: .8; border-radius: 2px 2px 0 0; }
+.hmd-tl-hist-axis { display: flex; justify-content: space-between;
+    padding: .15rem .75rem .45rem; color: var(--hmd-dim);
+    font-family: var(--hmd-mono); font-size: .7rem; min-width: 22rem; }
