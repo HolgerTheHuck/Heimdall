@@ -62,6 +62,24 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
   Guid/DateTime/TimeSpan → String, null-Attribute entfallen.
 
 ### Behoben
+- **Auto-Refresh zerstörte Suche und aufgeklappte Logs.** Auto-Refresh macht ein
+  volles `location.reload()` — der Server rendert die Seite komplett neu, jeder
+  rein clientseitige Zustand ging dabei verloren: ein manuell aufgeklappter Log
+  (Klick auf die Zeile) klappte wieder zu, eine manuell zugeklappte
+  Service-Gruppe (`view=svc`) sprang wieder auf, und noch nicht abgeschickter
+  Text im Suchfeld (getippt, aber „Suchen" noch nicht geklickt) war weg. Jetzt
+  sichert der Auto-Refresh-Tick vor dem Reload den Zustand in `sessionStorage`
+  und stellt ihn danach wieder her — dieselbe Technik, die schon für die
+  Scroll-Position der Liste bestand (`saveListScroll`/`restoreListScroll`),
+  jetzt erweitert: `saveLogOpenState`/`restoreLogOpenState` (aufgeklappte
+  Log-Zeilen über einen neuen `data-log-key`, zugeklappte Service-Gruppen über
+  `data-group-key`) und `saveFilterEdits`/`restoreFilterEdits` (Text-/Zahl-Felder
+  und `<select>` in der Filterleiste — bewusst ohne Checkboxen/Radios, deren
+  Zustand nach dem Reload ohnehin korrekt aus der URL kommt). Wirkt auf jeder
+  Seite mit Auto-Refresh, nicht nur Logs. Verbleibende Einschränkung: Fokus und
+  Cursor-Position im Suchfeld überleben einen echten Seiten-Reload naturgemäß
+  nicht — der eingegebene Text schon, ein erneuter Klick ins Feld ist aber
+  nötig, um weiterzutippen.
 - **Zeitauswahl ging bei jedem Submit verloren, der nicht vom Preset-Knopf kam.**
   Die Presets waren Submit-Buttons mit `name="preset"` — ein Submit-Button
   steuert seinen Wert laut HTML-Spec aber nur bei, wenn *er* das Formular

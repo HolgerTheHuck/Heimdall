@@ -97,7 +97,11 @@
            der native Aufklapp-Pfeil nicht mitten im Text sitzt. *@
         @foreach (var g in _groups)
         {
-            <details class="hmd-log-group" open>
+            @* data-group-key: erlaubt heimdall.js, ein manuell zugeklapptes Service-
+               Details ueber einen Auto-Refresh-Reload hinweg wiederzufinden (sonst
+               springt jede kollabierte Gruppe beim naechsten Reload wieder auf —
+               Default ist "open"). *@
+            <details class="hmd-log-group" data-group-key="@g.Service" open>
                 <summary class="hmd-subhead hmd-log-group-summary">@g.Service <span class="hmd-dim">(@g.Logs.Count)</span></summary>
                 <div class="hmd-list-scroll">
                 <table class="hmd-table hmd-logs">

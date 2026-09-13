@@ -848,7 +848,9 @@ public class HeimdallUiTests : HostBootTestBase
         sink.WriteLogs(new[] { SeedLog(SeedNowNs(), "msg-a", "shop"), SeedLog(SeedNowNs() + 1, "msg-b", "billing") });
 
         var body = await (await Client.GetAsync("/otel/logs?view=svc&preset=1h")).Content.ReadAsStringAsync();
-        Assert.Equal(2, CountOccurrences(body, "<details class=\"hmd-log-group\" open>"));
+        Assert.Equal(2, CountOccurrences(body, "<details class=\"hmd-log-group\" data-group-key="));
+        Assert.Contains("<details class=\"hmd-log-group\" data-group-key=\"shop\" open>", body);
+        Assert.Contains("<details class=\"hmd-log-group\" data-group-key=\"billing\" open>", body);
         Assert.Contains("hmd-log-group-summary", body);
         // Kein <section>/<h2> mehr fuer die Gruppen-Ueberschrift.
         Assert.DoesNotContain("<h2 class=\"hmd-subhead\">", body);
@@ -900,6 +902,80 @@ public class HeimdallUiTests : HostBootTestBase
         var body = await (await Client.GetAsync($"/otel/trace/{hex}?ret=" + Uri.EscapeDataString(evilRet))).Content.ReadAsStringAsync();
         Assert.Contains("href=\"/otel/traces\"", body);
         Assert.DoesNotContain(evilRet, body);
+    }
+
+    // === Auto-Refresh soll Listen-Zustand nicht mehr zerstoeren =============
+
+    /// <summary>
+    /// Jede Log-Zeile traegt einen stabilen <c>data-log-key</c> — die Verankerung,
+    /// die heimdall.js braucht, um eine manuell aufgeklappte Zeile nach einem
+    /// Auto-Refresh-<c>location.reload()</c> wiederzufinden und erneut
+    /// aufzuklappen (Reload rendert die Seite komplett neu, jeder rein
+    /// clientseitige <c>&lt;details open&gt;</c>-Zustand geht sonst verloren).
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_LogZeile_TraegtDataLogKey()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        sink.WriteLogs(new[] { SeedLog(SeedNowNs(), "msg", "shop") });
+
+        var body = await (await Client.GetAsync("/otel/logs?preset=1h")).Content.ReadAsStringAsync();
+        Assert.Contains("data-log-key=\"", body);
+    }
+
+    /// <summary>
+    /// Jede Service-Gruppe (view=svc) traegt <c>data-group-key</c> = Servicename —
+    /// dieselbe Verankerung fuer eine manuell ZUGEKLAPPTE Gruppe (Default ist
+    /// offen), damit sie nach einem Auto-Refresh nicht wieder aufspringt.
+    /// </summary>
+    [Fact]
+    public async Task LogsSeiteGruppiert_Gruppe_TraegtDataGroupKey()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        sink.WriteLogs(new[] { SeedLog(SeedNowNs(), "msg", "shop") });
+
+        var body = await (await Client.GetAsync("/otel/logs?view=svc&preset=1h")).Content.ReadAsStringAsync();
+        Assert.Contains("data-group-key=\"shop\"", body);
+    }
+
+    /// <summary>
+    /// Zwei Log-Zeilen mit unterschiedlichem Body (aber sonst identischen
+    /// Merkmalen) erhalten unterschiedliche Schluessel — sonst wuerde ein
+    /// aufgeklappter Log nach dem Reload den FALSCHEN Nachbarn mit aufklappen.
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_UnterschiedlicheBodies_ErgebenUnterschiedlicheLogKeys()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var t = SeedNowNs();
+        sink.WriteLogs(new[] { SeedLog(t, "erste nachricht", "shop"), SeedLog(t, "zweite nachricht", "shop") });
+
+        var body = await (await Client.GetAsync("/otel/logs?preset=1h")).Content.ReadAsStringAsync();
+        var keys = new System.Collections.Generic.HashSet<string>();
+        foreach (System.Text.RegularExpressions.Match m in
+                 System.Text.RegularExpressions.Regex.Matches(body, "data-log-key=\"([^\"]*)\""))
+            keys.Add(m.Groups[1].Value);
+        Assert.Equal(2, keys.Count);
+    }
+
+    /// <summary>
+    /// Regression: der JS-Handler fuer das Sichern/Wiederherstellen des Listen-
+    /// Zustands ueber einen Auto-Refresh-Reload hinweg ist tatsaechlich
+    /// ausgeliefert (Scroll-Position, aufgeklappte Logs/Gruppen, noch nicht
+    /// abgeschickte Filter-Eingaben — sonst „zerstoert" jeder Reload die Liste,
+    /// die Suche und offene Details).
+    /// </summary>
+    [Fact]
+    public void HeimdallJs_EnthaeltAutoRefreshZustandserhalt()
+    {
+        // Ueber die statische Route gefetcht wäre das brüchig — die Test-Factory
+        // liefert Static-Web-Assets nicht zuverlässig (siehe HostAuthTests-
+        // Kommentar zu genau diesem Verhalten); direkt von der Platte gelesen.
+        var js = File.ReadAllText(LocateRepoFile("src", "Heimdall.Blazor", "wwwroot", "js", "heimdall.js"));
+        Assert.Contains("saveLogOpenState", js);
+        Assert.Contains("restoreLogOpenState", js);
+        Assert.Contains("saveFilterEdits", js);
+        Assert.Contains("restoreFilterEdits", js);
     }
 
     private static string LocateRepoFile(params string[] parts)

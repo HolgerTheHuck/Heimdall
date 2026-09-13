@@ -505,21 +505,27 @@
         });
     }, true);
 
-    // === Auto-Refresh: Scroll-Position der Liste erhalten ==================
-    // Die Log-/Trace-Liste scrollt im eigenen Container (.hmd-list-scroll,
-    // overflow:auto + Sticky-Header). location.reload() stellt nur die
-    // Fenster-Scroll-Position wieder her — der Listen-Container springt nach
-    // oben und der User verliert beim Refresh seine Position. Deshalb: vor
-    // dem Reload in sessionStorage sichern, nach dem Load wiederherstellen.
+    // === Auto-Refresh: Listen-Zustand erhalten ==============================
+    // Auto-Refresh macht ein volles location.reload() — der Server rendert die
+    // Seite komplett neu, jeder clientseitige Zustand (Scroll-Position, manuell
+    // aufgeklappte Logs/Gruppen, noch nicht abgeschickte Filter-Eingaben) geht
+    // dabei verloren. Alles Folgende sichert diesen Zustand in sessionStorage
+    // VOR dem Reload und stellt ihn NACH dem Load wieder her — dieselbe Technik,
+    // die schon fuer die Scroll-Position bestand, jetzt auf drei Aspekte erweitert.
     // Key = URL OHNE refresh-Param (sonst würde auch der Interval-Wechsel im
-    // Refresh-Select die Position wegwerfen); Filter-Änderungen erzeugen
-    // andere Keys → neue Ergebnismenge startet bewusst oben.
+    // Refresh-Select den Zustand wegwerfen); Filter-Änderungen erzeugen andere
+    // Keys → neue Ergebnismenge startet bewusst frisch (kein Aufklapp-Zustand
+    // einer ANDEREN Ergebnismenge wird uebernommen).
 
-    function listScrollKey() {
+    function refreshStorageKey(prefix) {
         var p = new URLSearchParams(location.search);
         p.delete("refresh");
-        return "hmdListScroll:" + location.pathname + "?" + p.toString();
+        return prefix + location.pathname + "?" + p.toString();
     }
+
+    function listScrollKey() { return refreshStorageKey("hmdListScroll:"); }
+    function logOpenKey() { return refreshStorageKey("hmdLogOpen:"); }
+    function filterEditKey() { return refreshStorageKey("hmdFilterEdit:"); }
 
     function saveListScroll() {
         var el = document.querySelector(".hmd-list-scroll");
@@ -543,6 +549,89 @@
         el.scrollLeft = pos.l || 0;
     }
 
+    // Manuell aufgeklappte Log-Zeilen (Default zugeklappt → offene Keys sichern)
+    // UND manuell zugeklappte Service-Gruppen (Default offen → geschlossene Keys
+    // sichern) — je die Abweichung vom Default, nicht den Default selbst.
+    function saveLogOpenState() {
+        var openRows = [];
+        var rows = document.querySelectorAll("tr[data-log-key]");
+        for (var i = 0; i < rows.length; i++) {
+            var d = rows[i].querySelector("details.hmd-log-details");
+            if (d && d.open) openRows.push(rows[i].getAttribute("data-log-key"));
+        }
+        var closedGroups = [];
+        var groups = document.querySelectorAll("details.hmd-log-group[data-group-key]");
+        for (var j = 0; j < groups.length; j++) {
+            if (!groups[j].open) closedGroups.push(groups[j].getAttribute("data-group-key"));
+        }
+        if (openRows.length === 0 && closedGroups.length === 0) return;
+        try {
+            sessionStorage.setItem(logOpenKey(), JSON.stringify({ open: openRows, closedGroups: closedGroups }));
+        } catch (e) { /* kein Storage — Refresh trotzdem ausführen */ }
+    }
+
+    function restoreLogOpenState() {
+        var raw;
+        try { raw = sessionStorage.getItem(logOpenKey()); } catch (e) { return; }
+        if (!raw) return;
+        try { sessionStorage.removeItem(logOpenKey()); } catch (e) { }
+        var state;
+        try { state = JSON.parse(raw); } catch (e) { return; }
+        (state.open || []).forEach(function (key) {
+            var tr = document.querySelector('tr[data-log-key="' + cssEscape(key) + '"]');
+            var d = tr && tr.querySelector("details.hmd-log-details");
+            if (d) d.open = true;
+        });
+        (state.closedGroups || []).forEach(function (key) {
+            var d = document.querySelector('details.hmd-log-group[data-group-key="' + cssEscape(key) + '"]');
+            if (d) d.open = false;
+        });
+    }
+
+    // Minimaler CSS.escape-Ersatz fuer Attribut-Selektoren (aeltere Browser ohne
+    // CSS.escape) — Schluessel/Servicenamen koennen Anfuehrungszeichen enthalten.
+    function cssEscape(s) {
+        if (window.CSS && CSS.escape) return CSS.escape(s);
+        return String(s).replace(/["\\]/g, "\\$&");
+    }
+
+    // Noch nicht abgeschickte Eingaben in der Filterleiste (getippter Suchtext,
+    // eine gerade erst gewaehlte Severity/Version/Ansicht, bevor „Suchen“ geklickt
+    // wurde) — location.reload() laedt exakt dieselbe URL neu, der Server rendert
+    // also wieder GENAU den Stand von vor dem Tippen. Ohne dieses Sichern/
+    // Wiederherstellen loescht jeder Auto-Refresh-Tick, was man gerade eintippt.
+    // Bewusst nur Text-/Such-/Zahl-Felder + <select> — Checkboxen/Radios (Service-
+    // Auswahl, Zeit-Presets) bleiben aussen vor, deren Default nach dem Reload
+    // ist ohnehin korrekt (aus der URL abgeleitet).
+    function saveFilterEdits() {
+        var form = document.querySelector("form.hmd-filters");
+        if (!form) return;
+        var data = {};
+        var els = form.querySelectorAll('input[type="text"], input[type="search"], input[type="number"], select');
+        for (var i = 0; i < els.length; i++) {
+            if (els[i].name) data[els[i].name] = els[i].value;
+        }
+        if (Object.keys(data).length === 0) return;
+        try { sessionStorage.setItem(filterEditKey(), JSON.stringify(data)); } catch (e) { }
+    }
+
+    function restoreFilterEdits() {
+        var raw;
+        try { raw = sessionStorage.getItem(filterEditKey()); } catch (e) { return; }
+        if (!raw) return;
+        try { sessionStorage.removeItem(filterEditKey()); } catch (e) { }
+        var data;
+        try { data = JSON.parse(raw); } catch (e) { return; }
+        var form = document.querySelector("form.hmd-filters");
+        if (!form) return;
+        Object.keys(data).forEach(function (name) {
+            var el = form.elements[name];
+            if (!el || el instanceof RadioNodeList) return;   // Radios/Checkboxen ausser Reichweite
+            if (el.tagName === "SELECT" || el.type === "text" || el.type === "search" || el.type === "number")
+                el.value = data[name];
+        });
+    }
+
     function startAutoRefresh() {
         var params = new URLSearchParams(location.search);
         var r = params.get("refresh");
@@ -551,7 +640,12 @@
         if (!m) return;
         var secs = parseInt(m[1], 10) * (m[2] === "m" ? 60 : 1);
         if (secs < 3) return;
-        var iv = setInterval(function () { saveListScroll(); location.reload(); }, secs * 1000);
+        var iv = setInterval(function () {
+            saveListScroll();
+            saveLogOpenState();
+            saveFilterEdits();
+            location.reload();
+        }, secs * 1000);
         var badge = document.createElement("div");
         badge.className = "hmd-refresh-badge";
         badge.setAttribute("role", "status");
@@ -799,7 +893,14 @@
         for (var i = 0; i < open.length; i++) syncRowGrowth(open[i]);
     });
 
-    function initAll() { restoreListScroll(); initTimePicker(); initLazyPanels(); initQlHighlight(); }
+    function initAll() {
+        restoreListScroll();
+        restoreLogOpenState();
+        restoreFilterEdits();
+        initTimePicker();
+        initLazyPanels();
+        initQlHighlight();
+    }
 
     if (document.readyState === "loading") {
         document.addEventListener("DOMContentLoaded", initAll);

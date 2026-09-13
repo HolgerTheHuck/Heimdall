@@ -10,7 +10,10 @@
    (flache Logs-Liste) kommt der Service zwischen Zeit und Sev. *@
 @using System.Collections.Generic
 @inject Heimdall.Blazor.IHeimdallI18n I18n
-<tr class="@SevClass()">
+@* data-log-key: stabiler (best-effort) Schluessel fuer diese Zeile, damit
+   heimdall.js einen manuell aufgeklappten Log ueber einen Auto-Refresh-Reload
+   hinweg wiederfinden und erneut aufklappen kann (siehe LogKey() unten). *@
+<tr class="@SevClass()" data-log-key="@LogKey()">
     <td class="hmd-mono">@HeimdallFmt.Ts(Log.TimeUnixNano)</td>
     @if (ShowService)
     {
@@ -152,4 +155,31 @@
     }
 
     private string SevClass() => "hmd-sev-" + HeimdallFmt.Sev(Log.Severity).ToLowerInvariant();
+
+    /// <summary>
+    /// Best-effort-Schluessel dieser Log-Zeile ueber einen Reload hinweg (Auto-
+    /// Refresh macht ein <c>location.reload()</c>, das jede clientseitige
+    /// <c>&lt;details&gt;</c>-Aufklapp-Markierung verwirft — der Schluessel erlaubt
+    /// heimdall.js, dieselbe Zeile nach dem Reload wiederzufinden und erneut
+    /// aufzuklappen). Zeitstempel+Severity+Trace+Span grenzen praktisch immer ein;
+    /// der Body-Hash faengt den seltenen Fall unverknuepfter Logs (kein Trace/Span)
+    /// im selben Nanosekunden-Tick ab. Keine kryptografische Anforderung — eine
+    /// Kollision waere hoechstens ein falsch wiederaufgeklappter Log, kein
+    /// Sicherheitsproblem.
+    /// </summary>
+    private string LogKey() =>
+        Log.TimeUnixNano.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" +
+        Log.Severity.ToString(System.Globalization.CultureInfo.InvariantCulture) + "|" +
+        (Log.TraceId ?? "") + "|" + (Log.SpanId ?? "") + "|" + StableHash(Log.Body);
+
+    private static string StableHash(string? s)
+    {
+        if (string.IsNullOrEmpty(s)) return "0";
+        unchecked
+        {
+            uint h = 5381;
+            foreach (var c in s) h = ((h << 5) + h) ^ c;
+            return h.ToString("x8", System.Globalization.CultureInfo.InvariantCulture);
+        }
+    }
 }
