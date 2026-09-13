@@ -192,6 +192,47 @@ public class HeimdallUiTests : HostBootTestBase
     }
 
     /// <summary>
+    /// Ohne <c>?preset=</c> markiert die Leiste das Preset, das der Server
+    /// tatsaechlich anwendet (sein Fallback). Vorher war beim Landen auf einer
+    /// Seite ohne Preset-Parameter NICHTS markiert, obwohl serverseitig ein
+    /// Stundenfenster galt — die Leiste sah aus wie „alles deselektiert = alles
+    /// sehen", zeigte aber nur die letzte Stunde.
+    /// </summary>
+    [Theory]
+    [InlineData("/otel/logs", "1h")]
+    [InlineData("/otel/traces", "1h")]
+    [InlineData("/otel/endpoints", "24h")]   // eigene Seite, eigenes Fallback
+    [InlineData("/otel/dashboard", "24h")]
+    public async Task TimeRange_OhnePresetParam_MarkiertDasFallback(string url, string expected)
+    {
+        var body = await (await Client.GetAsync(url)).Content.ReadAsStringAsync();
+        Assert.Contains($"type=\"radio\" name=\"preset\" value=\"{expected}\" checked", body);
+        Assert.Equal(1, CountOccurrences(body, "hmd-range-btn is-active"));
+    }
+
+    /// <summary>
+    /// „Alles" ist der explizite Knopf fuer „alles sehen": er loest zu einem
+    /// unbegrenzten Fenster auf und zeigt damit auch Daten, die aelter sind als
+    /// jedes zeitliche Preset.
+    /// </summary>
+    [Fact]
+    public async Task TimeRange_PresetAlles_ZeigtAuchAlteDaten()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var alt = SeedNowNs() - 3L * 24 * 3600 * 1_000_000_000L;   // 3 Tage alt
+        sink.WriteLogs(new[] { SeedLog(alt, "uralt-eintrag", "shop") });
+
+        // Default-Fenster (1 h) sieht ihn nicht ...
+        var eng = await (await Client.GetAsync("/otel/logs")).Content.ReadAsStringAsync();
+        Assert.DoesNotContain("uralt-eintrag", eng);
+
+        // ... „Alles" schon.
+        var alles = await (await Client.GetAsync("/otel/logs?preset=all")).Content.ReadAsStringAsync();
+        Assert.Contains("uralt-eintrag", alles);
+        Assert.Contains("type=\"radio\" name=\"preset\" value=\"all\" checked", alles);
+    }
+
+    /// <summary>
     /// Kein Preset-Knopf ist mehr ein Submit-Button. Das schliesst die implizite
     /// Submission: Enter in einem Textfeld aktiviert den ERSTEN Submit-Button des
     /// Formulars — das war „15 Minuten", womit Suchbegriff+Enter still auf ein

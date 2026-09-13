@@ -80,6 +80,16 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
   über `preset`, der Klick bliebe sonst wirkungslos), und umgekehrt hakt eine
   explizite Spanne die Presets ab, damit die URL nicht ein Preset zeigt, das
   gar nicht gilt.
+- **Zeitleiste zeigte beim Landen gar keine Auswahl, obwohl eine galt.** Ohne
+  `?preset=` in der URL wendet der Server sein Fallback an (1 h; Dashboard und
+  Endpoints 24 h), die Leiste verglich aber gegen den rohen Parameter und
+  markierte deshalb nichts — der Zustand sah aus wie „alles deselektiert = alles
+  sehen", während in Wahrheit ein Stundenfenster galt. Das war der Landezustand
+  jeder frischen Navigation. Die Leiste markiert jetzt das *wirksame* Preset
+  (neuer `FallbackPreset`-Parameter an `HeimdallTimeRange`, von Dashboard und
+  Endpoints auf 24 h gesetzt — passend zu ihrem `HeimdallRange.Resolve`-Aufruf).
+  „Alles sehen" ist und bleibt der explizite Knopf **Alles** (unbegrenztes
+  Fenster).
 - **Filterleiste sprang bei jeder Auswahl und bei jedem Sprachwechsel.** Drei
   Ursachen: (1) der aktive Preset-Knopf bekam `font-weight: 600` — fetter Text
   ist breiter, der Knopf wuchs beim Anwählen und schob seine Nachbarn (und beim

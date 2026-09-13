@@ -28,7 +28,7 @@
         <label>@I18n.T("endpoint.filter.actionattr") <input type="search" name="actionAttr" value="@ActionAttr" /></label>
         <label>@I18n.T("endpoint.filter.routeattr") <input type="search" name="routeAttr" value="@RouteAttr" /></label>
         <label>@I18n.T("metrics.filter.limit") <input type="number" name="limit" value="@Limit" min="1" max="20000" /></label>
-        <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
+        <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" FallbackPreset="24h" />
         <button type="submit">@I18n.T("metrics.filter.load")</button>
     </form>
 

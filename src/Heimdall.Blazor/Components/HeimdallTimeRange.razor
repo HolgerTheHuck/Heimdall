@@ -25,7 +25,13 @@
     <div class="hmd-range-btns" role="radiogroup" aria-label="@I18n.T("timerange.aria")">
         @foreach (var p in HeimdallRange.Presets)
         {
-            var isOn = Preset == p.Key && From is null && To is null;
+            @* Gegen das WIRKSAME Preset vergleichen, nicht gegen den rohen Parameter.
+               Ohne ?preset= in der URL wendet der Server sein Fallback an (1 h, auf
+               Dashboard/Endpoints 24 h) — die Leiste zeigte dann GAR KEINE Auswahl
+               und sah damit aus wie „alles deselektiert = alles sehen", waehrend in
+               Wahrheit ein Stundenfenster galt. Genau der Landezustand jeder frischen
+               Navigation. *@
+            var isOn = EffectivePreset == p.Key && From is null && To is null;
             var label = I18n.T("timerange.preset." + p.Key);
             @* data-lbl traegt dieselbe Beschriftung: das CSS reserviert damit vorab
                die Breite der FETTEN (aktiven) Variante, sonst wuechse der Knopf beim
@@ -63,6 +69,19 @@
 @code {
     /// <summary>Aktives Preset (Key) oder null für „kein Preset".</summary>
     [Parameter] public string? Preset { get; set; }
+
+    /// <summary>
+    /// Preset, das die Seite anwendet, wenn weder <see cref="Preset"/> noch
+    /// <see cref="From"/>/<see cref="To"/> gesetzt sind — muss zum
+    /// <c>fallbackPreset</c> ihres <see cref="HeimdallRange.Resolve"/>-Aufrufs
+    /// passen (Default 1 h; Dashboard und Endpoints nutzen 24 h). Nur fuer die
+    /// Markierung: ohne ihn zeigt die Leiste beim Landen auf einer Seite ohne
+    /// <c>?preset=</c> keine Auswahl, obwohl serverseitig eines gilt.
+    /// </summary>
+    [Parameter] public string FallbackPreset { get; set; } = "1h";
+
+    /// <summary>Das tatsaechlich wirksame Preset (Parameter, sonst Fallback).</summary>
+    private string EffectivePreset => string.IsNullOrWhiteSpace(Preset) ? FallbackPreset : Preset!;
     /// <summary>Explizite untere Schranke (Unix-ns); überschreibt Preset.</summary>
     [Parameter] public long? From { get; set; }
     /// <summary>Explizite obere Schranke (Unix-ns); überschreibt Preset.</summary>
