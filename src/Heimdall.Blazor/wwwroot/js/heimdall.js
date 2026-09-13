@@ -487,8 +487,15 @@
         };
         set(fromIso, "from");
         set(toIso, "to");
-        // Wenn explizite Zeiten gesendet werden, preset verwerfen.
-        if (fromIso && fromIso.value) { var p = form.querySelector('input[name="preset"], button[name="preset"]'); if (p && p.type === "hidden") p.remove(); }
+        // Wenn explizite Zeiten gesendet werden, preset verwerfen: serverseitig
+        // gewinnen from/to ohnehin (HeimdallRange.Resolve), aber ein zusaetzlich
+        // mitgeschicktes preset macht die URL unehrlich (Bookmark zeigt ein
+        // Preset, das nicht gilt). Presets sind Radios — abwaehlen heisst
+        // uncheck, nicht remove.
+        if (fromIso && fromIso.value) {
+            var radios = form.querySelectorAll('input[type="radio"][name="preset"]');
+            for (var i = 0; i < radios.length; i++) radios[i].checked = false;
+        }
         // Leere from/to-hidden-Felder entfernen, damit sie nicht als `from=&to=` (leer)
         // gesendet werden — sonst unschöne URLs und (ohne serverseitige Toleranz) ein
         // Bindungsfehler bei Preset-Submit. Gefüllte Felder bleiben (siehe set() oben).
@@ -576,9 +583,39 @@
         });
     }
 
+    // Preset-Radios: Klick schickt das Filter-Formular sofort ab (Progressive
+    // Enhancement). Die Presets sind bewusst Radios und keine Submit-Buttons —
+    // nur so ueberlebt die Zeitauswahl jeden anderen Submit („Suchen", Enter im
+    // Suchfeld). Ohne JS greift die Auswahl beim naechsten Submit; mit JS fuehlt
+    // sich der Klick an wie vorher (ein Klick = neue Ansicht).
+    function bindPresetRadios() {
+        var radios = document.querySelectorAll('.hmd-range-btn > input[type="radio"][name="preset"]');
+        for (var i = 0; i < radios.length; i++) {
+            var r = radios[i];
+            if (r._hmdBound) continue;
+            r._hmdBound = true;
+            r.addEventListener("change", function (e) {
+                var f = e.target.form;
+                if (!f) return;
+                // Ein neu gewaehltes Preset schlaegt eine alte benutzerdefinierte
+                // Spanne: serverseitig gewinnen from/to ueber preset
+                // (HeimdallRange.Resolve), der Klick bliebe sonst wirkungslos.
+                // Auch die ISO-Felder leeren — der submit-Handler unten befuellt
+                // from/to sonst gleich wieder aus ihnen.
+                ["from", "to", "from-iso", "to-iso"].forEach(function (n) {
+                    var el = f.querySelector('input[name="' + n + '"]');
+                    if (el) el.value = "";
+                });
+                if (typeof f.requestSubmit === "function") f.requestSubmit();
+                else f.submit();
+            });
+        }
+    }
+
     function initTimePicker() {
         startAutoRefresh();
         bindRefreshSelect();
+        bindPresetRadios();
     }
 
     // === Lazy Dashboard-Panels ============================================

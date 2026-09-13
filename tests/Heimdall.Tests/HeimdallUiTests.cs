@@ -163,9 +163,45 @@ public class HeimdallUiTests : HostBootTestBase
         var body = await resp.Content.ReadAsStringAsync();
         Assert.Contains("hmd-range-btn", body);
         Assert.Contains("name=\"preset\" value=\"1h\"", body);
-        Assert.Contains("aria-pressed=\"true\"", body);   // 1h aktiv
+        // Presets sind Radios (nicht Submit-Buttons): der angehakte Wert wird bei
+        // JEDEM Submit mitgeschickt, nicht nur wenn der Preset-Knopf selbst
+        // abgeschickt hat. Aktiv-Zustand = checked + serverseitiges is-active.
+        Assert.Contains("type=\"radio\" name=\"preset\" value=\"1h\" checked", body);
+        Assert.Contains("hmd-range-btn is-active", body);
         Assert.Contains("name=\"refresh\"", body);        // Auto-Refresh-Select
         Assert.Contains("datetime-local", body);          // Benutzerdefiniert-Felder
+    }
+
+    /// <summary>
+    /// Die Zeitauswahl ueberlebt einen Submit, der NICHT vom Preset-Knopf kam.
+    /// Frueher trugen die Presets ihren Wert nur als Submit-Button-name/value —
+    /// ein Klick auf „Suchen" (oder Enter im Suchfeld) schickte gar kein preset
+    /// mit, und der Server fiel auf den Default zurueck. Als Radio wird der
+    /// angehakte Wert immer mitgesendet; hier simuliert durch einen Request, der
+    /// preset zusammen mit anderen Filtern traegt.
+    /// </summary>
+    [Fact]
+    public async Task TimeRange_PresetUeberlebtFremdenSubmit()
+    {
+        // Wie der Browser es nach „Suchen" schickt: alle Formularfelder inkl. des
+        // angehakten Preset-Radios.
+        var body = await (await Client.GetAsync(
+            "/otel/traces?name=&svc=&ver=&err=&limit=100&preset=24h&refresh=")).Content.ReadAsStringAsync();
+        Assert.Contains("type=\"radio\" name=\"preset\" value=\"24h\" checked", body);
+        Assert.DoesNotContain("type=\"radio\" name=\"preset\" value=\"1h\" checked", body);
+    }
+
+    /// <summary>
+    /// Kein Preset-Knopf ist mehr ein Submit-Button. Das schliesst die implizite
+    /// Submission: Enter in einem Textfeld aktiviert den ERSTEN Submit-Button des
+    /// Formulars — das war „15 Minuten", womit Suchbegriff+Enter still auf ein
+    /// 15-Minuten-Fenster sprang.
+    /// </summary>
+    [Fact]
+    public async Task TimeRange_PresetsSindKeineSubmitButtons()
+    {
+        var body = await (await Client.GetAsync("/otel/logs?preset=1h")).Content.ReadAsStringAsync();
+        Assert.DoesNotContain("<button type=\"submit\" name=\"preset\"", body);
     }
 
     /// <summary>

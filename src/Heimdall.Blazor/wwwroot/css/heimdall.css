@@ -207,7 +207,14 @@ a:hover { text-decoration: underline; }
     border-radius: 4px;
     padding: .3rem .4rem;
     font-size: .85rem;
-    min-width: 8rem;
+    /* FESTE Breite statt min-width: ein <select> ist so breit wie seine
+       laengste Option, ein Textfeld so breit wie sein Inhalt es zulaesst.
+       Mit min-width sprang die ganze Leiste bei jeder Auswahl um — das
+       Versions-Dropdown etwa zwischen „—" (deaktiviert) und einer Liste
+       echter Versionsnummern, und beim Sprachwechsel alle Felder auf
+       einmal. Breite Felder setzen ihre eigene Breite (z. B. .hmd-logq). */
+    width: 9rem; max-width: 100%;
+    box-sizing: border-box;
     text-transform: none;          /* Label-UpperStyle greift nicht im Control */
     letter-spacing: normal;
     font-weight: 400;
@@ -243,7 +250,7 @@ a:hover { text-decoration: underline; }
    Selektoren mit .hmd-filters-Praefix, damit sie gegen .hmd-filters label /
    .hmd-filters input (Typ-Selektor) gewinnen. */
 .hmd-filter-field { display: flex; flex-direction: column; gap: .2rem; color: var(--hmd-dim); font-size: .72rem; text-transform: uppercase; letter-spacing: .07em; font-weight: 600; }
-.hmd-msel { position: relative; min-width: 8rem; }
+.hmd-msel { position: relative; width: 9rem; max-width: 100%; }
 .hmd-msel > summary {
     list-style: none;                       /* nativen Details-Pfeil aus */
     display: flex;
@@ -269,7 +276,7 @@ a:hover { text-decoration: underline; }
 .hmd-msel > summary:hover { border-color: var(--hmd-accent); }
 .hmd-msel > summary:focus-visible { border-color: var(--hmd-accent); box-shadow: 0 0 0 2px var(--hmd-accent-dim); }
 .hmd-msel[open] > summary { border-color: var(--hmd-accent); }
-.hmd-msel-text { max-width: 12rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hmd-msel-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .hmd-msel-count { margin-left: auto; font-size: .7rem; background: var(--hmd-accent-dim); color: var(--hmd-on-accent); border-radius: 999px; padding: 0 .45rem; }
 .hmd-msel-count:empty { display: none; }
 .hmd-msel-chev { color: var(--hmd-dim); transition: transform var(--hmd-tx); }
@@ -668,15 +675,38 @@ a:hover { text-decoration: underline; }
     display: inline-flex; flex-wrap: wrap; gap: .35rem;
     background: transparent;
 }
+/* Segment = <label> um einen Radio (siehe HeimdallTimeRange). Der Radio selbst
+   ist visuell weg, aber fokussierbar — die Tastaturbedienung (Pfeiltasten in der
+   Gruppe) bleibt die native. */
 .hmd-range-btn {
-    appearance: none; -webkit-appearance: none;
+    position: relative; display: inline-grid; place-items: center;
     background: var(--hmd-bg); color: var(--hmd-dim);
     border: 1px solid var(--hmd-border); border-radius: var(--hmd-radius-sm);
     padding: .35rem .6rem; font-size: .78rem; cursor: pointer;
+    /* Die Filterleiste erbt uppercase/letter-spacing von .hmd-filters label —
+       im Segment gilt die eigene Typografie (wie bei input/select). */
+    text-transform: none; letter-spacing: normal; font-weight: 400;
     transition: background var(--hmd-tx), color var(--hmd-tx), border-color var(--hmd-tx);
 }
+.hmd-range-btn > input[type="radio"] {
+    position: absolute; opacity: 0; width: 100%; height: 100%;
+    margin: 0; cursor: pointer;
+}
+/* Breite der fetten (aktiven) Beschriftung vorab reservieren: das Pseudo-Element
+   traegt denselben Text in font-weight 600, ist aber hoehenlos und unsichtbar.
+   Ohne das wuchs der Knopf beim Anwaehlen und schob die Nachbarn zur Seite —
+   bei jedem Preset-Wechsel und bei jedem Sprachwechsel sprang das Layout. */
+.hmd-range-btn::after {
+    content: attr(data-lbl);
+    grid-area: 1 / 1;
+    font-weight: 600;
+    height: 0; overflow: hidden; visibility: hidden;
+    pointer-events: none;
+}
+.hmd-range-btn > span { grid-area: 1 / 1; }
 .hmd-range-btn:hover { background: var(--hmd-row-hover); color: var(--hmd-fg); }
-.hmd-range-btn[aria-pressed="true"] {
+.hmd-range-btn.is-active,
+.hmd-range-btn:has(input:checked) {
     background: var(--hmd-accent-dim); color: var(--hmd-fg);
     font-weight: 600; border-color: var(--hmd-accent);
     box-shadow: inset 0 -2px 0 var(--hmd-accent);
@@ -824,7 +854,7 @@ a:hover { text-decoration: underline; }
 .hmd-filters textarea { width: 100%; font-family: var(--hmd-mono); font-size: .78rem; }
 
 /* --- LogQL-Suchfeld (Logs-Seite): breit, Monospace für {k=v} |= "t" -------- */
-.hmd-logq input { min-width: 22rem; font-family: var(--hmd-mono); }
+.hmd-logq input { width: min(22rem, 100%); font-family: var(--hmd-mono); }
 
 /* --- Quick-Nav-Kacheln (Landing) --------------------------------------- */
 .hmd-navcards {
@@ -1020,10 +1050,15 @@ a:hover { text-decoration: underline; }
 .hmd-navcard:focus-visible,
 .hmd-btn:focus-visible,
 .hmd-lang-btn:focus-visible,
-.hmd-range-btn:focus-visible {
+.hmd-range-btn:focus-visible,
+/* Segment ist ein <label>; fokussierbar ist der Radio darin — der Ring gehoert
+   trotzdem um das sichtbare Segment. */
+.hmd-range-btn:has(> input:focus-visible) {
     outline: 2px solid var(--hmd-accent);
     outline-offset: 2px;
 }
+/* ... und nicht zusaetzlich um den unsichtbaren Radio selbst. */
+.hmd-range-btn > input[type="radio"]:focus-visible { outline: none; }
 
 /* === a11y: Skip-Link ================================================ */
 .hmd-skip {

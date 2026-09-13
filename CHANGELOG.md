@@ -62,6 +62,34 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
   Guid/DateTime/TimeSpan → String, null-Attribute entfallen.
 
 ### Behoben
+- **Zeitauswahl ging bei jedem Submit verloren, der nicht vom Preset-Knopf kam.**
+  Die Presets waren Submit-Buttons mit `name="preset"` — ein Submit-Button
+  steuert seinen Wert laut HTML-Spec aber nur bei, wenn *er* das Formular
+  abgeschickt hat. Klick auf „1 Stunde" (→ `preset=1h`), dann Klick auf
+  „Suchen": kein `preset` im Payload, Server fiel auf den Default zurück. Der
+  gleiche Mechanismus traf die implizite Submission: der erste Submit-Button im
+  Formular war „15 Minuten", und Enter in einem Textfeld aktiviert genau den —
+  Suchbegriff eintippen und Enter drücken sprang still auf ein
+  15-Minuten-Fenster. Presets sind jetzt eine echte Radio-Gruppe: der angehakte
+  Wert wird bei *jedem* Submit mitgeschickt, bleibt genau ein Wert (kein
+  doppelter Parameter, keine Server-Änderung) und ist für Screenreader die
+  richtige Semantik (eins aus N statt N unabhängige Schalter). Ein Klick
+  schickt weiterhin sofort ab (`heimdall.js`, Progressive Enhancement); ohne JS
+  greift die Auswahl beim nächsten Submit. Ein neu gewähltes Preset räumt eine
+  zuvor gesetzte benutzerdefinierte Spanne weg (serverseitig gewinnen `from`/`to`
+  über `preset`, der Klick bliebe sonst wirkungslos), und umgekehrt hakt eine
+  explizite Spanne die Presets ab, damit die URL nicht ein Preset zeigt, das
+  gar nicht gilt.
+- **Filterleiste sprang bei jeder Auswahl und bei jedem Sprachwechsel.** Drei
+  Ursachen: (1) der aktive Preset-Knopf bekam `font-weight: 600` — fetter Text
+  ist breiter, der Knopf wuchs beim Anwählen und schob seine Nachbarn (und beim
+  Sprachwechsel alle fünf auf einmal). Die Breite der fetten Variante wird jetzt
+  über ein höhenloses Pseudo-Element vorab reserviert. (2) `min-width: 8rem` auf
+  den Filter-Controls ist ein Minimum, keine Breite: ein `<select>` ist so breit
+  wie seine längste Option — das Versions-Dropdown sprang zwischen „—"
+  (deaktiviert) und echten Versionsnummern. Jetzt feste Breite
+  (`width: 9rem`, `max-width: 100%` fürs Handy). (3) dito die
+  Service-Combobox, deren Summary zwischen „alle" und Auswahl-Text wechselte.
 - **⚠ Logs-Seite lieferte 500, sobald ein Log einen Scope-Namen trug** (also bei
   praktisch jedem echten OTel-Sender — der Scope ist der Logger-/Source-Name).
   Beim Format-v2-Umbau bekam in `ReadLog` auch Projektionsposition 7 den

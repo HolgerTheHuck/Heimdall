@@ -8,12 +8,35 @@
 @using System.Globalization
 @inject Heimdall.Blazor.IHeimdallI18n I18n
 <div class="hmd-timerange">
-    <div class="hmd-range-btns" role="group" aria-label="@I18n.T("timerange.aria")">
+    @* Presets als ECHTE Radio-Gruppe, nicht als Submit-Buttons.
+       Ein Submit-Button steuert seinen name/value nur bei, wenn ER das Formular
+       abgeschickt hat (HTML-Spec: „submitter"). Als Buttons ging die Zeitauswahl
+       deshalb bei jedem anderen Submit verloren — Klick auf „Suchen" schickte gar
+       kein preset mit, der Server fiel auf den Default zurueck. Schlimmer noch: der
+       erste Submit-Button im Formular war „15 Minuten", und Enter in einem Textfeld
+       loest genau den aus (implizite Submission) — Suchbegriff + Enter sprang still
+       auf 15 Minuten.
+       Ein angehakter Radio wird IMMER mitgeschickt, egal wer abschickt: die Auswahl
+       ueberlebt „Suchen" und Enter, bleibt genau ein Wert (kein doppelter
+       preset-Parameter, keine Server-Aenderung) und ist fuer Screenreader die
+       richtige Semantik (eins aus N statt N unabhaengige Schalter).
+       Ein Klick schickt weiterhin sofort ab — das uebernimmt heimdall.js
+       (Progressive Enhancement); ohne JS greift die Auswahl beim naechsten Submit. *@
+    <div class="hmd-range-btns" role="radiogroup" aria-label="@I18n.T("timerange.aria")">
         @foreach (var p in HeimdallRange.Presets)
         {
             var isOn = Preset == p.Key && From is null && To is null;
-            <button type="submit" name="preset" value="@p.Key" class="hmd-range-btn"
-                    aria-pressed="@(isOn ? "true" : "false")">@I18n.T("timerange.preset." + p.Key)</button>
+            var label = I18n.T("timerange.preset." + p.Key);
+            @* data-lbl traegt dieselbe Beschriftung: das CSS reserviert damit vorab
+               die Breite der FETTEN (aktiven) Variante, sonst wuechse der Knopf beim
+               Anwaehlen und schoebe die halbe Filterleiste zur Seite. *@
+            @* is-active kommt vom Server (deterministisch, ohne :has()-Support);
+               :has(input:checked) ergaenzt es fuer den Moment zwischen Klick und
+               Submit bzw. wenn JS aus ist. *@
+            <label class="hmd-range-btn@(isOn ? " is-active" : "")" data-lbl="@label">
+                <input type="radio" name="preset" value="@p.Key" checked="@isOn" />
+                <span>@label</span>
+            </label>
         }
     </div>
     <details class="hmd-range-custom">
