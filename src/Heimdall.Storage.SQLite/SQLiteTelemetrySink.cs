@@ -37,6 +37,11 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     private const int MaxRegexCacheEntries = 256;
     private int _disposed;
 
+    // Count(*)-Cache je Tabelle (siehe Count): Wert + Zeitpunkt der Ermittlung.
+    // Fester Schluesselraum (die Tabellennamen dieser Klasse) — kein Cap noetig.
+    private readonly Dictionary<string, (long Value, long AtTicks)> _countCache = new(StringComparer.Ordinal);
+    private static readonly long CountCacheTtlTicks = TimeSpan.FromSeconds(10).Ticks;
+
     // Retention- & Eviction-Zähler (A4-Observability, siehe SQLiteTelemetrySink.MetricSource.cs).
     private long _retDeletedSpans, _retDeletedLogs, _retDeletedMetrics;
     private long _retEvictedSpans, _retEvictedLogs, _retEvictedMetrics;
@@ -180,6 +185,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             }
             tx.Commit();
             Interlocked.Add(ref _hostIngestSpans, spans.Count);   // C3: ingested-Volume
+            BumpCount("heim_spans", spans.Count);                 // Count(*)-Cache fortschreiben
         }
     }
 
@@ -208,6 +214,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             }
             tx.Commit();
             Interlocked.Add(ref _hostIngestLogs, logs.Count);   // C3: ingested-Volume
+            BumpCount("heim_logs", logs.Count);                 // Count(*)-Cache fortschreiben
         }
     }
 
@@ -264,6 +271,11 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             }
             tx.Commit();
             Interlocked.Add(ref _hostIngestMetrics, metrics.Count);   // C3: ingested-Volume
+            // heim_metrics waechst um genau metrics.Count; heim_metric_series nur um
+            // die neu aufgeloesten Serien (INSERT OR IGNORE) — deren Zahl steht hier
+            // nicht fest, deshalb den Serien-Zaehler verwerfen statt zu schaetzen.
+            BumpCount("heim_metrics", metrics.Count);
+            lock (_countCache) _countCache.Remove("heim_metric_series");
         }
     }
 
@@ -612,11 +624,63 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     // Hebel 4 — Serien-Zeilenzahl (Test-Hook).
     internal long CountMetricSeries() => Count("heim_metric_series");
 
+    /// <summary>
+    /// Zeilenzahl einer Tabelle — gecacht mit kurzer TTL (<see cref="CountCacheTtlTicks"/>).
+    /// SQLite fuehrt keinen Row-Count mit: <c>SELECT COUNT(*)</c> ohne WHERE scannt
+    /// den kleinsten Index der Tabelle vollstaendig. Die Zaehler haengen aber in der
+    /// Fusszeile (HeimdallFooter) und damit an JEDER Seite — auf einer Multi-GB-DB
+    /// waren das drei Full-Scans pro Seitenaufruf, mit Auto-Refresh dauerhaft.
+    /// Die Zahlen sind Orientierungswerte („wieviel liegt drin"), keine exakte
+    /// Buchhaltung — ein paar Sekunden Nachlauf ist der richtige Tausch.
+    /// </summary>
     private long Count(string table)
     {
-        using var rc = OpenReadConnection();
-        using var cmd = new SqliteCommand($"SELECT COUNT(*) FROM {table}", rc);
-        return (long)cmd.ExecuteScalar()!;
+        var now = DateTime.UtcNow.Ticks;
+        lock (_countCache)
+        {
+            if (_countCache.TryGetValue(table, out var e) && now - e.AtTicks < CountCacheTtlTicks)
+                return e.Value;
+        }
+
+        long value;
+        using (var rc = OpenReadConnection())
+        using (var cmd = new SqliteCommand($"SELECT COUNT(*) FROM {table}", rc))
+            value = (long)cmd.ExecuteScalar()!;
+
+        lock (_countCache) _countCache[table] = (value, now);
+        return value;
+    }
+
+    /// <summary>
+    /// Schreibt <paramref name="delta"/> Zeilen auf den gecachten Zaehler fort, ohne
+    /// den Zeitstempel zu beruehren. Die Write-Pfade kennen die Zeilenzahl exakt
+    /// (reine INSERTs, kein OR IGNORE) — damit bleibt der Cache waehrend laufendem
+    /// Ingest korrekt, statt bei jedem Batch zu verfallen. Der unveraenderte
+    /// Zeitstempel laesst die TTL trotzdem greifen: spaetestens nach
+    /// <see cref="CountCacheTtlTicks"/> wird gegen die DB resynchronisiert, sodass
+    /// ein etwaiger Drift aus einem nicht erfassten Pfad zeitlich begrenzt bleibt.
+    /// Kein Eintrag im Cache = nichts zu tun (der naechste Read zaehlt exakt).
+    /// </summary>
+    private void BumpCount(string table, long delta)
+    {
+        if (delta == 0) return;
+        lock (_countCache)
+        {
+            if (_countCache.TryGetValue(table, out var e))
+                _countCache[table] = (e.Value + delta, e.AtTicks);
+        }
+    }
+
+    /// <summary>
+    /// Verwirft alle gecachten Zeilenzahlen — fuer Pfade, die Zeilen loeschen, ohne
+    /// die genaue Zahl je Tabelle zurueckzureichen (Retention-Sweep, Cap-Eviction,
+    /// Rollup-Kompaktierung, Bootstrap-Dedup). Diese laufen selten; ein exaktes
+    /// Nachzaehlen beim naechsten Read ist dort der guenstigere Tausch gegen die
+    /// Buchfuehrung ueber jeden einzelnen DELETE.
+    /// </summary>
+    private void InvalidateCounts()
+    {
+        lock (_countCache) _countCache.Clear();
     }
 
     // -----------------------------------------------------------------------
@@ -751,9 +815,15 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         r.GetInt64(5), r.GetInt64(6), r.GetInt64(7), r.GetInt32(8), NStr(r, 9),
         NJson(r, 10) ?? "{}", NJson(r, 11) ?? "[]", NJson(r, 12) ?? "{}", NStr(r, 13));
 
+    // Spaltenfolge der SearchLogs-Projektion: 0 ts, 1 trace_id, 2 span_id,
+    // 3 severity, 4 severity_text, 5 body, 6 attrs_json, 7 scope_name,
+    // 8 service.name (Subselect auf den Attr-Index). NUR 6 ist eine JSON-Spalte
+    // (Brotli-BLOB); scope_name ist gewoehnliches TEXT und muss mit NStr gelesen
+    // werden — NJson wirft darauf („erwartet Brotli-BLOB — Gefunden: String"),
+    // sobald ein Log ueberhaupt einen Scope-Namen traegt (jeder echte OTel-Sender).
     private static LogRow ReadLog(SqliteDataReader r) => new LogRow(
         r.GetInt64(0), NStr(r, 1), NStr(r, 2), r.GetInt32(3), NStr(r, 4), NStr(r, 5),
-        NJson(r, 6) ?? "{}", NJson(r, 7), NStr(r, 8));
+        NJson(r, 6) ?? "{}", NStr(r, 7), NStr(r, 8));
 
     private static string? NStr(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
 
@@ -1018,6 +1088,11 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             try
             {
                 bool anyDeleted = false;
+                // Der Sweep loescht quer ueber alle Tabellen (TTL, Cap-Eviction,
+                // Rollup, verwaiste Serien) — die gecachten Zeilenzahlen sind danach
+                // in keiner Tabelle mehr verlaesslich. Einmal pauschal verwerfen ist
+                // billiger als jeden DELETE-Zweig einzeln zu verbuchen.
+                InvalidateCounts();
                 // 0. Rollup (Workstream F): rohe Metrik-Punkte aelter als RawDays zu
                 //    ResolutionSeconds-Buckets aggregieren, VOR der TTL-Loeschung.
                 //    Liefert true, falls Raw-Zeilen eingrollt wurden (-> Reclaim).
@@ -1077,6 +1152,13 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 MaybeFullVacuum();
             }
             catch { /* Sweeper darf nie den Host killen */ }
+            finally
+            {
+                // NACH allen Commits nochmal verwerfen: Reads laufen auf eigenen
+                // Verbindungen ohne _gate und koennen den Cache mitten im Sweep mit
+                // einem Zwischenstand neu gefuellt haben.
+                InvalidateCounts();
+            }
         }
         sw.Stop();
         Interlocked.Exchange(ref _hostSweepDurationTicks, sw.Elapsed.Ticks);   // C3: letzter Sweep-Wert

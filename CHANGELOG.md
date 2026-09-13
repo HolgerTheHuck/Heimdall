@@ -8,6 +8,22 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
 ## [Unreleased]
 
 ### Hinzugefügt
+- **Attributwerte im Log-Detail sind Filter-Links.** Ein Klick auf einen
+  Attributwert in der aufgeklappten Log-Zeile übernimmt ihn als
+  LogQL-Stream-Selector (`{key="value"}`) auf die Logs-Seite — der Reflex aus
+  Seq/Grafana („zeig mir alle Logs mit diesem Wert") war bisher nur per Hand ins
+  Suchfeld zu tippen, obwohl Parser, `q`-Parameter und Attribut-Index längst
+  dafür da waren. Der aktive Zeitraum wird mitgenommen (neuer
+  `ExtraQuery`-Parameter an `HeimdallLogRow`), statt auf den Default
+  zurückzufallen. Schlüssel, die der Stream-Selector nicht adressieren kann (er
+  liest nur `[A-Za-z0-9_.]`), bleiben bewusst reiner Text — ein Link, der still
+  nach etwas anderem sucht als er anzeigt, wäre schlimmer als keiner. Wirkt in
+  allen Ansichten, die `HeimdallLogRow` nutzen (Logs, Trace-Detail,
+  Dashboard-Panels, Übersicht). Neuer i18n-Key `logs.attr.filter`.
+- **Gekürzte IDs tragen den vollen Wert als `title`.** TraceIds (12 bzw. 16
+  Zeichen) und SpanIds (8 Zeichen) waren außerhalb des Drilldowns nirgends
+  vollständig erreichbar — jetzt per Hover lesbar und kopierbar (Logs-Zeile,
+  Traces-Tabelle, Trace-Detail, Dashboard- und Übersichts-Panels).
 - **Depot-Übersicht (Storage-Stats) als eigener Nav-Tab** (`/depot`, embedded und
   Host): KPI-Zeile (DB-Datei, WAL, Freelist, belegte Bytes gegen das Cap),
   Verbrauch je Tabelle/-gruppe (Spans, Logs, Metrics, Serien, Rollup,
@@ -45,7 +61,43 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
   Dokumentierte Restverluste: decimal → double, ulong-Overflow → String,
   Guid/DateTime/TimeSpan → String, null-Attribute entfallen.
 
+### Behoben
+- **⚠ Logs-Seite lieferte 500, sobald ein Log einen Scope-Namen trug** (also bei
+  praktisch jedem echten OTel-Sender — der Scope ist der Logger-/Source-Name).
+  Beim Format-v2-Umbau bekam in `ReadLog` auch Projektionsposition 7 den
+  Brotli-Dekoder, obwohl dort `scope_name` steht: eine gewöhnliche TEXT-Spalte,
+  keine JSON-Spalte. Ergebnis: `InvalidDataException („erwartet Brotli-BLOB —
+  Gefunden: String")` aus jeder `SearchLogs`-Abfrage, und damit 500 auf der
+  Logs-Seite, im Trace-Detail, in den Dashboard-Log-Panels und auf der
+  Übersicht. Die bestehenden Tests liefen durch, weil sie den Scope null lassen
+  (NULL reicht der Dekoder durch) — Regressionstest mit gesetztem Scope ergänzt.
+- **Zählzeile stand in der gruppierten Logs-Ansicht doppelt** (`view=svc`): das
+  `hmd-count`-Absatz wurde sowohl am Ende des Gruppen-Zweigs als auch
+  unbedingt darunter gerendert.
+- **`?limit=` war serverseitig unbegrenzt** (Logs, Traces). Das
+  `max`-Attribut am Zahlenfeld ist reine Client-Kosmetik — über die URL ließ
+  sich eine beliebig große Seite anfordern, die der Server materialisierte
+  (inkl. Attribut-Dekompression) und zu HTML rendert. Jetzt geklemmt (Logs
+  5000, Traces 1000, wie die Formular-Maxima); der geklemmte Wert schlägt auch
+  ins Formularfeld und in die selbst gebauten URLs durch. Metrics (5000) und
+  Endpoints (20000) klemmten bereits.
+
 ### Geändert
+- **Zeilenzahlen (`CountSpans`/`CountLogs`/`CountMetrics`) werden gecacht.**
+  SQLite führt keinen Row-Count mit — `SELECT COUNT(*)` ohne WHERE scannt den
+  kleinsten Index der Tabelle vollständig. Diese Zähler hängen aber in der
+  Fußzeile und damit an **jeder** Seite: auf einer Multi-GB-DB waren das drei
+  Full-Scans pro Seitenaufruf (Logs-Seite: fünf, zwei davon aus der doppelten
+  Zählzeile), mit Auto-Refresh dauerhaft. Jetzt: Wert je Tabelle mit 10 s TTL,
+  die Write-Pfade schreiben die exakte Zeilenzahl fort (reine INSERTs, kein
+  `OR IGNORE`) statt den Eintrag verfallen zu lassen — sonst wäre der Cache
+  bei laufendem Ingest, dem Normalfall, wirkungslos. Der Retention-Sweep
+  verwirft den Cache (er löscht quer über alle Tabellen, ohne Zahlen je Tabelle
+  zurückzureichen), ebenso die Serien-Tabelle beim Metrik-Write
+  (`INSERT OR IGNORE`, Zuwachs steht nicht fest). Die unveränderte TTL
+  begrenzt einen etwaigen Drift zeitlich. Die Seiten holen ihren Zähler
+  zusätzlich einmal in `OnInitialized` statt im Markup (dort lief der Aufruf
+  bei jedem Render erneut).
 - **⚠ Format-Wechsel: JSON-Spalten als Brotli-komprimierte BLOBs
   (`user_version=2`).** Attrs/Events/Links/Resource-JSONs von Spans und Logs
   sowie die Histogramm-Spalten (`bucket_counts_json`, `explicit_bounds_json`

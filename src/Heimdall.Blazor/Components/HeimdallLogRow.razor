@@ -34,10 +34,25 @@
             <div class="hmd-log-full">
                 @if (_attrs.Count > 0)
                 {
+                    @* Attributwert ist klickbar: uebernimmt {key="value"} als LogQL-
+                       Filter auf der Logs-Seite. Der Reflex aus Seq/Grafana — „zeig
+                       mir alle Logs mit diesem Wert" — war bisher nur per Hand ins
+                       Suchfeld zu tippen. Nicht-adressierbare Schluessel (Zeichen,
+                       die der Stream-Selector nicht liest) bleiben reiner Text. *@
                     <dl class="hmd-attr-list">
                         @foreach (var a in _attrs)
                         {
-                            <dt>@a.Key</dt><dd>@a.Value</dd>
+                            <dt>@a.Key</dt>
+                            var fu = FilterUrl(a.Key, a.Value);
+                            @if (fu is null)
+                            {
+                                <dd>@a.Value</dd>
+                            }
+                            else
+                            {
+                                <dd><a class="hmd-attr-filter" href="@fu"
+                                       title="@I18n.T("logs.attr.filter", a.Key, a.Value)">@a.Value</a></dd>
+                            }
                         }
                     </dl>
                 }
@@ -57,7 +72,9 @@
     <td class="hmd-mono hmd-log-trace">
         @if (!string.IsNullOrEmpty(Log.TraceId))
         {
-            <a href="@(BasePath + "/trace/" + Log.TraceId)">@HeimdallFmt.Truncate(Log.TraceId, 12)</a>
+            @* title = volle TraceId: die Spalte kuerzt auf 12 Zeichen, sonst ist der
+               vollstaendige Wert nirgends erreichbar (Hover + Kopieren aus dem Tooltip). *@
+            <a href="@(BasePath + "/trace/" + Log.TraceId)" title="@Log.TraceId">@HeimdallFmt.Truncate(Log.TraceId, 12)</a>
         }
         else
         {
@@ -77,11 +94,39 @@
     /// für die flache Logs-Liste; Trace-Detail/Dashboard-Panels bleiben unverändert.</summary>
     [Parameter] public bool ShowService { get; set; }
 
+    /// <summary>
+    /// Query-String-Anhang (ohne fuehrendes <c>&amp;</c>), den die Attribut-Filter-
+    /// Links mitnehmen — die Logs-Seite reicht hier ihren aktiven Zeitraum durch,
+    /// damit ein Klick nicht stillschweigend auf den Default-Zeitraum zurueckfaellt.
+    /// Leer = Logs-Seite entscheidet selbst.
+    /// </summary>
+    [Parameter] public string? ExtraQuery { get; set; }
+
     private IReadOnlyList<HeimdallCharting.AttrKv> _attrs = Array.Empty<HeimdallCharting.AttrKv>();
 
     protected override void OnInitialized()
     {
         _attrs = HeimdallCharting.ParseAttrs(Log.AttrsJson);
+    }
+
+    /// <summary>
+    /// Baut die Logs-URL fuer den Stream-Selector <c>{key="value"}</c>, oder null,
+    /// wenn der Schluessel im LogQL-Selector nicht adressierbar ist. <c>LogQl.ReadIdent</c>
+    /// liest nur <c>[A-Za-z0-9_.]</c> — ein Schluessel mit anderen Zeichen (Klammern,
+    /// Bindestrich, Leerzeichen) wuerde beim Parsen abbrechen und still einen falschen
+    /// Filter ergeben. Dann lieber kein Link als ein Link, der etwas anderes sucht.
+    /// </summary>
+    private string? FilterUrl(string key, string value)
+    {
+        if (string.IsNullOrEmpty(key)) return null;
+        foreach (var c in key)
+            if (!char.IsLetterOrDigit(c) && c != '_' && c != '.') return null;
+
+        // LogQl.ReadString kennt \\ und \" — in dieser Reihenfolge escapen.
+        var v = (value ?? string.Empty).Replace("\\", "\\\\").Replace("\"", "\\\"");
+        var q = "{" + key + "=\"" + v + "\"}";
+        var url = BasePath + "/logs?q=" + Uri.EscapeDataString(q);
+        return string.IsNullOrEmpty(ExtraQuery) ? url : url + "&" + ExtraQuery;
     }
 
     private string SevClass() => "hmd-sev-" + HeimdallFmt.Sev(Log.Severity).ToLowerInvariant();

@@ -56,7 +56,7 @@
                 <tr class="@(s.StatusCode == 2 ? "hmd-err" : "")">
                     <td>
                         <span style="@HeimdallTraceWaterfall.Indent(depth)">
-                            <span class="hmd-mono">@HeimdallFmt.Truncate(s.SpanId, 8)</span>
+                            <span class="hmd-mono" title="@s.SpanId">@HeimdallFmt.Truncate(s.SpanId, 8)</span>
                             @s.Name
                             @if (!string.IsNullOrEmpty(s.ParentSpanId))
                             {

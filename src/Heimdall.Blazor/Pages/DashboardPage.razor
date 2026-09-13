@@ -110,7 +110,7 @@
                         @foreach (var t in _traces)
                         {
                             <tr class="@(t.HasError ? "hmd-err" : "")">
-                                <td class="hmd-mono"><a href="@(BasePath + "/trace/" + t.TraceId)">@HeimdallFmt.Truncate(t.TraceId, 16)</a></td>
+                                <td class="hmd-mono"><a href="@(BasePath + "/trace/" + t.TraceId)" title="@t.TraceId">@HeimdallFmt.Truncate(t.TraceId, 16)</a></td>
                                 <td>@HeimdallFmt.Ts(t.FirstStartUnixNano)</td>
                                 <td>@HeimdallFmt.Dur(t.DurationNs)</td>
                                 <td>@t.SpanCount</td>

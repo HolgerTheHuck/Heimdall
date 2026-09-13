@@ -260,6 +260,12 @@ public static class HeimdallI18n
         ["logs.view.svc"]   = Lang("nach Service", "by service", "par service"),
         ["logs.group.none"] = Lang("(ohne Service)", "(no service)", "(sans service)"),
 
+        // --- Logs-Seite: Attribut als Filter uebernehmen (Klick im Detail) ----
+        ["logs.attr.filter"] = Lang(
+            "Logs mit {0}={1} suchen",
+            "Search logs where {0}={1}",
+            "Rechercher les logs où {0}={1}"),
+
         // --- Allgemein (mehrere Seiten) --------------------------------------
         ["common.back.to"]   = Lang("zurück zur", "back to", "retour à la"),
         ["common.row.range"] = Lang("Zeile {0}–{1}", "Row {0}–{1}", "Ligne {0}–{1}"),

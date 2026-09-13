@@ -52,7 +52,7 @@
                 }
             </select>
         </label>
-        <label>@I18n.T("metrics.filter.limit") <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
+        <label>@I18n.T("metrics.filter.limit") <input type="number" name="limit" value="@_pageSize" min="1" max="5000" /></label>
         @* Alternative Ansicht (Opt-in): view=svc gruppiert die Treffer je Service
            unter eine Service-Ueberschrift. Default bleibt die flache Liste. *@
         <label>@I18n.T("logs.view")
@@ -101,14 +101,13 @@
                     <tbody>
                     @foreach (var l in g.Logs)
                     {
-                        <HeimdallLogRow Log="@l" BasePath="@BasePath" Expand="@Expand" />
+                        <HeimdallLogRow Log="@l" BasePath="@BasePath" Expand="@Expand" ExtraQuery="@_rangeQs" />
                     }
                     </tbody>
                 </table>
                 </div>
             </section>
         }
-        <p class="hmd-count">@I18n.T("logs.count", _logs.Count, Query.CountLogs())</p>
     }
     else
     {
@@ -121,7 +120,7 @@
             <tbody>
             @foreach (var l in _logs)
             {
-                <HeimdallLogRow Log="@l" BasePath="@BasePath" Expand="@Expand" ShowService="true" />
+                <HeimdallLogRow Log="@l" BasePath="@BasePath" Expand="@Expand" ShowService="true" ExtraQuery="@_rangeQs" />
             }
             </tbody>
         </table>
@@ -132,7 +131,7 @@
                        NextUrl="@PageUrl(_offset + _pageSize)"
                        RangeLabel="@I18n.T("common.row.range", _offset + 1, _offset + _logs.Count)" />
     }
-    <p class="hmd-count">@I18n.T("logs.count", _logs.Count, Query.CountLogs())</p>
+    <p class="hmd-count">@I18n.T("logs.count", _logs.Count, _totalLogs)</p>
 
     <script>
     // Ganze Zeile klappt den Log auf/zu (Progressive Enhancement). Klick auf einen
@@ -191,6 +190,21 @@
     private int _pageSize;
     private bool _hasMore;
     private bool _grouped;
+    // Gesamtbestand fuer die Zaehlzeile — EINMAL in OnInitialized geholt. Im Markup
+    // ausgewertet liefe der Aufruf bei jedem Render erneut (und stand hier frueher
+    // zweimal im Baum).
+    private long _totalLogs;
+
+    /// <summary>Obergrenze fuer <c>?limit=</c>. Das <c>max</c>-Attribut am
+    /// Zahlenfeld ist reine Client-Kosmetik — ohne serverseitige Schranke laesst
+    /// sich ueber die URL eine beliebig grosse Seite anfordern, die der Server
+    /// materialisiert (inkl. Attr-Dekompression) und zu HTML rendert.</summary>
+    private const int MaxLimit = 5000;
+
+    // Zeitraum-Anhang fuer die Attribut-Filter-Links in den Log-Zeilen: ein Klick
+    // auf einen Attributwert soll im aktuellen Fenster bleiben, nicht auf den
+    // Default-Zeitraum zurueckfallen.
+    private string _rangeQs = "";
     // LogQL-Syntax als Tooltip auf dem Suchfeld (statt Absatz darunter, der
     // Platz wegnimmt und das Filter-Layout unruhig macht).
     private string LogqlHint =>
@@ -204,6 +218,17 @@
     protected override void OnInitialized()
     {
         var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano());
+
+        // Zeitraum als Query-Anhang (gleiche Regel wie BuildUrl: Preset gewinnt).
+        if (!string.IsNullOrEmpty(Preset))
+            _rangeQs = "preset=" + System.Uri.EscapeDataString(Preset);
+        else
+        {
+            var rp = new List<string>();
+            if (From is long rf) rp.Add("from=" + rf.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            if (To is long rt) rp.Add("to=" + rt.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            _rangeQs = string.Join("&", rp);
+        }
 
         // Chip-Wertemengen im aufgeloesten Zeitraum — NUR AUS LOGS: ein Service,
         // der nur Traces schickt, wuerde im Filter angeboten und bei Auswahl eine
@@ -245,7 +270,7 @@
                 if ((f.Op == "|=" || f.Op == "|~") && !string.IsNullOrEmpty(f.Value)) { body = f.Value; break; }
         }
 
-        _pageSize = Limit < 1 ? 200 : Limit;
+        _pageSize = Limit < 1 ? 200 : (Limit > MaxLimit ? MaxLimit : Limit);
         _offset = Offset < 0 ? 0 : Offset;
         _grouped = string.Equals(View, "svc", System.StringComparison.OrdinalIgnoreCase);
         if (_grouped) _offset = 0;   // Gruppiert seitenlos: Limit begrenzt gesamt, Offset entfaellt.
@@ -271,6 +296,7 @@
         _logs = new List<Heimdall.LogRow>(Query.SearchLogs(s));
         // Volle Seite = wahrscheinlich weitere (ältere) Logs vorhanden.
         _hasMore = _logs.Count >= _pageSize;
+        _totalLogs = Query.CountLogs();
 
         // Gruppierte Ansicht: je Service (LogRow.ServiceName aus dem Attr-Index;
         // ohne Service → Platzhalter-Gruppe am Ende) die Treffer in Reihenfolge

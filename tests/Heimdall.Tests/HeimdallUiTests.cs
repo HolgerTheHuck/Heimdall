@@ -616,6 +616,125 @@ public class HeimdallUiTests : HostBootTestBase
         Assert.DoesNotContain("hmd-band-lane", body);
     }
 
+    // === Quick Wins: Zaehlzeile, Limit-Klammer, Attribut-Filter, volle IDs ====
+
+    /// <summary>
+    /// Die Zaehlzeile („N auf dieser Seite · M gesamt") steht genau EINMAL im
+    /// Dokument — auch in der gruppierten Ansicht (view=svc), wo sie frueher
+    /// zusaetzlich am Ende des Gruppen-Zweigs gerendert wurde und damit doppelt
+    /// untereinander stand.
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_Zaehlzeile_GenauEinmal_AuchGruppiert()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        var t = SeedNowNs();
+        sink.WriteLogs(new[] { SeedLog(t, "msg-a", "shop"), SeedLog(t + 1, "msg-b", "billing") });
+
+        var flat = await (await Client.GetAsync("/otel/logs")).Content.ReadAsStringAsync();
+        Assert.Equal(1, CountOccurrences(flat, "class=\"hmd-count\""));
+
+        var grouped = await (await Client.GetAsync("/otel/logs?view=svc")).Content.ReadAsStringAsync();
+        Assert.Contains("hmd-log-group", grouped);              // Gruppen wirklich gerendert
+        Assert.Equal(1, CountOccurrences(grouped, "class=\"hmd-count\""));
+    }
+
+    /// <summary>
+    /// <c>?limit=</c> wird serverseitig geklemmt. Das <c>max</c>-Attribut am
+    /// Zahlenfeld ist reine Client-Kosmetik — ueber die URL laesst sich sonst eine
+    /// beliebig grosse Seite anfordern, die der Server materialisiert und rendert.
+    /// Der geklemmte Wert schlaegt sowohl im Formularfeld als auch in den
+    /// Pager-URLs durch.
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_LimitWirdGeklemmt()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        sink.WriteLogs(new[] { SeedLog(SeedNowNs(), "msg", "shop") });
+
+        var body = await (await Client.GetAsync("/otel/logs?limit=999999")).Content.ReadAsStringAsync();
+        Assert.Contains("name=\"limit\" value=\"5000\"", body);
+        Assert.DoesNotContain("name=\"limit\" value=\"999999\"", body);
+        // Die selbst gebauten URLs (Sortier-Links, Pager) tragen den geklemmten Wert —
+        // der Beweis, dass auch die Abfrage geklemmt lief, nicht nur die Anzeige.
+        Assert.Contains("limit=5000", body);
+        Assert.DoesNotContain("limit=999999&", body);
+    }
+
+    /// <summary>Wie <see cref="LogsSeite_LimitWirdGeklemmt"/>, Traces-Seite (Cap 1000).</summary>
+    [Fact]
+    public async Task TracesSeite_LimitWirdGeklemmt()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        sink.WriteSpans(new[] { SeedSpan(TraceId, RootSpanId, "shop") });
+
+        var body = await (await Client.GetAsync("/otel/traces?limit=999999")).Content.ReadAsStringAsync();
+        Assert.Contains("name=\"limit\" value=\"1000\"", body);
+        Assert.DoesNotContain("name=\"limit\" value=\"999999\"", body);
+        Assert.Contains("limit=1000", body);
+        Assert.DoesNotContain("limit=999999&", body);
+    }
+
+    /// <summary>
+    /// Attributwerte im aufgeklappten Log sind Links, die den Wert als
+    /// LogQL-Stream-Selector auf die Logs-Seite uebernehmen — und dabei den
+    /// aktiven Zeitraum mitnehmen statt auf den Default zurueckzufallen.
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_AttributWert_IstFilterLinkMitZeitraum()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        sink.WriteLogs(new[]
+        {
+            new HLogRecord(SeedNowNs(), HSeverity.Info, "INFO", "checkout done", null, null,
+                new[] { new HAttribute("http.route", "/checkout") },
+                new HResource(new[] { new HAttribute("service.name", "shop") }), null),
+        });
+
+        var body = await (await Client.GetAsync("/otel/logs?preset=6h")).Content.ReadAsStringAsync();
+        Assert.Contains("hmd-attr-filter", body);
+        // q={http.route="/checkout"} — URL-kodiert im href.
+        Assert.Contains("/logs?q=%7Bhttp.route%3D%22%2Fcheckout%22%7D", body);
+        Assert.Contains("preset=6h", body);
+    }
+
+    /// <summary>
+    /// Schluessel, die der LogQL-Stream-Selector nicht lesen kann (er akzeptiert nur
+    /// <c>[A-Za-z0-9_.]</c>), bleiben reiner Text — ein Link wuerde still nach etwas
+    /// anderem suchen als angezeigt.
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_NichtAdressierbarerSchluessel_BleibtText()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        sink.WriteLogs(new[]
+        {
+            new HLogRecord(SeedNowNs(), HSeverity.Info, "INFO", "odd key", null, null,
+                new[] { new HAttribute("weird-key[0]", "v") },
+                new HResource(new[] { new HAttribute("service.name", "shop") }), null),
+        });
+
+        var body = await (await Client.GetAsync("/otel/logs")).Content.ReadAsStringAsync();
+        Assert.Contains("weird-key[0]", body);        // Attribut selbst wird gezeigt
+        Assert.DoesNotContain("hmd-attr-filter", body);
+    }
+
+    /// <summary>
+    /// Gekuerzte TraceIds tragen den vollen Wert als <c>title</c> — sonst ist er
+    /// nirgends erreichbar (Spalten kuerzen auf 12 bzw. 16 Zeichen).
+    /// </summary>
+    [Fact]
+    public async Task GekuerzteTraceId_TraegtVollenWertAlsTitle()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        sink.WriteSpans(new[] { SeedSpan(TraceId, RootSpanId, "shop") });
+
+        var hex = System.Convert.ToHexString(TraceId).ToLowerInvariant();
+        Assert.Equal(32, hex.Length);                       // wirklich laenger als die Anzeige
+        var body = await (await Client.GetAsync("/otel/traces")).Content.ReadAsStringAsync();
+        Assert.Contains("title=\"" + hex + "\"", body);
+    }
+
     private static HMetricPoint MetricPoint(string name, long tNs, double value) =>
         new(name, "1", HMetricType.Gauge, HTemporality.Unspecified, tNs, value,
             null, null, null, null, null, null,

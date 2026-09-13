@@ -482,6 +482,20 @@ a:hover { text-decoration: underline; }
 }
 .hmd-attr-list dt { color: var(--hmd-dim); font-family: var(--hmd-mono); }
 .hmd-attr-list dd { margin: 0; font-family: var(--hmd-mono); word-break: break-word; }
+
+/* Attributwert als Filter-Link (Logs-Detail): im Ruhezustand wie normaler Text,
+   damit die Attributliste ruhig bleibt — die Klickbarkeit zeigt sich erst beim
+   Hover/Fokus. Gepunktete Unterlinie als dezenter Affordanz-Hinweis. */
+.hmd-attr-list a.hmd-attr-filter {
+    color: inherit;
+    text-decoration: underline dotted var(--hmd-dim);
+    text-underline-offset: 2px;
+}
+.hmd-attr-list a.hmd-attr-filter:hover,
+.hmd-attr-list a.hmd-attr-filter:focus-visible {
+    color: var(--hmd-accent);
+    text-decoration: underline solid var(--hmd-accent);
+}
 .hmd-attr-ids dt { color: var(--hmd-dim); }
 /* --- Log-Tabelle: Seq-style — ein kompakter Einzeiler pro Log, aufklappbar ----
    table-layout:fixed + th-Breiten fixieren Zeit/Sev/Trace; Body bekommt den Rest.

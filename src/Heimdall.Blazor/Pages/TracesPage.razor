@@ -39,7 +39,7 @@
                 <option value="0" selected="@(HasError is false)">@I18n.T("traces.status.ok")</option>
             </select>
         </label>
-        <label>@I18n.T("traces.filter.limit") <input type="number" name="limit" value="@Limit" min="1" max="1000" /></label>
+        <label>@I18n.T("traces.filter.limit") <input type="number" name="limit" value="@_pageSize" min="1" max="1000" /></label>
         <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
         <button type="submit">@I18n.T("traces.filter.submit")</button>
     </form>
@@ -83,10 +83,11 @@
                     @* Tempo-Semantik: Root-Span-Name + Root-Service machen den Trace
                        lesbar („GET /api/...“ · „ModuleStore_v2_Int“). Fehlt die
                        Anreicherung (altes Backend), fällt die Zelle auf den Platzhalter. *@
-                    <td><a href="@(BasePath + "/trace/" + t.TraceId)">
+                    <td><a href="@(BasePath + "/trace/" + t.TraceId)" title="@(string.IsNullOrEmpty(t.RootName) ? t.TraceId : t.RootName)">
                         @(string.IsNullOrEmpty(t.RootName) ? HeimdallFmt.Truncate(t.TraceId, 16) : t.RootName)</a></td>
                     <td>@(string.IsNullOrEmpty(t.RootService) ? "—" : t.RootService)</td>
-                    <td class="hmd-mono"><a href="@(BasePath + "/trace/" + t.TraceId)">@HeimdallFmt.Truncate(t.TraceId, 16)</a></td>
+                    @* title = volle TraceId (Spalte kuerzt auf 16 Zeichen). *@
+                    <td class="hmd-mono"><a href="@(BasePath + "/trace/" + t.TraceId)" title="@t.TraceId">@HeimdallFmt.Truncate(t.TraceId, 16)</a></td>
                     <td>@HeimdallFmt.Ts(t.FirstStartUnixNano)</td>
                     <td>@HeimdallFmt.Dur(t.DurationNs)</td>
                     <td>@t.SpanCount</td>
@@ -102,7 +103,7 @@
                        NextUrl="@PageUrl(Offset + _pageSize)"
                        RangeLabel="@I18n.T("common.row.range", Offset + 1, Offset + _traces.Count)" />
     }
-    <p class="hmd-count">@I18n.T("traces.count", _traces.Count, Query.CountSpans())</p>
+    <p class="hmd-count">@I18n.T("traces.count", _traces.Count, _totalSpans)</p>
 </HeimdallDocument>
 
 @code {
@@ -130,14 +131,23 @@
     private System.Collections.Generic.List<string> _versions = new();
     private int _pageSize;
     private bool _hasMore;
+    // Gesamtbestand fuer die Zaehlzeile — EINMAL hier, nicht im Markup (dort liefe
+    // der Aufruf bei jedem Render erneut).
+    private long _totalSpans;
     // Effektive Sortierung (normalisiert): Langläufer zuerst als Default.
     private string _sort = "duration";
     private string _dir = "desc";
 
+    /// <summary>Obergrenze fuer <c>?limit=</c>. Das <c>max</c>-Attribut am
+    /// Zahlenfeld ist reine Client-Kosmetik — ohne serverseitige Schranke laesst
+    /// sich ueber die URL eine beliebig grosse Seite anfordern, die der Server
+    /// materialisiert und zu HTML rendert.</summary>
+    private const int MaxLimit = 1000;
+
     protected override void OnInitialized()
     {
         var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano());
-        _pageSize = Limit < 1 ? 100 : Limit;
+        _pageSize = Limit < 1 ? 100 : (Limit > MaxLimit ? MaxLimit : Limit);
         _sort = Sort switch { "start" or "duration" or "spans" or "status" => Sort, _ => "duration" };
         _dir = string.Equals(Dir, "asc", System.StringComparison.OrdinalIgnoreCase) ? "asc" : "desc";
 
@@ -174,6 +184,7 @@
         _traces = new System.Collections.Generic.List<Heimdall.TraceSummary>(Query.ListTraces(f));
         // Volle Seite = wahrscheinlich weitere (ältere) Traces vorhanden.
         _hasMore = _traces.Count >= _pageSize;
+        _totalSpans = Query.CountSpans();
     }
 
     /// <summary>Baut die Traces-URL mit neuem Offset und erhält alle Filter-Params

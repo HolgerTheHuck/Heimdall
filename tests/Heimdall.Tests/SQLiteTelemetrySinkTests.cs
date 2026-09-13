@@ -481,4 +481,93 @@ public class SQLiteTelemetrySinkTests
         }
         finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
     }
+
+    /// <summary>
+    /// Der Count(*)-Cache bleibt unter fortlaufenden Writes exakt: die Write-Pfade
+    /// schreiben die Zeilenzahl fort, statt den Eintrag nur verfallen zu lassen
+    /// (sonst waere der Cache bei laufendem Ingest — dem Normalfall — wirkungslos).
+    /// Gelesen wird zwischendurch, damit ein Eintrag ueberhaupt im Cache liegt.
+    /// </summary>
+    [Fact]
+    public void Counts_BleibenExakt_UeberMehrereWrites()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            Assert.Equal(0, sink.CountSpans());
+            Assert.Equal(0, sink.CountLogs());
+
+            sink.WriteSpans(new[] { MakeSpan(1, 1, null, "a"), MakeSpan(2, 2, null, "b") });
+            Assert.Equal(2, sink.CountSpans());          // fortgeschrieben, nicht abgelaufen
+
+            sink.WriteSpans(new[] { MakeSpan(3, 3, null, "c") });
+            Assert.Equal(3, sink.CountSpans());
+
+            sink.WriteLogs(new[] { MakeCountLog(NowNs), MakeCountLog(NowNs + 1) });
+            Assert.Equal(2, sink.CountLogs());
+            Assert.Equal(3, sink.CountSpans());          // andere Tabelle unberuehrt
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    /// <summary>
+    /// Der Retention-Sweep loescht quer ueber die Tabellen, ohne je Tabelle eine
+    /// Zeilenzahl zurueckzureichen — danach muss der Cache verworfen sein, sonst
+    /// zeigt die Fusszeile dauerhaft den Vor-Sweep-Stand.
+    /// </summary>
+    [Fact]
+    public void Counts_NachSweep_Neuermittelt()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions
+            { DataPath = path, RetentionDays = 1, RetentionSweepMinutes = 0 });
+
+            long alt = NowNs - 5L * 24 * 3600 * 1_000_000_000L;   // 5 Tage alt -> faellt raus
+            sink.WriteLogs(new[] { MakeCountLog(alt), MakeCountLog(NowNs) });
+            Assert.Equal(2, sink.CountLogs());   // Wert liegt jetzt im Cache
+
+            sink.SweepRetention();
+            Assert.Equal(1, sink.CountLogs());   // nur der neue -> Cache wurde verworfen
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    /// <summary>
+    /// Regression (Format v2): ein Log MIT Scope-Namen liest sich zurueck. Die
+    /// Projektion hat an Position 7 <c>scope_name</c> — gewoehnliches TEXT, keine
+    /// JSON-Spalte. Solange <c>ReadLog</c> dort den Brotli-Dekoder ansetzte, warf
+    /// JEDE Log-Abfrage, sobald irgendein Log einen Scope trug (also bei jedem
+    /// echten OTel-Sender) — die Logs-Seite lieferte 500. Die aelteren Tests liefen
+    /// durch, weil sie den Scope null lassen (NULL wird vom Dekoder durchgereicht).
+    /// </summary>
+    [Fact]
+    public void SearchLogs_MitScopeName_LiestZurueck()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            var t = NowNs;
+            sink.WriteLogs(new[]
+            {
+                new HLogRecord(t, HSeverity.Info, "INFO", "checkout ok", null, null,
+                    new[] { new HAttribute("http.route", "/checkout") }, Res("shop"),
+                    new HScope("Shop.Api.CheckoutController", "1.0", Array.Empty<HAttribute>())),
+            });
+
+            var rows = sink.SearchLogs(new LogSearch { Limit = 10 });
+            var row = Assert.Single(rows);
+            Assert.Equal("Shop.Api.CheckoutController", row.ScopeName);
+            Assert.Contains("http.route", row.AttrsJson);      // JSON-Spalte weiterhin korrekt dekomprimiert
+            Assert.Equal("shop", row.ServiceName);
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    private static HLogRecord MakeCountLog(long tsNs) =>
+        new(tsNs, HSeverity.Info, "INFO", "count", null, null,
+            Array.Empty<HAttribute>(), Res("shop"), null);
 }
