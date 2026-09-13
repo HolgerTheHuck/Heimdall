@@ -10,8 +10,9 @@
 @inject Heimdall.IHeimdallQuery Query
 @inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<HeimdallDocument Title="@I18n.T("page.title.logs")" BasePath="@BasePath" MainClass="hmd-main hmd-main-wide">
-    <h1>@I18n.T("page.title.logs")</h1>
+@* Ueberschrift steht in der Nav-Zeile (HeimdallDocument.NavTitle) — spart hier
+   den Platz, den ein grosser Content-h1 sonst kosten wuerde. *@
+<HeimdallDocument Title="@I18n.T("page.title.logs")" NavTitle="@I18n.T("page.title.logs")" BasePath="@BasePath">
 
     <form class="hmd-filters" method="get" action="@(BasePath + "/logs")">
         <label class="hmd-logq">@I18n.T("logs.filter.search") <input type="search" name="q" value="@Query1" placeholder="{service.name=\"shop\"} |= \"timeout\"" title="@LogqlHint" /></label>
@@ -122,8 +123,8 @@
     {
         <div class="hmd-list-scroll">
         <table class="hmd-table hmd-logs">
-            @* hmd-vh: Das <h1> über der Filterleiste heißt bereits "Logs" — das
-               Caption ist nur Screenreader-Futter, kostet sonst eine Zeile. *@
+            @* hmd-vh: Die Nav-Zeile zeigt bereits "Logs" als h1 — das Caption
+               ist nur Screenreader-Futter, kostet sonst eine sichtbare Zeile. *@
             <caption class="hmd-vh">@I18n.T("page.title.logs")</caption>
             <thead><tr><th class="hmd-col-ts" scope="col" aria-sort="@AriaSort("time")"><a href="@SortUrl("time")" title="@I18n.T("sort.aria", I18n.T("table.time"))">@I18n.T("table.time")@SortIndicator("time")</a></th><th class="hmd-col-svc" scope="col">@I18n.T("logs.filter.service")</th><th class="hmd-col-sev" scope="col" aria-sort="@AriaSort("severity")"><a href="@SortUrl("severity")" title="@I18n.T("sort.aria", I18n.T("table.sev"))">@I18n.T("table.sev")@SortIndicator("severity")</a></th><th scope="col">@I18n.T("table.body")</th><th class="hmd-col-trace" scope="col">@I18n.T("table.trace")</th></tr></thead>
             <tbody>

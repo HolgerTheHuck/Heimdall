@@ -55,7 +55,9 @@ public class HeimdallUiTests : HostBootTestBase
         var resp = await Client.GetAsync("/otel/traces");
         Assert.Equal(HttpStatusCode.OK, resp.StatusCode);
         var body = System.Net.WebUtility.HtmlDecode(await resp.Content.ReadAsStringAsync());
-        Assert.Contains("<h1>Traces</h1>", body);
+        // Ueberschrift steht in der Nav-Zeile (HeimdallNav.PageTitle), nicht mehr
+        // als eigener grosser <h1> im Seiteninhalt (spart Vertikalraum).
+        Assert.Contains("<h1 class=\"hmd-page-title\">Traces</h1>", body);
         Assert.Contains("Name enthält", body);   // Traces-Filter-Label
     }
 
@@ -65,7 +67,7 @@ public class HeimdallUiTests : HostBootTestBase
         // Regressionssicherung: Root darf nicht mehr die Traces-Tabelle sein.
         var resp = await Client.GetAsync("/otel");
         var body = await resp.Content.ReadAsStringAsync();
-        Assert.DoesNotContain("<h1>Traces</h1>", body);
+        Assert.DoesNotContain("<h1 class=\"hmd-page-title\">Traces</h1>", body);
     }
 
     // === Aktive Nav-Markierung (Block 2) =================================
@@ -976,6 +978,52 @@ public class HeimdallUiTests : HostBootTestBase
         Assert.Contains("restoreLogOpenState", js);
         Assert.Contains("saveFilterEdits", js);
         Assert.Contains("restoreFilterEdits", js);
+    }
+
+    // === Platzausbeute: Seitentitel in der Nav, volle Breite ================
+
+    /// <summary>
+    /// Logs/Traces/Metriken/Endpoints zeigen ihre Ueberschrift als <c>h1</c> in
+    /// der Nav-Zeile (statt eines eigenen grossen Content-h1, der Vertikalraum
+    /// kostet) — genau EIN h1 je Seite, nur an anderer Stelle im DOM.
+    /// </summary>
+    [Theory]
+    [InlineData("/otel/logs", "Logs")]
+    [InlineData("/otel/traces", "Traces")]
+    [InlineData("/otel/metrics", "Metriken")]
+    [InlineData("/otel/endpoints", "Endpoints")]
+    public async Task BrowseSeiten_ZeigenTitelInDerNav_NichtImInhalt(string url, string expectedTitle)
+    {
+        var body = System.Net.WebUtility.HtmlDecode(await (await Client.GetAsync(url)).Content.ReadAsStringAsync());
+        Assert.Equal(1, CountOccurrences(body, "<h1"));   // genau ein h1 auf der Seite
+        Assert.Contains($"<h1 class=\"hmd-page-title\">{expectedTitle}</h1>", body);
+    }
+
+    /// <summary>
+    /// Seiten, die kein <c>NavTitle</c> setzen (Home, Dashboard, …), zeigen
+    /// keinen Titel in der Nav — die Nav bleibt unveraendert schlicht (Marke +
+    /// Tabs), kein leeres/unnoetiges Element.
+    /// </summary>
+    [Fact]
+    public async Task HomeSeite_ZeigtKeinenNavTitel()
+    {
+        var body = await (await Client.GetAsync("/otel")).Content.ReadAsStringAsync();
+        Assert.DoesNotContain("hmd-page-title", body);
+    }
+
+    /// <summary>
+    /// Regression: Alle Seiten nutzen die volle Viewport-Breite (kein
+    /// Lesebreiten-Cap mehr) — Logs war zuvor bereits so, der Rest zog nach.
+    /// </summary>
+    [Fact]
+    public void Css_HmdMain_HatKeinMaxWidth()
+    {
+        var css = File.ReadAllText(LocateRepoFile("src", "Heimdall.Blazor", "wwwroot", "css", "heimdall.css"));
+        var idx = css.IndexOf(".hmd-main {", StringComparison.Ordinal);
+        Assert.True(idx >= 0, "Regel .hmd-main fehlt");
+        var rule = css.Substring(idx, css.IndexOf('}', idx) - idx);
+        Assert.Contains("max-width: none", rule);
+        Assert.DoesNotContain("1600px", rule);
     }
 
     private static string LocateRepoFile(params string[] parts)

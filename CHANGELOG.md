@@ -62,6 +62,22 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
   Guid/DateTime/TimeSpan → String, null-Attribute entfallen.
 
 ### Behoben
+- **Seitentitel in die Nav-Zeile verlagert (Logs, Traces, Metriken,
+  Endpoints).** Der grosse `<h1>` im Seiteninhalt kostete auf diesen
+  „browse"-Seiten spürbar Vertikalraum, bevor überhaupt die Filterleiste kam.
+  Der Titel steht jetzt als `<h1>` in der ohnehin immer sichtbaren Nav-Zeile
+  (rechts neben der Marke, per Trennstrich abgesetzt) — genau ein `<h1>` je
+  Seite, nur an anderer Stelle im DOM (a11y unverändert: eine Überschrift pro
+  Seite, jetzt nur weiter oben). Neuer `NavTitle`-Parameter an
+  `HeimdallDocument`/`HeimdallNav`; Seiten ohne diesen Parameter (Home,
+  Dashboard, Alerts, Depot, Grafana-Editoren, …) bleiben unverändert bei ihrer
+  eigenen Content-Überschrift.
+- **Alle Seiten nutzen jetzt die volle Viewport-Breite.** Bisher hatte nur die
+  Logs-Seite eine eigene `hmd-main-wide`-Variante ohne Lesebreiten-Deckelung
+  (1600px) — dadurch wirkte sie merklich breiter als der Rest und der
+  Seitenwechsel „sprang" sichtbar in der Breite. `.hmd-main` ist jetzt für alle
+  Seiten das, was zuvor nur `.hmd-main-wide` war; die separate Klasse entfällt
+  (redundant geworden).
 - **Auto-Refresh zerstörte Suche und aufgeklappte Logs.** Auto-Refresh macht ein
   volles `location.reload()` — der Server rendert die Seite komplett neu, jeder
   rein clientseitige Zustand ging dabei verloren: ein manuell aufgeklappter Log

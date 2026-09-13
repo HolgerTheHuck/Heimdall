@@ -12,7 +12,7 @@
     <a class="hmd-skip" href="#main">@I18n.T("nav.skip")</a>
     @if (!HideNav)
     {
-        <HeimdallNav BasePath="@BasePath" />
+        <HeimdallNav BasePath="@BasePath" PageTitle="@NavTitle" />
     }
     <main id="main" class="@MainClass">@ChildContent</main>
     @if (!HideFooter)
@@ -26,10 +26,19 @@
     /// <summary>Lokalisierter <title>/Überschrift-Titel der Seite.</summary>
     [Parameter] public string Title { get; set; } = "Heimdall";
 
+    /// <summary>
+    /// Seitentitel in der Nav-Zeile (statt eines eigenen grossen <c>&lt;h1&gt;</c>
+    /// im Seiteninhalt — spart Vertikalraum auf den "browse"-lastigen Seiten wie
+    /// Logs/Traces/Metriken/Endpoints). null/leer (Default) = die Seite behaelt
+    /// ihre eigene Ueberschrift im Inhalt; die Nav zeigt dann nur Marke + Tabs.
+    /// </summary>
+    [Parameter] public string? NavTitle { get; set; }
+
     /// <summary>Dashboard-Prefix (Default /otel), durchgereicht an Nav/Footer.</summary>
     [Parameter] public string BasePath { get; set; } = "/otel";
 
-    /// <summary>CSS-Klasse des <main>-Containers (z. B. "hmd-main hmd-main-wide").</summary>
+    /// <summary>CSS-Klasse des <main>-Containers (Default "hmd-main" — volle
+    /// Breite, keine Lesebreiten-Deckelung; siehe heimdall.css).</summary>
     [Parameter] public string MainClass { get; set; } = "hmd-main";
 
     /// <summary>Optionale <body>-Klasse (z. B. Login-Variante).</summary>

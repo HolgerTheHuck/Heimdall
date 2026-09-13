@@ -153,6 +153,19 @@ a:hover { text-decoration: underline; }
 .hmd-brand { font-weight: 700; font-size: 1.05rem; letter-spacing: .12em; color: var(--hmd-fg); white-space: nowrap; display: inline-flex; align-items: center; gap: .5rem; }
 .hmd-brand svg { display: block; width: 24px; height: 24px; }
 .hmd-brand:hover { text-decoration: none; }
+/* Seitentitel in der Nav-Zeile (siehe HeimdallNav.PageTitle) — ersetzt den
+   grossen Content-h1 auf den "browse"-Seiten, ohne eine zweite Zeile/Hoehe zu
+   kosten. font-size wie ein <h1> waere (semantisch bleibt es einer), aber
+   optisch zurueckhaltend, damit er sich in die Nav-Zeile einfuegt statt sie zu
+   dominieren. Trennstrich zur Marke; auf schmalen Viewports Ellipsis statt
+   display:none — sonst faellt die einzige sichtbare Ueberschrift der Seite weg. */
+.hmd-page-title {
+    font-size: 1rem; font-weight: 600; color: var(--hmd-fg); margin: 0;
+    padding-left: var(--hmd-sp-5); border-left: 1px solid var(--hmd-border);
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    max-width: 14rem;
+}
+@media (max-width: 640px) { .hmd-page-title { max-width: 6rem; padding-left: .6rem; } }
 .hmd-tabs { display: flex; gap: var(--hmd-sp-2); overflow-x: auto; scrollbar-width: thin; }
 .hmd-tabs a {
     padding: .3rem .6rem;
@@ -174,10 +187,11 @@ a:hover { text-decoration: underline; }
     .hmd-tabs { -webkit-overflow-scrolling: touch; }
 }
 
-.hmd-main { max-width: 1600px; margin: 0 auto; padding: 1.1rem 1.5rem; }
+/* Volle Breite auf allen Seiten (frueher nur .hmd-main-wide fuer Logs — die
+   Logs-Seite wirkte dadurch merklich breiter als der Rest; Platzausbeute ist
+   auf grossen Monitoren wichtiger als eine Lesebreiten-Deckelung). */
+.hmd-main { max-width: none; margin: 0; padding: .5rem .75rem; }
 .hmd-main h1 { font-size: 1.4rem; letter-spacing: -.01em; margin: .2rem 0 1rem; }
-/* Volle Breite (z. B. Logs-Liste): keine Ränder, Tabellen nutzen den ganzen Viewport. */
-.hmd-main-wide { max-width: none; margin: 0; padding: .5rem .75rem; }
 
 /* Page-Header (Titel + Sub + Actions) */
 .hmd-page-head {

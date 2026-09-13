@@ -3,12 +3,20 @@
    Der aktive Tab wird ueber den Request-Pfad markiert (aria-current="page") — via
    HttpContext, das im statischen SSR als CascadingParameter verfuegbar ist. "@"
    rendert aria-current nur bei dem Tab, dessen Pfad zum aktuellen Request passt.
+   PageTitle (optional): der eigentliche <h1> der Seite lebt HIER statt im
+   Seiteninhalt — spart auf den "browse"-Seiten (Logs/Traces/Metriken/Endpoints)
+   den vertikalen Platz, den ein grosser Content-h1 sonst kostet, ohne die
+   a11y-Semantik zu verlieren (genau ein h1, nur an anderer Stelle im DOM).
    Rechts: Flaggen-Schalter (de/en/fr) als kleine POST-Forms (CSRF-sicher via
    /lang-Endpoint + CheckSameOrigin); Windows rendert keine Emoji-Flaggen, daher
    inline SVG. Kein JS. *@
 @inject Heimdall.Blazor.IHeimdallI18n I18n
 <header class="hmd-nav">
     <a class="hmd-brand" href="@BasePath">@Heimdall.Blazor.HeimdallMark.Brand("hmd-bif-nav") Heimdall</a>
+    @if (!string.IsNullOrEmpty(PageTitle))
+    {
+        <h1 class="hmd-page-title">@PageTitle</h1>
+    }
     <nav class="hmd-tabs" aria-label="@I18n.T("nav.aria.label")">
         <a href="@BasePath" aria-current="@Active("")">@I18n.T("nav.overview")</a>
         <a href="@(BasePath + "/dashboard")" aria-current="@Active("/dashboard")">@I18n.T("nav.monitoring")</a>
@@ -43,6 +51,10 @@
 
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";
+
+    /// <summary>Seitentitel, in der Nav-Zeile als <c>&lt;h1&gt;</c> gerendert
+    /// (siehe HeimdallDocument.NavTitle). null/leer = kein Titel in der Nav.</summary>
+    [Parameter] public string? PageTitle { get; set; }
 
     // Statisches SSR: HttpContext als CascadingParameter; ohne Request (z. B.
     // reiner Unit-Render ohne HTTP-Kontext) null → keine Markierung (graceful).

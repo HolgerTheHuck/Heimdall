@@ -3,8 +3,8 @@
 @inject Heimdall.IHeimdallQuery Query
 @inject Heimdall.Blazor.IHeimdallI18n I18n
 
-<HeimdallDocument Title="@I18n.T("page.title.traces")" BasePath="@BasePath">
-    <h1>@I18n.T("page.title.traces")</h1>
+@* Ueberschrift steht in der Nav-Zeile (HeimdallDocument.NavTitle). *@
+<HeimdallDocument Title="@I18n.T("page.title.traces")" NavTitle="@I18n.T("page.title.traces")" BasePath="@BasePath">
 
     <form class="hmd-filters" method="get" action="@(BasePath + "/traces")">
         <label>@I18n.T("traces.filter.name") <input type="search" name="name" value="@NameContains" placeholder="checkout" /></label>
@@ -65,7 +65,7 @@
     {
         <div class="hmd-list-scroll">
         <table class="hmd-table hmd-dense">
-            @* hmd-vh: Das <h1> heißt bereits "Traces" — Caption nur für Screenreader. *@
+            @* hmd-vh: Die Nav-Zeile zeigt bereits "Traces" als h1 — Caption nur für Screenreader. *@
             <caption class="hmd-vh">@I18n.T("page.title.traces")</caption>
             <thead><tr>
                 <th scope="col">@I18n.T("traces.col.name")</th>
