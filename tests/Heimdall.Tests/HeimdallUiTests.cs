@@ -1,4 +1,6 @@
 #if NET10_0
+using System;
+using System.IO;
 using System.Net;
 using System.Net.Http;
 using System.Threading.Tasks;
@@ -810,6 +812,105 @@ public class HeimdallUiTests : HostBootTestBase
         Assert.Equal(32, hex.Length);                       // wirklich laenger als die Anzeige
         var body = await (await Client.GetAsync("/otel/traces")).Content.ReadAsStringAsync();
         Assert.Contains("title=\"" + hex + "\"", body);
+    }
+
+    // === Feedback-Runde: Checkbox-Abstand, Gruppen zuklappbar, Zurueck-Ziel ====
+
+    /// <summary>
+    /// Regression: <c>.hmd-filters input</c> bekam eine feste <c>width</c> (statt
+    /// nur <c>min-width</c>), damit die Filterleiste bei Auswahl nicht mehr springt.
+    /// Eine Checkbox matcht denselben Selektor, rendert aber nur ihren kleinen
+    /// nativen Glyph — ohne Reset blieb ihre LAYOUT-Box 9rem breit, und der Abstand
+    /// zum Label-Text mass vom Rand dieser unsichtbaren Box, nicht vom sichtbaren
+    /// Haekchen (Box und Text standen sichtbar weit auseinander). Die Checkbox-
+    /// Ausnahme muss <c>width</c> zuruecksetzen, nicht nur <c>min-width</c>.
+    /// </summary>
+    [Fact]
+    public void Css_InlineCheckbox_SetztWidthZurueck_NichtNurMinWidth()
+    {
+        var css = File.ReadAllText(LocateRepoFile("src", "Heimdall.Blazor", "wwwroot", "css", "heimdall.css"));
+        var idx = css.IndexOf(".hmd-inline-chk input", StringComparison.Ordinal);
+        Assert.True(idx >= 0, "Regel .hmd-inline-chk input fehlt");
+        var rule = css.Substring(idx, css.IndexOf('}', idx) - idx);
+        Assert.Contains("width: auto", rule);
+    }
+
+    /// <summary>
+    /// Gruppierte Logs-Ansicht (view=svc): jede Service-Gruppe ist ein natives
+    /// <c>&lt;details&gt;</c> (Default offen) — zuklappbar fuer den schnellen
+    /// Ueberblick ueber die beteiligten Services, ohne dass die Zeilen verloren
+    /// gehen (bleiben im DOM, nur eingeklappt).
+    /// </summary>
+    [Fact]
+    public async Task LogsSeiteGruppiert_JedeGruppeIstZuklappbaresDetails()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        sink.WriteLogs(new[] { SeedLog(SeedNowNs(), "msg-a", "shop"), SeedLog(SeedNowNs() + 1, "msg-b", "billing") });
+
+        var body = await (await Client.GetAsync("/otel/logs?view=svc&preset=1h")).Content.ReadAsStringAsync();
+        Assert.Equal(2, CountOccurrences(body, "<details class=\"hmd-log-group\" open>"));
+        Assert.Contains("hmd-log-group-summary", body);
+        // Kein <section>/<h2> mehr fuer die Gruppen-Ueberschrift.
+        Assert.DoesNotContain("<h2 class=\"hmd-subhead\">", body);
+    }
+
+    /// <summary>
+    /// Ein Trace-Link aus einer Log-Zeile traegt die aktuelle Seite (samt Filtern)
+    /// als <c>ret=</c> — der Zurueck-Link auf dem Trace-Detail fuehrt dorthin
+    /// zurueck, statt fest auf /traces. Kommt jemand direkt ueber die Traces-Seite
+    /// (kein ret gesetzt), bleibt /traces das Ziel — unveraendertes Altverhalten.
+    /// </summary>
+    [Fact]
+    public async Task LogsSeite_TraceLink_TraegtRetZuruecksZuLogs()
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        sink.WriteSpans(new[] { SeedSpan(TraceId, RootSpanId, "shop") });
+        sink.WriteLogs(new[]
+        {
+            new HLogRecord(SeedNowNs(), HSeverity.Info, "INFO", "log with trace", TraceId, RootSpanId,
+                Array.Empty<HAttribute>(), new HResource(new[] { new HAttribute("service.name", "shop") }), null),
+        });
+
+        var logsUrl = "/otel/logs?preset=1h&sev=9";
+        var logsBody = await (await Client.GetAsync(logsUrl)).Content.ReadAsStringAsync();
+        var hex = System.Convert.ToHexString(TraceId).ToLowerInvariant();
+        var expectedRet = "ret=" + Uri.EscapeDataString(logsUrl);
+        Assert.Contains($"/otel/trace/{hex}?{expectedRet}", logsBody);
+
+        // Der Trace-Detail-Link fuehrt tatsaechlich zur Logs-Seite mit denselben Filtern zurueck.
+        var traceBody = await (await Client.GetAsync($"/otel/trace/{hex}?{expectedRet}")).Content.ReadAsStringAsync();
+        Assert.Contains($"href=\"{System.Net.WebUtility.HtmlEncode(logsUrl)}\"", traceBody);
+    }
+
+    /// <summary>
+    /// Ein manipulierter <c>ret</c>, der nicht auf den eigenen BasePath zeigt
+    /// (Open-Redirect-Versuch — fremde Domain oder fremder Pfad), wird verworfen;
+    /// das Zurueck-Ziel faellt auf den alten Default <c>/traces</c> zurueck.
+    /// Gleiche Regel wie beim Login-<c>returnUrl</c> und dem <c>/lang</c>-<c>ret</c>.
+    /// </summary>
+    [Theory]
+    [InlineData("https://evil.example/steal")]
+    [InlineData("/andere-app/geheim")]
+    public async Task TraceDetail_FremdesRet_FaelltAufTracesZurueck(string evilRet)
+    {
+        var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
+        sink.WriteSpans(new[] { SeedSpan(TraceId, RootSpanId, "shop") });
+        var hex = System.Convert.ToHexString(TraceId).ToLowerInvariant();
+
+        var body = await (await Client.GetAsync($"/otel/trace/{hex}?ret=" + Uri.EscapeDataString(evilRet))).Content.ReadAsStringAsync();
+        Assert.Contains("href=\"/otel/traces\"", body);
+        Assert.DoesNotContain(evilRet, body);
+    }
+
+    private static string LocateRepoFile(params string[] parts)
+    {
+        var dir = AppContext.BaseDirectory;
+        for (var d = dir; d is not null; d = Directory.GetParent(d)?.FullName)
+        {
+            var cand = Path.Combine(d, Path.Combine(parts));
+            if (File.Exists(cand)) return cand;
+        }
+        return Path.Combine(parts);
     }
 
     private static HMetricPoint MetricPoint(string name, long tNs, double value) =>

@@ -9,7 +9,7 @@
 @inject Heimdall.Blazor.IHeimdallI18n I18n
 
 <HeimdallDocument Title="@I18n.T("page.title.trace")" BasePath="@BasePath">
-    <p class="hmd-back"><a href="@(BasePath + "/traces")">@I18n.T("trace.back")</a></p>
+    <p class="hmd-back"><a href="@_backUrl">@I18n.T("trace.back")</a></p>
     <h1>@I18n.T("trace.title.prefix")<span class="hmd-mono">@TraceId</span></h1>
 
     @if (_spans.Count == 0)
@@ -141,15 +141,33 @@
     [Parameter] public string BasePath { get; set; } = "/otel";
     [Parameter] public string TraceId { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Rueck-Ziel aus <c>?ret=</c> (von <see cref="HeimdallLogRow"/> mitgegeben, wenn
+    /// der Trace-Link aus einer Log-Zeile kam) — sonst der alte Default <c>/traces</c>.
+    /// Wer direkt ueber die Traces-Seite hierher kam, landet also weiterhin auf
+    /// /traces; wer ueber die Logs-Seite, Dashboard- oder Home-Log-Panels kam, landet
+    /// wieder dort (samt Filtern/Zeitraum, weil ret die volle Anfrage-URL traegt).
+    /// </summary>
+    [Parameter] public string? Ret { get; set; }
+
     private List<Heimdall.SpanRow> _spans = new();
     private List<Heimdall.LogRow> _logs = new();
     private IReadOnlyList<(Heimdall.SpanRow Span, int Depth)> _ordered = System.Array.Empty<(Heimdall.SpanRow, int)>();
     private (long StartUnixNano, long EndUnixNano) _range;
     private IReadOnlyList<(int Count, long FromUnixNano, long ToUnixNano)> _hist = System.Array.Empty<(int, long, long)>();
     private int _histMax = 1;
+    private string _backUrl = string.Empty;
 
     protected override void OnInitialized()
     {
+        // Open-Redirect-Schutz wie ueberall sonst in der App (Login-returnUrl,
+        // /lang-ret): ret muss mit dem externen BasePath beginnen, sonst faellt es
+        // auf den alten Default zurueck — ein manipulierter ret-Parameter darf nicht
+        // auf eine fremde Domain/einen fremden Pfad zeigen.
+        _backUrl = !string.IsNullOrEmpty(Ret) && Ret.StartsWith(BasePath, System.StringComparison.Ordinal)
+            ? Ret
+            : BasePath + "/traces";
+
         if (string.IsNullOrEmpty(TraceId)) return;
         _spans = new List<Heimdall.SpanRow>(Query.GetTrace(TraceId));
         // Zeitstrahl: DFS-Reihenfolge + gemeinsame Trace-Spanne (Tabelle + Histogramm).

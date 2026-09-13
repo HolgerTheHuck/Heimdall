@@ -329,7 +329,10 @@ public static class HeimdallI18n
         ["metrics.col.attrs"]          = Lang("Attrs", "Attrs", "Attrs"),
 
         // --- Trace-Detail ----------------------------------------------------
-        ["trace.back"]            = Lang("← zurück zu Traces", "← back to Traces", "← retour aux Traces"),
+        // Generisch statt „zurück zu Traces": das Ziel ist inzwischen die
+        // tatsaechliche Herkunft (Logs, Dashboard, Home, …), nicht mehr fest /traces
+        // (siehe TraceDetailPage.Ret).
+        ["trace.back"]            = Lang("← zurück", "← back", "← retour"),
         ["trace.title.prefix"]    = Lang("Trace ", "Trace ", "Trace "),
         ["trace.empty.spans"]     = Lang("Keine Spans zu dieser Trace-ID.", "No spans for this trace ID.", "Aucune span pour cet ID de trace."),
         ["trace.timeline.heading"]= Lang("Span-Zeitstrahl", "Span timeline", "Chronologie des spans"),

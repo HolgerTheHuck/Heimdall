@@ -73,8 +73,11 @@
         @if (!string.IsNullOrEmpty(Log.TraceId))
         {
             @* title = volle TraceId: die Spalte kuerzt auf 12 Zeichen, sonst ist der
-               vollstaendige Wert nirgends erreichbar (Hover + Kopieren aus dem Tooltip). *@
-            <a href="@(BasePath + "/trace/" + Log.TraceId)" title="@Log.TraceId">@HeimdallFmt.Truncate(Log.TraceId, 12)</a>
+               vollstaendige Wert nirgends erreichbar (Hover + Kopieren aus dem Tooltip).
+               ret= traegt die aktuelle Seite (samt Filtern) an das Trace-Detail durch,
+               damit dessen Zurueck-Link zur wirklichen Herkunft fuehrt (Logs, Dashboard,
+               Home, …) statt fest auf /traces. *@
+            <a href="@(BasePath + "/trace/" + Log.TraceId + RetSuffix())" title="@Log.TraceId">@HeimdallFmt.Truncate(Log.TraceId, 12)</a>
         }
         else
         {
@@ -102,11 +105,30 @@
     /// </summary>
     [Parameter] public string? ExtraQuery { get; set; }
 
+    // Statisches SSR: HttpContext als CascadingParameter (wie HeimdallNav.CurrentUrl),
+    // um die aktuelle Anfrage-URL fuer den ret=-Parameter des Trace-Links zu bilden.
+    [Microsoft.AspNetCore.Components.CascadingParameter]
+    public Microsoft.AspNetCore.Http.HttpContext? HttpContext { get; set; }
+
     private IReadOnlyList<HeimdallCharting.AttrKv> _attrs = Array.Empty<HeimdallCharting.AttrKv>();
 
     protected override void OnInitialized()
     {
         _attrs = HeimdallCharting.ParseAttrs(Log.AttrsJson);
+    }
+
+    /// <summary>
+    /// <c>?ret=&lt;aktuelle-URL&gt;</c> fuer den Trace-Link, oder leerer String ohne
+    /// HttpContext (z. B. Unit-Render ausserhalb eines Requests). Traegt PathBase +
+    /// Pfad + Query-String — dieselbe Form wie <see cref="HeimdallNav.CurrentUrl"/> —
+    /// damit TraceDetailPage sie unveraendert als Zurueck-Ziel uebernehmen kann.
+    /// </summary>
+    private string RetSuffix()
+    {
+        if (HttpContext is null) return string.Empty;
+        var req = HttpContext.Request;
+        var full = req.PathBase.Value + req.Path.Value + req.QueryString.Value;
+        return "?ret=" + Uri.EscapeDataString(full);
     }
 
     /// <summary>

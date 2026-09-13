@@ -90,10 +90,15 @@
            Reihenfolge des ersten Treffers in der aktuellen Sortierung (Default:
            zuletzt aktiver Service zuerst). Limit begrenzt die Treffer GESAMT, das
            Paging entfaellt — Offset wird ignoriert. *@
+        @* Jede Gruppe ist ein <details> (nativ, kein JS): zuklappbar fuer den
+           schnellen Ueberblick ueber die beteiligten Services — Default offen,
+           damit sich am bisherigen Verhalten nichts aendert. Summary traegt die
+           bisherige Ueberschrift (Name + Trefferzahl) als eigenes Element, damit
+           der native Aufklapp-Pfeil nicht mitten im Text sitzt. *@
         @foreach (var g in _groups)
         {
-            <section class="hmd-log-group">
-                <h2 class="hmd-subhead">@g.Service <span class="hmd-dim">(@g.Logs.Count)</span></h2>
+            <details class="hmd-log-group" open>
+                <summary class="hmd-subhead hmd-log-group-summary">@g.Service <span class="hmd-dim">(@g.Logs.Count)</span></summary>
                 <div class="hmd-list-scroll">
                 <table class="hmd-table hmd-logs">
                     <caption class="hmd-vh">@g.Service</caption>
@@ -106,7 +111,7 @@
                     </tbody>
                 </table>
                 </div>
-            </section>
+            </details>
         }
     }
     else

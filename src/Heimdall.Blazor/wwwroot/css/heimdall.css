@@ -434,9 +434,24 @@ a:hover { text-decoration: underline; }
 
 /* --- Unterüberschriften, Inline-Checkbox, Roh-Tabelle ------------------- */
 .hmd-subhead { font-size: 1rem; margin: 1rem 0 .4rem; color: var(--hmd-fg); }
+/* Service-Gruppe (Logs, view=svc) als natives <details>: gleiches Pfeil-Muster
+   wie die aufklappbare Log-Zeile (hmd-log-details), damit die Zuklapp-Affordanz
+   im ganzen Dashboard konsistent aussieht. */
+.hmd-log-group > summary { cursor: pointer; list-style: none; }
+.hmd-log-group > summary::-webkit-details-marker { display: none; }
+.hmd-log-group-summary::before { content: "▸ "; color: var(--hmd-dim); }
+.hmd-log-group[open] > .hmd-log-group-summary::before { content: "▾ "; }
+.hmd-log-group > summary:hover { color: var(--hmd-accent); }
 .hmd-subhead-sm { font-size: .85rem; margin: 1.2rem 0 .3rem; color: var(--hmd-dim); text-transform: uppercase; letter-spacing: .06em; }
 .hmd-inline-chk { flex-direction: row !important; align-items: center; gap: .35rem !important; }
-.hmd-inline-chk input { min-width: auto !important; margin: 0; }
+/* .hmd-filters input setzt seit der Anti-Layout-Sprung-Fixierung eine feste
+   width: 9rem (statt min-width) — ein Checkbox-<input> matcht denselben
+   Selektor, rendert aber weiterhin nur seinen kleinen nativen Glyph. Die
+   Klickflaeche/Layout-Box blieb 9rem breit, der Gap zum Label-Text mass also
+   vom Rand dieser unsichtbaren Box, nicht vom sichtbaren Haekchen — Box und
+   Text standen sichtbar weit auseinander. width statt nur min-width
+   zuruecksetzen. */
+.hmd-inline-chk input { width: auto !important; min-width: auto !important; margin: 0; }
 .hmd-raw { margin: 1rem 0; }
 .hmd-raw > summary { cursor: pointer; color: var(--hmd-dim); font-size: .82rem; padding: .3rem 0; }
 
