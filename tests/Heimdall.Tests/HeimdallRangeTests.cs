@@ -5,7 +5,7 @@ namespace Heimdall.Tests;
 
 /// <summary>
 /// Tests fuer die Zeitbereich-Auflösung (HeimdallRange): Preset → Unix-ns-Fenster,
-/// explizite from/to überschreiben Preset, „all" → unbegrenzt, Default-Fallback.
+/// explizite from/to überschreiben Preset, Legacy-„all" → größtes Preset, Default-Fallback.
 /// </summary>
 public class HeimdallRangeTests
 {
@@ -42,11 +42,13 @@ public class HeimdallRangeTests
     }
 
     [Fact]
-    public void Resolve_PresetAll_LiefertUnbegrenzt()
+    public void Resolve_LegacyAll_FaelltAufGroesstesPreset()
     {
+        // „Alles" wurde als Preset entfernt (unbegrenzte Fenster bauen zu langsam);
+        // alte Bookmarks mit ?preset=all landen auf 7 Tage statt auf dem 1h-Fallback.
         var r = HeimdallRange.Resolve("all", null, null, Now);
-        Assert.Null(r.From);
-        Assert.Null(r.To);
+        Assert.Equal(Now - 7 * D, r.From!.Value);
+        Assert.Equal(Now, r.To!.Value);
     }
 
     [Fact]
@@ -98,8 +100,7 @@ public class HeimdallRangeTests
         Assert.Contains("1h", keys);
         Assert.Contains("24h", keys);
         Assert.Contains("7d", keys);
-        Assert.Contains("all", keys);
-        // „all" hat keine Spanne.
-        Assert.Null(HeimdallRange.Presets.First(p => p.Key == "all").SpanNanos);
+        // „all" ist als Preset entfernt — unbegrenzte Fenster sind zu teuer.
+        Assert.DoesNotContain("all", keys);
     }
 }

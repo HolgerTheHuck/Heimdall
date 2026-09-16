@@ -80,8 +80,20 @@
     /// </summary>
     [Parameter] public string FallbackPreset { get; set; } = "1h";
 
-    /// <summary>Das tatsaechlich wirksame Preset (Parameter, sonst Fallback).</summary>
-    private string EffectivePreset => string.IsNullOrWhiteSpace(Preset) ? FallbackPreset : Preset!;
+    /// <summary>
+    /// Das tatsaechlich wirksame Preset (Parameter, sonst Fallback). Legacy-„all"
+    /// (entferntes „Alles"-Preset, alte Bookmarks) mappt wie
+    /// <see cref="HeimdallRange.Resolve"/> aufs größte Preset (7 d), damit die
+    /// Leiste markiert, was serverseitig wirklich gilt.
+    /// </summary>
+    private string EffectivePreset
+    {
+        get
+        {
+            var p = string.IsNullOrWhiteSpace(Preset) ? FallbackPreset : Preset!;
+            return p == "all" ? HeimdallRange.Presets[^1].Key : p;
+        }
+    }
     /// <summary>Explizite untere Schranke (Unix-ns); überschreibt Preset.</summary>
     [Parameter] public long? From { get; set; }
     /// <summary>Explizite obere Schranke (Unix-ns); überschreibt Preset.</summary>

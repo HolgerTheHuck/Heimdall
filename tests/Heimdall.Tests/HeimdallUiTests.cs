@@ -215,25 +215,25 @@ public class HeimdallUiTests : HostBootTestBase
     }
 
     /// <summary>
-    /// „Alles" ist der explizite Knopf fuer „alles sehen": er loest zu einem
-    /// unbegrenzten Fenster auf und zeigt damit auch Daten, die aelter sind als
-    /// jedes zeitliche Preset.
+    /// „Alles" ist als Preset entfernt: unbegrenzte Fenster bauen bei großen
+    /// Datenmengen das System herunter. Alte Bookmarks mit <c>?preset=all</c>
+    /// fallen aufs größte Preset (7 Tage) — der 3 Tage alte Eintrag bleibt damit
+    /// sichtbar, aber der Knopf ist aus der Leiste verschwunden.
     /// </summary>
     [Fact]
-    public async Task TimeRange_PresetAlles_ZeigtAuchAlteDaten()
+    public async Task TimeRange_LegacyAll_FaelltAuf7Tage()
     {
         var sink = (IHeimdallSink)Services.GetService(typeof(IHeimdallSink))!;
         var alt = SeedNowNs() - 3L * 24 * 3600 * 1_000_000_000L;   // 3 Tage alt
         sink.WriteLogs(new[] { SeedLog(alt, "uralt-eintrag", "shop") });
 
-        // Default-Fenster (1 h) sieht ihn nicht ...
-        var eng = await (await Client.GetAsync("/otel/logs")).Content.ReadAsStringAsync();
-        Assert.DoesNotContain("uralt-eintrag", eng);
+        var body = await (await Client.GetAsync("/otel/logs?preset=all")).Content.ReadAsStringAsync();
 
-        // ... „Alles" schon.
-        var alles = await (await Client.GetAsync("/otel/logs?preset=all")).Content.ReadAsStringAsync();
-        Assert.Contains("uralt-eintrag", alles);
-        Assert.Contains("type=\"radio\" name=\"preset\" value=\"all\" checked", alles);
+        // Legacy-Bookmark: all → 7-Tage-Fenster, der alte Eintrag bleibt sichtbar ...
+        Assert.Contains("uralt-eintrag", body);
+        Assert.Contains("type=\"radio\" name=\"preset\" value=\"7d\" checked", body);
+        // ... aber der „Alles"-Knopf ist weg.
+        Assert.DoesNotContain("name=\"preset\" value=\"all\"", body);
     }
 
     /// <summary>

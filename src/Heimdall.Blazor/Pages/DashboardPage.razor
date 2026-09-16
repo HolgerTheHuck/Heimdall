@@ -290,7 +290,8 @@
                 from?.ToString(CultureInfo.InvariantCulture) ?? "—",
                 to?.ToString(CultureInfo.InvariantCulture) ?? "—");
         var key = string.IsNullOrWhiteSpace(preset) ? "24h" : preset;
-        var p = HeimdallRange.Presets.FirstOrDefault(x => x.Key == key);
+        var p = HeimdallRange.Presets.FirstOrDefault(x => x.Key == key)
+                ?? (key == "all" ? HeimdallRange.Presets[^1] : null);   // Legacy-„all" → 7 d
         return p is null ? key : I18n.T("timerange.preset." + p.Key);
     }
 }

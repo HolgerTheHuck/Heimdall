@@ -184,7 +184,6 @@ public static class HeimdallI18n
         ["timerange.preset.1h"]   = Lang("1 Stunde", "1 hour", "1 heure"),
         ["timerange.preset.24h"]  = Lang("24 Stunden", "24 hours", "24 heures"),
         ["timerange.preset.7d"]   = Lang("7 Tage", "7 days", "7 jours"),
-        ["timerange.preset.all"]  = Lang("Alles", "All", "Tout"),
         // Fenster für explizite from/to (RangeLabel in DashboardPage/EndpointsPage).
         ["timerange.window.ns"]   = Lang("von {0} bis {1} ns", "from {0} to {1} ns", "de {0} à {1} ns"),
 

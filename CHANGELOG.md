@@ -155,6 +155,13 @@ folgt [Semantic Versioning](https://semver.org/lang/de/).
   Endpoints (20000) klemmten bereits.
 
 ### Geändert
+- **Zeitauswahl ohne „Alles".** Der Preset-Knopf „Alles" (unbegrenztes Fenster)
+  ist entfernt: nach zwei Wochen Daten war der Aufbau spürbar langsam, bei
+  Monaten hätte er die Instanz lahmgelegt — und er war nur ein Klick entfernt,
+  auch für andere Nutzer des Hosts. Die Auswahl umfasst jetzt 15 m/1 h/24 h/7 d;
+  wer weiter zurück will, nutzt „Benutzerdefiniert" mit explizitem von/bis.
+  Alte Bookmarks mit `?preset=all` fallen aufs größte Preset (7 Tage), nicht
+  auf den Seiten-Default.
 - **Zeilenzahlen (`CountSpans`/`CountLogs`/`CountMetrics`) werden gecacht.**
   SQLite führt keinen Row-Count mit — `SELECT COUNT(*)` ohne WHERE scannt den
   kleinsten Index der Tabelle vollständig. Diese Zähler hängen aber in der
