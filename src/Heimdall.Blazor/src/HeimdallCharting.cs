@@ -269,13 +269,18 @@ internal static class HeimdallCharting
           .Append(F(top)).Append("\" x2=\"").Append(F(left)).Append("\" y2=\"").Append(F(bottom)).Append("\"/>");
         sb.Append("<line class=\"hmd-chart-axis\" x1=\"").Append(F(left)).Append("\" y1=\"")
           .Append(F(bottom)).Append("\" x2=\"").Append(F(right)).Append("\" y2=\"").Append(F(bottom)).Append("\"/>");
-        // x-Ticks + Labels
-        foreach (var tk in g.XTicks)
+        // x-Ticks + Labels. Rand-Ticks anstellig mittig setzen (erster = start,
+        // letzter = end): mittig ließe die halbe Labelbreite über den rechten/
+        // linken SVG-Rand hinausragen — und .hmd-chart schreibt über die
+        // Panel-Grenze (sichtbarer Überlauf, siehe heimdall.css).
+        for (int i = 0; i < g.XTicks.Count; i++)
         {
+            var tk = g.XTicks[i];
+            string anchor = i == 0 ? "start" : i == g.XTicks.Count - 1 ? "end" : "middle";
             sb.Append("<line class=\"hmd-chart-axis\" x1=\"").Append(F(tk.X)).Append("\" y1=\"")
               .Append(F(bottom)).Append("\" x2=\"").Append(F(tk.X)).Append("\" y2=\"").Append(F(bottom + 4)).Append("\"/>");
             sb.Append("<text class=\"hmd-chart-label hmd-chart-xlabel\" x=\"").Append(F(tk.X))
-              .Append("\" y=\"").Append(F(bottom + 18)).Append("\" text-anchor=\"middle\">")
+              .Append("\" y=\"").Append(F(bottom + 18)).Append("\" text-anchor=\"").Append(anchor).Append("\">")
               .Append(Esc(Trunc(tk.Label, 13))).Append("</text>");
         }
         // Linien + (wenige) Punkte. Bei vorhandenem RawPoints werden die Kreis-Punkte
@@ -472,15 +477,18 @@ internal static class HeimdallCharting
         }
 
         // X-Achse: bis zu 5 Zeit-Ticks (HH:mm:ss) mit dünnen Gitterlinien.
+        // Rand-Ticks start/end statt middle (siehe RenderLineSvg) — sonst ragt
+        // das Label über den SVG-Rand hinaus.
         int ticks = Math.Min(5, cols);
         for (int i = 0; i < ticks; i++)
         {
             int c = ticks == 1 ? 0 : (int)((long)i * (cols - 1) / (ticks - 1));
             double x = padL + c * colW;
+            string anchor = i == 0 ? "start" : i == ticks - 1 ? "end" : "middle";
             sb.Append("<line class=\"hmd-chart-grid\" x1=\"").Append(F(x)).Append("\" y1=\"")
               .Append(F(padT)).Append("\" x2=\"").Append(F(x)).Append("\" y2=\"").Append(F(bottomY)).Append("\"/>");
             sb.Append("<text class=\"hmd-chart-label hmd-chart-xlabel\" x=\"").Append(F(x))
-              .Append("\" y=\"").Append(F(bottomY + 15)).Append("\" text-anchor=\"middle\">")
+              .Append("\" y=\"").Append(F(bottomY + 15)).Append("\" text-anchor=\"").Append(anchor).Append("\">")
               .Append(Esc(Trunc(TimeOnly(columnTimesMs[c] * 1_000_000L), 8))).Append("</text>");
         }
 
@@ -581,9 +589,12 @@ internal static class HeimdallCharting
             double y = padT + i * rowH + (rowH - barH) / 2;
             double bw = plotW * (row.Value / max);
             if (double.IsNaN(bw) || bw < 0) bw = 0; else if (bw > plotW) bw = plotW;
+            // Label end-verankert an padL-6 (=114): die Länge muss bei 9px-
+            // Monofont (~5.4px/Zeichen) in 114px passen — 20 Zeichen + „…" laufen
+            // sonst knapp über den linken SVG-Rand hinaus.
             sb.Append("<text class=\"hmd-chart-label hmd-bg-label\" x=\"").Append(F(padL - 6))
               .Append("\" y=\"").Append(F(y + barH * 0.75)).Append("\" text-anchor=\"end\">")
-              .Append(Esc(Trunc(row.Label, 22))).Append("</text>");
+              .Append(Esc(Trunc(row.Label, 19))).Append("</text>");
             sb.Append("<rect class=\"hmd-bg-track\" x=\"").Append(F(padL)).Append("\" y=\"")
               .Append(F(y)).Append("\" width=\"").Append(F(plotW)).Append("\" height=\"")
               .Append(F(barH)).Append("\"/>");

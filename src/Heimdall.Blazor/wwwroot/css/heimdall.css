@@ -382,6 +382,12 @@ a:hover { text-decoration: underline; }
    (hmd-panel/hmd-gpanel) sind die Tabellen kurz — Sticky würde beim Scrollen
    mehrerer Panels übereinanderstapeln, daher dort statisch. */
 .hmd-panel .hmd-table thead th, .hmd-gpanel .hmd-table thead th { position: static; }
+/* Panel-Tabellen an die Kachel-Breite klemmen: lange, nicht umbrechbare
+   Zell-Inhalte (Pfade, GUIDs, Body-Strings) würden das auto-layout der Tabelle
+   über die Panel-Grenze aufweiten. overflow-wrap:anywhere drückt die
+   min-content-Breite jeder Zelle auf ein Zeichen → die Tabelle bleibt im Panel. */
+.hmd-panel .hmd-table td, .hmd-panel .hmd-table th,
+.hmd-gpanel .hmd-table td, .hmd-gpanel .hmd-table th { overflow-wrap: anywhere; }
 
 /* Listen-Seiten (Logs/Traces): Ergebnis-Tabelle im eigenen Scroll-Panel, damit die
    Suchkriterien (Filter-Form) oben erreichbar bleiben — nur die Liste scrollt, nicht
@@ -471,10 +477,13 @@ a:hover { text-decoration: underline; }
 
 /* --- SVG-Charts -------------------------------------------------------- */
 .hmd-chart-wrap { margin: 0 0 1rem; }
+/* overflow entfällt (SVG-Root clippt per Default): alles, was über den
+   viewBox-Rand hinauszeichnet, würde sonst über die Panel-Kachel-Grenze
+   schreiben (Chart-SVG sitzt direkt im Panel ohne eigenes Clip-Rechteck). */
 .hmd-chart {
     display: block; width: 100%; height: auto;
     background: var(--hmd-panel); border: 1px solid var(--hmd-border);
-    border-radius: var(--hmd-radius); overflow: visible;
+    border-radius: var(--hmd-radius);
     box-shadow: var(--hmd-shadow-sm);
 }
 .hmd-chart-grid { stroke: var(--hmd-border); stroke-width: 1; stroke-dasharray: 2 3; }
@@ -825,6 +834,9 @@ a:hover { text-decoration: underline; }
     text-decoration: none;
 }
 .hmd-gpanel-edit:hover { color: var(--hmd-accent); }
+/* Lange Titel (v. a. Ein-Wort-Titel wie PromQL-Strings) umbrechen statt über
+   die Kachel-Grenze zu laufen; der ✎-Link bleibt rechts-oben gefloatet. */
+.hmd-gpanel-title { overflow-wrap: anywhere; }
 
 /* Inline-Vorschau im Panel-Editor: abgesetzte Box unter dem Formular, Inhalt
    = derselbe Render-Pfad wie die Dashboard-Kachel. */
