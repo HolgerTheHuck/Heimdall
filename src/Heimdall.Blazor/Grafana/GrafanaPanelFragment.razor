@@ -23,5 +23,5 @@
 
     private string AssetPath =>
         HeimdallUiPaths.AssetBase(Http.HttpContext) + "/_content/Heimdall.Blazor/css/heimdall.css"
-        + "?v=" + (typeof(GrafanaPanelFragment).Assembly.GetName().Version?.ToString() ?? "dev");
+        + "?v=" + HeimdallAssetStamp.For(Http.HttpContext, "css/heimdall.css");
 }

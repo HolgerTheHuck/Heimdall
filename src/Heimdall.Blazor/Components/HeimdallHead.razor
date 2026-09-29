@@ -6,8 +6,10 @@
    via AddHeimdallDashboard registriert (dorthin führt jeder Dashboard-Einsatz).
    Statische Assets laufen am UseHeimdallNoCache-Kurzschluss vorbei und senden nur
    ETag/Last-Modified — Browser cachen sie heuristisch und zeigen nach Updates
-   alte Fassungen. Der ?v=-Stamp (Assembly-Version) bricht diesen Cache bei jedem
-   Release. *@
+   alte Fassungen. Der ?v=-Stamp folgt dem Asset-Inhalt (SHA-256, HeimdallAssetStamp)
+   statt der Assembly-Version — eine neue Asset-Fassung bricht den Cache sofort,
+   auch wenn die AssemblyVersion gleich bleibt. *@
+
 @inject Microsoft.AspNetCore.Http.IHttpContextAccessor Http
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -25,13 +27,10 @@
 @code {
     [Parameter] public string Title { get; set; } = "Heimdall";
 
-    /// <summary>Cache-Bust-Stamp (Assembly-Version), statisch pro Release.</summary>
-    private static readonly string AssetVersion =
-        typeof(HeimdallHead).Assembly.GetName().Version?.ToString() ?? "dev";
-
     /// <summary>App-root-relativer Asset-Pfad mit PathBase (IHeimdallUiPaths.AssetBase)
-    /// plus Versions-Query (Cache-Busting; ohne JS-Reihenfolge-Risiken, reine URL).</summary>
+    /// plus Versions-Query (Cache-Busting; ohne JS-Reihenfolge-Risiken, reine URL).
+    /// Der Stamp = Content-Hash des Assets (HeimdallAssetStamp).</summary>
     private string Asset(string rel) =>
         HeimdallUiPaths.AssetBase(Http.HttpContext) + "/_content/Heimdall.Blazor/" + rel
-        + "?v=" + AssetVersion;
+        + "?v=" + HeimdallAssetStamp.For(Http.HttpContext, rel);
 }
