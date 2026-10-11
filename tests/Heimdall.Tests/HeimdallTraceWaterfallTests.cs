@@ -112,4 +112,61 @@ public class HeimdallTraceWaterfallTests
         Assert.Equal("margin-left:1.8rem", Heimdall.Blazor.HeimdallTraceWaterfall.Indent(2));
         Assert.DoesNotContain(",", Heimdall.Blazor.HeimdallTraceWaterfall.Indent(3));
     }
+
+    [Fact]
+    public void CriticalPath_FolgtGroesstemEnd_VonDerWurzel()
+    {
+        var spans = new[]
+        {
+            Span("t", "root", null, "root", 0, 100),
+            Span("t", "c1", "root", "c1", 10, 90),
+            Span("t", "c2", "root", "c2", 20, 100),   // endet zuletzt → kritisch
+            Span("t", "g1", "c2", "g1", 30, 60),
+            Span("t", "g2", "c2", "g2", 50, 95),      // endet zuletzt → kritisch
+        };
+
+        var cp = Heimdall.Blazor.HeimdallTraceWaterfall.CriticalPath(spans);
+
+        Assert.True(cp.Contains("root"));
+        Assert.True(cp.Contains("c2"));
+        Assert.True(cp.Contains("g2"));
+        Assert.False(cp.Contains("c1"));
+        Assert.False(cp.Contains("g1"));
+    }
+
+    [Fact]
+    public void CriticalPath_NullLeerUndWaisen_WerfenNie()
+    {
+        Assert.Empty(Heimdall.Blazor.HeimdallTraceWaterfall.CriticalPath(null));
+        Assert.Empty(Heimdall.Blazor.HeimdallTraceWaterfall.CriticalPath(Array.Empty<SpanRow>()));
+
+        // Verwaister Span (Parent nicht in der Trace) = eigene Wurzel.
+        var orphan = Heimdall.Blazor.HeimdallTraceWaterfall.CriticalPath(new[] { Span("t", "a", "missing", "A", 0, 10) });
+        Assert.Contains("a", orphan);
+    }
+
+    [Fact]
+    public void ServiceFor_LiestResourceName_VorSpanAttrs()
+    {
+        var viaResource = new SpanRow("t", "a", "", "GET", (int)HSpanKind.Server,
+            0, 10, 10, (int)HStatusCode.Ok, null, "{}", "[]", "{\"service.name\":\"shop\"}", null);
+        Assert.Equal("shop", Heimdall.Blazor.HeimdallTraceWaterfall.ServiceFor(viaResource));
+
+        var viaAttrs = new SpanRow("t", "a", "", "GET", (int)HSpanKind.Server,
+            0, 10, 10, (int)HStatusCode.Ok, null, "{\"service_name\":\"shop\"}", "[]", "{}", null);
+        Assert.Equal("shop", Heimdall.Blazor.HeimdallTraceWaterfall.ServiceFor(viaAttrs));
+
+        Assert.Equal(string.Empty, Heimdall.Blazor.HeimdallTraceWaterfall.ServiceFor(Span("t", "a", null, "A", 0, 10)));
+    }
+
+    [Fact]
+    public void ServiceColor_StabilProService_LeerWarn()
+    {
+        Assert.Equal(Heimdall.Blazor.HeimdallTraceWaterfall.ServiceColor("shop"),
+            Heimdall.Blazor.HeimdallTraceWaterfall.ServiceColor("shop"));
+        Assert.NotEqual(Heimdall.Blazor.HeimdallTraceWaterfall.ServiceColor("shop"),
+            Heimdall.Blazor.HeimdallTraceWaterfall.ServiceColor("payments"));
+        Assert.Equal("var(--hmd-warn)", Heimdall.Blazor.HeimdallTraceWaterfall.ServiceColor(null));
+        Assert.Equal("var(--hmd-warn)", Heimdall.Blazor.HeimdallTraceWaterfall.ServiceColor(""));
+    }
 }

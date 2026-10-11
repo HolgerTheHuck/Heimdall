@@ -1279,7 +1279,24 @@ a:hover { text-decoration: underline; }
     background: var(--hmd-bg); border: 1px solid var(--hmd-line-soft);
     border-radius: var(--hmd-radius-sm); }
 .hmd-tl-bar { position: absolute; top: 1px; bottom: 1px;
-    min-width: 2px; border-radius: 2px; }   /* Farbe inline via ColorFor */
+    min-width: 2px; border-radius: 2px; overflow: hidden; }   /* Farbe inline via ColorFor */
+
+/* Kritischer Pfad: heller Rahmen + minimal höherer Balken — die Kette der
+   dominierenden Spans bleibt so über die Zeilen hinweg nachvollziehbar. */
+.hmd-trace-table tr.hmd-crit .hmd-tl-bar { top: 0; bottom: 0; box-shadow: 0 0 0 1px var(--hmd-fg); }
+
+/* Service-Legende: Farb-Chips über der Span-Tabelle (Service -> Balken-Farbe). */
+.hmd-tl-legend { display: flex; flex-wrap: wrap; gap: .35rem 1rem;
+    margin: 0 0 .6rem; color: var(--hmd-dim); font-size: .74rem; }
+.hmd-tl-legend-item { display: inline-flex; align-items: center; gap: .35rem; }
+.hmd-tl-swatch { width: .65rem; height: .65rem; border-radius: 2px; display: inline-block;
+    box-shadow: inset 0 0 0 1px var(--hmd-line-soft); }
+
+/* Dauer-Label im Balken (nur wenn breit genug, sonst via overflow versteckt). */
+.hmd-tl-dur { position: absolute; left: .25rem; top: 50%; transform: translateY(-50%);
+    font-family: var(--hmd-mono); font-size: .58rem; line-height: 1; color: #fff;
+    background: rgba(0, 0, 0, .5); border-radius: 2px; padding: .05rem .25rem;
+    white-space: nowrap; pointer-events: none; }
 
 /* Feste Spaltenbreiten (table-layout:fixed) + schwebendes Attrs-Panel: das Aufklappen
    verändert weder Spaltenbreiten noch Zeilenhöhe — der Klick-Treffer bleibt unter dem

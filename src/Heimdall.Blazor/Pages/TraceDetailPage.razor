@@ -45,6 +45,18 @@
         </details>
 
         <h2 class="hmd-subhead">@I18n.T("trace.spans.heading")</h2>
+        @* Service-Legende: Farb-Chips, sobald mehr als ein Service im Trace steckt
+           (dekorativ — die Zuordnung steht zusätzlich im erweiterten Span-Attribut,
+           daher aria-hidden). *@
+        @if (_serviceLegend.Count > 1)
+        {
+            <div class="hmd-tl-legend" aria-hidden="true">
+                @foreach (var (svc, color) in _serviceLegend)
+                {
+                    <span class="hmd-tl-legend-item"><span class="hmd-tl-swatch" style="background:@color"></span>@svc</span>
+                }
+            </div>
+        }
         <div class="hmd-list-scroll">
         <table class="hmd-table hmd-dense hmd-trace-table">
             <caption class="hmd-vh">@I18n.T("trace.spans.heading")</caption>
@@ -53,7 +65,9 @@
             @foreach (var (s, depth) in _ordered)
             {
                 var attrs = HeimdallCharting.ParseAttrs(s.AttrsJson);
-                <tr class="@(s.StatusCode == 2 ? "hmd-err" : "")">
+                var rowCls = s.StatusCode == 2 ? "hmd-err" : "";
+                if (_criticalPath.Contains(s.SpanId)) rowCls += " hmd-crit";
+                <tr class="@rowCls">
                     <td>
                         <span style="@HeimdallTraceWaterfall.Indent(depth)">
                             <span class="hmd-mono" title="@s.SpanId">@HeimdallFmt.Truncate(s.SpanId, 8)</span>
@@ -67,9 +81,14 @@
                     <td class="hmd-col-tl">
                         <div class="hmd-tl-track">
                             <div class="hmd-tl-bar hmd-chart-pt hmd-waterfall-bar"
-                                 style="@HeimdallTraceWaterfall.BarStyle(s, _range.StartUnixNano, _range.EndUnixNano - _range.StartUnixNano)"
+                                 style="@HeimdallTraceWaterfall.BarStyle(s, _range.StartUnixNano, _traceSpanNs, _spanService.GetValueOrDefault(s.SpanId, string.Empty))"
                                  data-t="@s.StartUnixNano" data-v="@s.DurationNs" data-label="@s.Name"
-                                 aria-hidden="true"></div>
+                                 aria-hidden="true">
+                                @if (HeimdallTraceWaterfall.ShowDurationLabel(s, _range.StartUnixNano, _traceSpanNs))
+                                {
+                                    <span class="hmd-tl-dur">@HeimdallFmt.Dur(s.DurationNs)</span>
+                                }
+                            </div>
                         </div>
                     </td>
                     <td>@((Heimdall.HSpanKind)s.Kind)</td>
@@ -157,6 +176,13 @@
     private IReadOnlyList<(int Count, long FromUnixNano, long ToUnixNano)> _hist = System.Array.Empty<(int, long, long)>();
     private int _histMax = 1;
     private string _backUrl = string.Empty;
+    // Service-Färbung: SpanId → service.name (einmal geparst, im Markup nachgeschlagen)
+    // plus distinkte Service-Farben für die Legende (Reihenfolge = DFS-Reihenfolge).
+    private Dictionary<string, string> _spanService = new(StringComparer.Ordinal);
+    private List<(string Service, string Color)> _serviceLegend = new();
+    private long _traceSpanNs;
+    // Kritischer Pfad: SpanIds der dominierenden Kette (markiert die Zeile).
+    private HashSet<string> _criticalPath = new(StringComparer.Ordinal);
 
     protected override void OnInitialized()
     {
@@ -173,8 +199,20 @@
         // Zeitstrahl: DFS-Reihenfolge + gemeinsame Trace-Spanne (Tabelle + Histogramm).
         _ordered = HeimdallTraceWaterfall.Order(_spans);
         _range = HeimdallTraceWaterfall.TraceRange(_spans);
+        _traceSpanNs = _range.EndUnixNano - _range.StartUnixNano;
         _hist = HeimdallTraceWaterfall.Histogram(_spans, _range);
         foreach (var h in _hist) if (h.Count > _histMax) _histMax = h.Count;
+        // Service-Färbung: pro Span den service.name ermitteln (ein Parse pro Span),
+        // distinct in DFS-Reihenfolge für die Legende sammeln.
+        var seenServices = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var s in _spans)
+        {
+            var svc = HeimdallTraceWaterfall.ServiceFor(s);
+            _spanService[s.SpanId] = svc;
+            if (!string.IsNullOrEmpty(svc) && seenServices.Add(svc))
+                _serviceLegend.Add((svc, HeimdallTraceWaterfall.ServiceColor(svc)));
+        }
+        _criticalPath = new HashSet<string>(HeimdallTraceWaterfall.CriticalPath(_spans), StringComparer.Ordinal);
         // Korrelation Traces↔Logs: LogSearch.TraceId existiert im Modell — direkter
         // Join über die Trace-ID, kein Zeitfenster nötig (Trace ist selbst begrenzt).
         _logs = new List<Heimdall.LogRow>(Query.SearchLogs(new Heimdall.LogSearch
