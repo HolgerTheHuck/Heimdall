@@ -500,16 +500,35 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             filters.Add(new AttrFilter("service.version", "=", search.ServiceVersion));
             search = search with { AttrFilters = filters };
         }
+        bool hasText = !string.IsNullOrWhiteSpace(search.Text);
+        bool hasTime = search.FromUnixNano is not null || search.ToUnixNano is not null;
+        // Zeitfenster-first (Punkt 1): Liegt ein Text-Begriff UND ein Zeitfenster
+        // vor, wird die FTS-Treffermenge einmal in eine echte Temp-Tabelle
+        // materialisiert und die Haupt-Query aus idx_heim_logs_ts gefahren (Stream,
+        // kein Sort). FTS5 ist eine Virtual Table — der Planner kann darauf keine
+        // Automatic-Index-IN-Optimierung bauen und fiele auf "FTS zuerst, dann
+        // alles sortieren" zurück; die materialisierte rowid-Menge macht den
+        // ts-Index wieder zur treibenden Seite (Latenz skaliert mit dem Fenster,
+        // nicht mit den historischen Treffern). Text ohne Zeitfenster behält den
+        // alten FTS-first-Pfad (die UI löst immer ein Fenster auf).
+        bool ftsViaTemp = hasText && hasTime;
+
         var sb = SqlBuilder();
-        sb.Append("SELECT ts_unix_nano, trace_id, span_id, severity, severity_text, body, attrs_json, scope_name, " +
-                  "(SELECT a.value FROM heim_log_attrs a WHERE a.log_rowid = heim_logs.rowid " +
-                  " AND a.key IN ('service.name','service_name') LIMIT 1) AS service_name " +
+        // rowid als Spalte 0: Basis der Batch-Anreicherung des service.name (Punkt 3) —
+        // ein zweiter Query über die rowids der Seite ersetzt den früheren
+        // korrelierten Subselect (1 Query statt N; Muster EnrichTraceRoots).
+        sb.Append("SELECT rowid, ts_unix_nano, trace_id, span_id, severity, severity_text, body, attrs_json, scope_name " +
                   "FROM heim_logs WHERE 1=1");
         var ps = new List<SqliteParameter>();
-        if (!string.IsNullOrWhiteSpace(search.Text))
+        if (hasText)
         {
-            sb.Append(" AND rowid IN (SELECT rowid FROM heim_logs_fts WHERE heim_logs_fts MATCH @q)");
-            ps.Add(Param("@q", SanitizeFts5(search.Text)));
+            if (ftsViaTemp)
+                sb.Append(" AND rowid IN (SELECT r FROM _heimdall_fts_matches)");
+            else
+            {
+                sb.Append(" AND rowid IN (SELECT rowid FROM heim_logs_fts WHERE heim_logs_fts MATCH @q)");
+                ps.Add(Param("@q", SanitizeFts5(search.Text)));
+            }
         }
         if (search.MinSeverity is not null) { sb.Append(" AND severity >= @sev"); ps.Add(Param("@sev", search.MinSeverity.Value)); }
         if (search.FromUnixNano is not null) { sb.Append(" AND ts_unix_nano >= @from"); ps.Add(Param("@from", search.FromUnixNano.Value)); }
@@ -572,13 +591,87 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         ps.Add(Param("@off", search.Offset));
 
         var list = new List<LogRow>();
+        var rowids = new List<long>();
         using (var rc = OpenReadConnection())
-        using (var cmd = BuildRead(rc, sb.ToString(), ps))
-        using (var r = cmd.ExecuteReader())
         {
-            while (r.Read()) list.Add(ReadLog(r));
+            if (ftsViaTemp) MaterializeFtsMatches(rc, search.Text!);
+            using (var cmd = BuildRead(rc, sb.ToString(), ps))
+            using (var r = cmd.ExecuteReader())
+            {
+                while (r.Read())
+                {
+                    rowids.Add(r.GetInt64(0));
+                    list.Add(ReadLog(r));
+                }
+            }
         }
-        return list;
+        return list.Count == 0 ? list : EnrichLogServiceNames(list, rowids);
+    }
+
+    /// <summary>
+    /// Materialisiert die FTS-Treffermenge eines Suchbegriffs in eine echte
+    /// Temp-Tabelle mit rowid-Index (Punkt 1). FTS5 ist eine Virtual Table — der
+    /// Planner kann darauf keine Automatic-Index-IN-Optimierung anwenden und fiele
+    /// auf "FTS zuerst, dann alles sortieren" zurück; eine materialisierte
+    /// rowid-Menge macht idx_heim_logs_ts wieder zur treibenden Seite. Temp-Tabellen
+    /// sind verbindungs-lokal (leben bis zum Dispose der Read-Verbindung); DROP+CREATE
+    /// macht die Wiederverwendung gepoolter Verbindungen deterministisch.
+    /// </summary>
+    private static void MaterializeFtsMatches(SqliteConnection rc, string text)
+    {
+        using (var c = new SqliteCommand("DROP TABLE IF EXISTS _heimdall_fts_matches", rc))
+            c.ExecuteNonQuery();
+        using (var c = new SqliteCommand(
+            "CREATE TEMP TABLE _heimdall_fts_matches AS SELECT rowid AS r FROM heim_logs_fts WHERE heim_logs_fts MATCH @q", rc))
+        {
+            c.Parameters.AddWithValue("@q", SanitizeFts5(text));
+            c.ExecuteNonQuery();
+        }
+        using (var c = new SqliteCommand("CREATE INDEX _heimdall_fts_matches_r ON _heimdall_fts_matches(r)", rc))
+            c.ExecuteNonQuery();
+    }
+
+    /// <summary>
+    /// Befüllt LogRow.ServiceName über einen Batch-Query statt eines korrelierten
+    /// Subselects pro Zeile (Punkt 3): ein Query je 500er-Chunk über die rowids der
+    /// Seite, MIN(value) gruppiert über den Attr-Index. Fehlschlag bleibt tolerant
+    /// (ServiceName leer, Liste unveraendert) — Muster EnrichTraceRoots.
+    /// </summary>
+    private List<LogRow> EnrichLogServiceNames(List<LogRow> list, List<long> rowids)
+    {
+        try
+        {
+            var svc = new Dictionary<long, string>(list.Count);
+            const string sql =
+                "SELECT log_rowid, MIN(value) FROM heim_log_attrs " +
+                "WHERE key IN ('service.name','service_name') AND log_rowid IN ";
+            using var rc = OpenReadConnection();
+            for (int off = 0; off < rowids.Count; off += 500)
+            {
+                var chunk = rowids.GetRange(off, Math.Min(500, rowids.Count - off));
+                var inSql = new StringBuilder(chunk.Count * 8).Append('(');
+                for (int i = 0; i < chunk.Count; i++)
+                    inSql.Append(i == 0 ? "@r" : ",@r").Append(off + i);
+                inSql.Append(") GROUP BY log_rowid");
+
+                using (var cmd = new SqliteCommand(sql + inSql, rc))
+                {
+                    for (int i = 0; i < chunk.Count; i++)
+                        cmd.Parameters.AddWithValue("@r" + (off + i), chunk[i]);
+                    using var r = cmd.ExecuteReader();
+                    while (r.Read()) svc[(long)r.GetValue(0)] = r.IsDBNull(1) ? "" : r.GetString(1);
+                }
+            }
+            if (svc.Count == 0) return list;
+            var result = new List<LogRow>(list.Count);
+            for (int i = 0; i < list.Count; i++)
+                result.Add(svc.TryGetValue(rowids[i], out var v) ? list[i] with { ServiceName = v } : list[i]);
+            return result;
+        }
+        catch
+        {
+            return list;   // tolerant: Anreicherung darf die Liste nie kippen
+        }
     }
 
     public IReadOnlyList<MetricRow> MetricSeries(string name, long? fromUnixNano, long? toUnixNano, int limit = 500)
@@ -815,15 +908,16 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         r.GetInt64(5), r.GetInt64(6), r.GetInt64(7), r.GetInt32(8), NStr(r, 9),
         NJson(r, 10) ?? "{}", NJson(r, 11) ?? "[]", NJson(r, 12) ?? "{}", NStr(r, 13));
 
-    // Spaltenfolge der SearchLogs-Projektion: 0 ts, 1 trace_id, 2 span_id,
-    // 3 severity, 4 severity_text, 5 body, 6 attrs_json, 7 scope_name,
-    // 8 service.name (Subselect auf den Attr-Index). NUR 6 ist eine JSON-Spalte
-    // (Brotli-BLOB); scope_name ist gewoehnliches TEXT und muss mit NStr gelesen
-    // werden — NJson wirft darauf („erwartet Brotli-BLOB — Gefunden: String"),
+    // Spaltenfolge der SearchLogs-Projektion: 0 rowid, 1 ts, 2 trace_id, 3 span_id,
+    // 4 severity, 5 severity_text, 6 body, 7 attrs_json, 8 scope_name. NUR 7 ist eine
+    // JSON-Spalte (Brotli-BLOB); scope_name ist gewoehnliches TEXT und muss mit NStr
+    // gelesen werden — NJson wirft darauf („erwartet Brotli-BLOB — Gefunden: String"),
     // sobald ein Log ueberhaupt einen Scope-Namen traegt (jeder echte OTel-Sender).
+    // service.name wird nicht mehr als korrelierter Subselect pro Zeile gelesen,
+    // sondern nachgelagert über EnrichLogServiceNames befuellt (Punkt 3).
     private static LogRow ReadLog(SqliteDataReader r) => new LogRow(
-        r.GetInt64(0), NStr(r, 1), NStr(r, 2), r.GetInt32(3), NStr(r, 4), NStr(r, 5),
-        NJson(r, 6) ?? "{}", NStr(r, 7), NStr(r, 8));
+        r.GetInt64(1), NStr(r, 2), NStr(r, 3), r.GetInt32(4), NStr(r, 5), NStr(r, 6),
+        NJson(r, 7) ?? "{}", NStr(r, 8), null);
 
     private static string? NStr(SqliteDataReader r, int i) => r.IsDBNull(i) ? null : r.GetString(i);
 

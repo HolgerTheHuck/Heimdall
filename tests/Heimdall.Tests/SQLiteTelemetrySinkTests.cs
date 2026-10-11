@@ -222,6 +222,39 @@ public class SQLiteTelemetrySinkTests
     }
 
     [Fact]
+    public void Logs_Fulltext_Plus_Zeitfenster_MaterialisiertFts()
+    {
+        // Punkt 1 (ftsViaTemp): Text UND Zeitfenster → FTS-Treffer werden in eine
+        // echte Temp-Tabelle materialisiert und die Haupt-Query fährt über
+        // idx_heim_logs_ts. Beweist die Schnittmenge Text ∧ Fenster und dass die
+        // rowid-Spalte 0 der neuen SELECT-Liste die Anreicherung korrekt füttert.
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            long t0 = NowNs;
+            sink.WriteLogs(new[]
+            {
+                new HLogRecord(t0,     HSeverity.Info,  "INFO",  "order placed for alice", null, null, Array.Empty<HAttribute>(), Res("shop"), null),
+                new HLogRecord(t0 + 1, HSeverity.Error, "ERROR", "payment failed for bob",  null, null, Array.Empty<HAttribute>(), Res("billing"), null),
+                new HLogRecord(t0 + 2, HSeverity.Info,  "INFO",  "payment retry succeeded", null, null, Array.Empty<HAttribute>(), Res("billing"), null),
+            });
+
+            // Enge Fenster [t0, t0+1]: nur der erste "payment"-Log liegt drin.
+            var hits = sink.SearchLogs(new LogSearch { Text = "payment", FromUnixNano = t0, ToUnixNano = t0 + 1 });
+            var body = Assert.Single(hits);
+            Assert.Contains("payment failed for bob", body.Body);
+            Assert.Equal("billing", body.ServiceName);
+
+            // FTS matcht (t0+1, t0+2), aber das Fenster [t0, t0] schneidet beide
+            // weg → leer, kein Throw. Beweist die Schnittmenge Text ∧ Fenster.
+            var none = sink.SearchLogs(new LogSearch { Text = "payment", FromUnixNano = t0, ToUnixNano = t0 });
+            Assert.Empty(none);
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    [Fact]
     public void Metrics_Series_Roundtrip()
     {
         var path = NewDbPath();
