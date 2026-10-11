@@ -27,29 +27,42 @@ public sealed partial class SQLiteTelemetrySink
         // Service wuerde sonst angeboten und lieferte bei Auswahl leer).
         var sb = SqlBuilder();
         var ps = new List<SqliteParameter>();
+        bool hasTime = fromUnixNano is not null || toUnixNano is not null;
 
-        sb.Append("SELECT DISTINCT a.value FROM heim_log_attrs a");
-        if (fromUnixNano is not null || toUnixNano is not null)
+        if (hasTime)
         {
-            // Zeitraum: Rowid-Join auf die Basistabelle (O(1) pro Attr-Zeile).
-            sb.Append(" JOIN heim_logs l ON l.rowid = a.log_rowid");
+            // Zeitfenster-first (Punkt 4a): idx_heim_logs_ts treibt, die Attr-Zeile
+            // wird je In-Fenster-Log ueber idx_heim_log_attrs_log(log_rowid) auf-
+            // geloest. Ohne das startet der Planner von heim_log_attrs aus, scannt
+            // jede service.name-Zeile der Historie und macht je Zeile einen PK-Lookup
+            // auf heim_logs (O(Historie) statt O(Fenster)).
+            sb.Append("SELECT DISTINCT a.value FROM heim_logs l " +
+                      "JOIN heim_log_attrs a ON a.log_rowid = l.rowid AND a.key IN ('service.name','service_name') " +
+                      "WHERE 1=1");
             if (fromUnixNano is not null) { sb.Append(" AND l.ts_unix_nano >= @lfrom"); ps.Add(Param("@lfrom", fromUnixNano.Value)); }
             if (toUnixNano is not null) { sb.Append(" AND l.ts_unix_nano <= @lto"); ps.Add(Param("@lto", toUnixNano.Value)); }
         }
-        sb.Append(" WHERE a.key IN ('service.name','service_name')");
+        else
+        {
+            sb.Append("SELECT DISTINCT a.value FROM heim_log_attrs a WHERE a.key IN ('service.name','service_name')");
+        }
 
         if (includeSpans)
         {
             sb.Append(" UNION ");
 
-            sb.Append("SELECT DISTINCT a.value FROM heim_span_attrs a");
-            if (fromUnixNano is not null || toUnixNano is not null)
+            if (hasTime)
             {
-                sb.Append(" JOIN heim_spans s ON s.rowid = a.span_rowid");
+                sb.Append("SELECT DISTINCT a.value FROM heim_spans s " +
+                          "JOIN heim_span_attrs a ON a.span_rowid = s.rowid AND a.key IN ('service.name','service_name') " +
+                          "WHERE 1=1");
                 if (fromUnixNano is not null) { sb.Append(" AND s.start_unix_nano >= @sfrom"); ps.Add(Param("@sfrom", fromUnixNano.Value)); }
                 if (toUnixNano is not null) { sb.Append(" AND s.start_unix_nano <= @sto"); ps.Add(Param("@sto", toUnixNano.Value)); }
             }
-            sb.Append(" WHERE a.key IN ('service.name','service_name')");
+            else
+            {
+                sb.Append("SELECT DISTINCT a.value FROM heim_span_attrs a WHERE a.key IN ('service.name','service_name')");
+            }
         }
         sb.Append(" ORDER BY 1");
 

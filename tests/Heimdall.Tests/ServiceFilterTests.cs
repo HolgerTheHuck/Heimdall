@@ -151,16 +151,20 @@ public class ServiceFilterTests
         var path = NewDbPath();
         try
         {
-            long old = NowNs - 10_000_000_000L;                    // ~10 s zurück (alt genug)
+            // Feste Zeitstempel statt NowNs: das Fenster ist sonst fragil, weil NowNs
+            // bei jedem Zugriff neu tickt — zwischen Write und Query vergehen auf lang-
+            // samen Maschinen >1 s, und der "frische" Log faellt hinter from zurueck.
+            long fresh = 20_000_000_000L;                    // deterministisches "jetzt"
+            long old = fresh - 10_000_000_000L;              // ~10 s zurück (alt genug)
             using var sink = NewSql(path);
             sink.WriteLogs(new[]
             {
-                Log(old,     "msg-old", "legacysvc"),
-                Log(NowNs,   "msg-new", "freshsvc"),
+                Log(old,   "msg-old", "legacysvc"),
+                Log(fresh, "msg-new", "freshsvc"),
             });
 
-            Assert.DoesNotContain("legacysvc", sink.ListServiceNames(NowNs - 1_000_000_000L, null));
-            Assert.Contains("freshsvc", sink.ListServiceNames(NowNs - 1_000_000_000L, null));
+            Assert.DoesNotContain("legacysvc", sink.ListServiceNames(fresh - 1_000_000_000L, null));
+            Assert.Contains("freshsvc", sink.ListServiceNames(fresh - 1_000_000_000L, null));
             // Global (kein Zeitraum): beide.
             var all = sink.ListServiceNames();
             Assert.Contains("legacysvc", all);

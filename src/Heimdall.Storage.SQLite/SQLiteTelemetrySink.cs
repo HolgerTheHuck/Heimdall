@@ -30,7 +30,9 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
     private readonly SQLiteTelemetryOptions _options;
     private readonly SqliteConnection _conn;
     private readonly SqliteCommand _insSpan, _insLog, _insMetric, _insSeries, _selSeriesId;
+    private readonly SqliteCommand _insSpanAttr, _insLogAttr;
     private readonly SqliteParameter[] _pSpan, _pLog, _pMetric, _pSeries;
+    private readonly SqliteParameter[] _pSpanAttr, _pLogAttr;
     private readonly Timer? _retentionTimer;
     private readonly object _gate = new();
     private readonly Dictionary<string, Regex> _regexCache = new(StringComparer.Ordinal);
@@ -104,10 +106,11 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             }
             return r.IsMatch(value);
         });
-        // Format v2: Dekompress-UDF für die Attr-Index-Trigger — json_each kann
-        // Brotli-BLOBs nicht lesen, drum zippt der Trigger per UDF zurück. Nur
-        // auf der Write-Verbindung nötig (Trigger feuern nur bei Writes); Reads
-        // dekomprimieren in C# (NJson), kein SQL-UDF im Read-Pfad.
+        // Format v2: Dekompress-UDF — json_each kann Brotli-BLOBs nicht lesen.
+        // Nach Punkt 4b expandieren die Attr-Trigger nicht mehr (das macht C# zur
+        // Schreibzeit); die UDF bleibt fuer den einmaligen BackfillSpanAttrs auf
+        // Bestands-DBs. Nur auf der Write-Verbindung noetig; Reads dekomprimieren
+        // in C# (NJson), kein SQL-UDF im Read-Pfad.
         _conn.CreateFunction("heimd_unzip", (object? v) => JsonBlob.Decode(v));
         if (_options.WalMode)
         {
@@ -132,6 +135,8 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
 
         (_insSpan, _pSpan) = Prepare(SqlInsertSpan, 16);
         (_insLog, _pLog) = Prepare(SqlInsertLog, 10);
+        (_insSpanAttr, _pSpanAttr) = Prepare(SqlInsertSpanAttrs, 3);
+        (_insLogAttr, _pLogAttr) = Prepare(SqlInsertLogAttrs, 3);
         (_insMetric, _pMetric) = Prepare(SqlInsertMetric, 17);
         // Serie (Labels) je Punkt aufloesen: INSERT OR IGNORE + SELECT series_id.
         (_insSeries, _pSeries) = Prepare(SqlInsertSeries, 5);
@@ -162,9 +167,14 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1) return;   // C4: kein _conn-Zugriff nach Dispose
             using var tx = _conn.BeginTransaction();
             _insSpan.Transaction = tx;
+            _insSpanAttr.Transaction = tx;
             for (int i = 0; i < spans.Count; i++)
             {
                 var s = spans[i];
+                // Raw-JSON vorhalten: Punkt 4b expandiert die Attr-Zeilen in C# aus
+                // genau diesem Text (kein Brotli-dekomprimieren im Trigger mehr).
+                var attrsJson = HeimdallJson.WriteAttributes(s.Attributes);
+                var resourceJson = s.Resource is null ? "{}" : HeimdallJson.WriteAttributes(s.Resource.Attributes);
                 _pSpan[0].Value = HeimdallJson.ToHex(s.TraceId);
                 _pSpan[1].Value = HeimdallJson.ToHex(s.SpanId);
                 _pSpan[2].Value = s.ParentSpanId is null ? DBNull.Value : (object)HeimdallJson.ToHex(s.ParentSpanId);
@@ -175,13 +185,18 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
                 _pSpan[7].Value = Math.Max(0, s.EndUnixNano - s.StartUnixNano);
                 _pSpan[8].Value = (int)s.StatusCode;
                 _pSpan[9].Value = (object?)s.StatusMessage ?? DBNull.Value;
-                _pSpan[10].Value = EncJson(HeimdallJson.WriteAttributes(s.Attributes));
+                _pSpan[10].Value = EncJson(attrsJson);
                 _pSpan[11].Value = EncJson(HeimdallJson.WriteSpanEvents(s.Events));
                 _pSpan[12].Value = EncJson(HeimdallJson.WriteSpanLinks(s.Links));
-                _pSpan[13].Value = EncJson(s.Resource is null ? "{}" : HeimdallJson.WriteAttributes(s.Resource.Attributes));
+                _pSpan[13].Value = EncJson(resourceJson);
                 _pSpan[14].Value = (object?)s.Scope?.Name ?? DBNull.Value;
                 _pSpan[15].Value = (object?)s.Scope?.Version ?? DBNull.Value;
-                _insSpan.ExecuteNonQuery();
+                var ridObj = _insSpan.ExecuteScalar();
+                if (ridObj is null) continue;   // INSERT OR IGNORE: Duplikat (trace_id, span_id) übersprungen
+                _pSpanAttr[0].Value = (long)ridObj;
+                _pSpanAttr[1].Value = attrsJson;
+                _pSpanAttr[2].Value = resourceJson;
+                _insSpanAttr.ExecuteNonQuery();
             }
             tx.Commit();
             Interlocked.Add(ref _hostIngestSpans, spans.Count);   // C3: ingested-Volume
@@ -197,20 +212,28 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
             if (Interlocked.CompareExchange(ref _disposed, 0, 0) == 1) return;   // C4: kein _conn-Zugriff nach Dispose
             using var tx = _conn.BeginTransaction();
             _insLog.Transaction = tx;
+            _insLogAttr.Transaction = tx;
             for (int i = 0; i < logs.Count; i++)
             {
                 var l = logs[i];
+                // Raw-JSON vorhalten (Punkt 4b, s. WriteSpans).
+                var attrsJson = HeimdallJson.WriteAttributes(l.Attributes);
+                var resourceJson = l.Resource is null ? "{}" : HeimdallJson.WriteAttributes(l.Resource.Attributes);
                 _pLog[0].Value = l.TimeUnixNano;
                 _pLog[1].Value = l.TraceId is null ? DBNull.Value : (object)HeimdallJson.ToHex(l.TraceId);
                 _pLog[2].Value = l.SpanId is null ? DBNull.Value : (object)HeimdallJson.ToHex(l.SpanId);
                 _pLog[3].Value = (int)l.Severity;
                 _pLog[4].Value = (object?)l.SeverityText ?? DBNull.Value;
                 _pLog[5].Value = (object?)l.Body ?? DBNull.Value;
-                _pLog[6].Value = EncJson(HeimdallJson.WriteAttributes(l.Attributes));
-                _pLog[7].Value = EncJson(l.Resource is null ? "{}" : HeimdallJson.WriteAttributes(l.Resource.Attributes));
+                _pLog[6].Value = EncJson(attrsJson);
+                _pLog[7].Value = EncJson(resourceJson);
                 _pLog[8].Value = (object?)l.Scope?.Name ?? DBNull.Value;
                 _pLog[9].Value = (object?)l.Scope?.Version ?? DBNull.Value;
-                _insLog.ExecuteNonQuery();
+                var rid = (long)_insLog.ExecuteScalar()!;   // heim_logs hat keinen UNIQUE → liefert immer rowid
+                _pLogAttr[0].Value = rid;
+                _pLogAttr[1].Value = attrsJson;
+                _pLogAttr[2].Value = resourceJson;
+                _insLogAttr.ExecuteNonQuery();
             }
             tx.Commit();
             Interlocked.Add(ref _hostIngestLogs, logs.Count);   // C3: ingested-Volume
@@ -1006,53 +1029,31 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
              "PRIMARY KEY (log_rowid, key, value))");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_log_attrs_kv ON heim_log_attrs(key, value)");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_log_attrs_log ON heim_log_attrs(log_rowid)");
-        // AFTER INSERT: beide JSON-Spalten expandieren (log-Attrs + Resource-Attrs).
-        // Format v2: die Spalten sind Brotli-BLOBs — json_each liest sie via
-        // heimd_unzip-UDF (Write-Verbindung). DROP+CREATE statt IF NOT EXISTS:
-        // bestehende v1-Trigger (direktes json_each) würden sonst stehen bleiben.
+        // AFTER INSERT/UPDATE-Expansion entfaellt (Punkt 4b): die Attr-Zeilen
+        // entstehen jetzt in C# (WriteLogs) aus dem Raw-JSON. Die _ai/_au-Trigger
+        // (Brotli-dekomprimieren via heimd_unzip) werden nur noch gedroppt
+        // (Bestands-DBs). Der _ad-Cascade bleibt — Retention-Loeschungen haengen
+        // daran.
         Exec("DROP TRIGGER IF EXISTS heim_log_attrs_ai");
-        Exec("CREATE TRIGGER heim_log_attrs_ai AFTER INSERT ON heim_logs BEGIN " +
-             "INSERT OR IGNORE INTO heim_log_attrs(log_rowid, key, value) " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.attrs_json)) e " +
-             "UNION ALL " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.resource_json)) e; END");
+        Exec("DROP TRIGGER IF EXISTS heim_log_attrs_au");
         // AFTER DELETE: Cascade ueber log_rowid (heim_logs.rowid ist implizit).
         Exec("CREATE TRIGGER IF NOT EXISTS heim_log_attrs_ad AFTER DELETE ON heim_logs BEGIN " +
              "DELETE FROM heim_log_attrs WHERE log_rowid = old.rowid; END");
-        // AFTER UPDATE: delete + reinsert (wie FTS5-Pattern).
-        Exec("DROP TRIGGER IF EXISTS heim_log_attrs_au");
-        Exec("CREATE TRIGGER heim_log_attrs_au AFTER UPDATE ON heim_logs BEGIN " +
-             "DELETE FROM heim_log_attrs WHERE log_rowid = old.rowid; " +
-             "INSERT OR IGNORE INTO heim_log_attrs(log_rowid, key, value) " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.attrs_json)) e " +
-             "UNION ALL " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.resource_json)) e; END");
 
         // Span-Attr-Index: exaktes Pendant zu heim_log_attrs, expandiert Span- UND
         // Resource-Attribute (service.name/service.version sitzen in resource_json)
         // in eine Zeile pro (span_rowid, key, value). Basis fuer Service-/Version-
-        // Filter und -Discovery auf Traces. Format v2: heimd_unzip im Trigger,
-        // DROP+CREATE (siehe oben).
+        // Filter und -Discovery auf Traces. Punkt 4b: Expansion in C# (WriteSpans),
+        // _ai/_au nur noch gedroppt, _ad-Cascade bleibt.
         Exec("CREATE TABLE IF NOT EXISTS heim_span_attrs (" +
              "span_rowid INTEGER NOT NULL, key TEXT NOT NULL, value TEXT NOT NULL, " +
              "PRIMARY KEY (span_rowid, key, value))");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_span_attrs_kv ON heim_span_attrs(key, value)");
         Exec("CREATE INDEX IF NOT EXISTS idx_heim_span_attrs_span ON heim_span_attrs(span_rowid)");
         Exec("DROP TRIGGER IF EXISTS heim_span_attrs_ai");
-        Exec("CREATE TRIGGER heim_span_attrs_ai AFTER INSERT ON heim_spans BEGIN " +
-             "INSERT OR IGNORE INTO heim_span_attrs(span_rowid, key, value) " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.attrs_json)) e " +
-             "UNION ALL " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.resource_json)) e; END");
+        Exec("DROP TRIGGER IF EXISTS heim_span_attrs_au");
         Exec("CREATE TRIGGER IF NOT EXISTS heim_span_attrs_ad AFTER DELETE ON heim_spans BEGIN " +
              "DELETE FROM heim_span_attrs WHERE span_rowid = old.rowid; END");
-        Exec("DROP TRIGGER IF EXISTS heim_span_attrs_au");
-        Exec("CREATE TRIGGER heim_span_attrs_au AFTER UPDATE ON heim_spans BEGIN " +
-             "DELETE FROM heim_span_attrs WHERE span_rowid = old.rowid; " +
-             "INSERT OR IGNORE INTO heim_span_attrs(span_rowid, key, value) " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.attrs_json)) e " +
-             "UNION ALL " +
-             "SELECT new.rowid, e.key, CAST(e.value AS TEXT) FROM json_each(heimd_unzip(new.resource_json)) e; END");
         BackfillSpanAttrs();
     }
 
@@ -1447,6 +1448,7 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         lock (_gate)
         {
             _insSpan.Dispose(); _insLog.Dispose(); _insMetric.Dispose();
+            _insSpanAttr.Dispose(); _insLogAttr.Dispose();
             _insSeries.Dispose(); _selSeriesId.Dispose();
             _conn.Dispose();
         }
@@ -1515,12 +1517,31 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallSink, IHeimdallQuery,
         "INSERT OR IGNORE INTO heim_spans (trace_id, span_id, parent_id, name, kind, " +
         "start_unix_nano, end_unix_nano, duration_ns, status_code, status_msg, " +
         "attrs_json, events_json, links_json, resource_json, scope_name, scope_version) " +
-        "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15)";
+        "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9,@p10,@p11,@p12,@p13,@p14,@p15) " +
+        "RETURNING rowid";
 
     private const string SqlInsertLog =
         "INSERT INTO heim_logs (ts_unix_nano, trace_id, span_id, severity, severity_text, body, " +
         "attrs_json, resource_json, scope_name, scope_version) " +
-        "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9)";
+        "VALUES (@p0,@p1,@p2,@p3,@p4,@p5,@p6,@p7,@p8,@p9) " +
+        "RETURNING rowid";
+
+    // Attribut-Expansion (Punkt 4b): in C# zur Schreibzeit statt im Trigger — dieselbe
+    // json_each+CAST(e.value AS TEXT)-Pipeline wie der alte Trigger, aber auf dem RAW-
+    // JSON (kein Brotli-Roundtrip: die Spalte wird ohnehin komprimiert gespeichert, der
+    // alte Trigger musste sie dafür erst wieder dekomprimieren). @p0 = rowid der
+    // Basiszeile, @p1 = attrs_json, @p2 = resource_json (beide unkomprimiert).
+    private const string SqlInsertLogAttrs =
+        "INSERT OR IGNORE INTO heim_log_attrs (log_rowid, key, value) " +
+        "SELECT @p0, e.key, CAST(e.value AS TEXT) FROM json_each(@p1) e " +
+        "UNION ALL " +
+        "SELECT @p0, e.key, CAST(e.value AS TEXT) FROM json_each(@p2) e";
+
+    private const string SqlInsertSpanAttrs =
+        "INSERT OR IGNORE INTO heim_span_attrs (span_rowid, key, value) " +
+        "SELECT @p0, e.key, CAST(e.value AS TEXT) FROM json_each(@p1) e " +
+        "UNION ALL " +
+        "SELECT @p0, e.key, CAST(e.value AS TEXT) FROM json_each(@p2) e";
 
     private const string SqlInsertMetric =
         "INSERT INTO heim_metrics (name, unit, type, temporality, ts_unix_nano, " +
