@@ -199,13 +199,18 @@ public sealed class IngestBuffer : IHeimdallSink, IDisposable
         // Channel schließen (keine neuen Writes mehr). Der Worker-Loop (RunAsync)
         // draint den Channel vollständig: WaitToReadAsync returnt false nach
         // TryComplete, der finally-Tail liest alle verbleibenden Items via TryRead
-        // und flusht sie. Task.WaitAll wartet auf den Worker (mit 5s-Timeout als
-        // Notbremse). SingleReader=true bleibt gewahrt (nur der Worker liest).
+        // und flusht sie. Task.WaitAll wartet auf den Worker — OHNE Timeout: der
+        // fruehere 5s-Timeout liess Dispose unter Last (volle Test-Suite, gesaettigter
+        // Threadpool) vor dem Drain zurueckkehren, der Rest-Batch ging verloren
+        // (Shutdown-Race, Datenverlust). Der Drain ist durch die Sink-Schreibdauer
+        // begrenzt; ein haengender Sink ist ein eigenes, schwereres Problem, das
+        // hier nicht mit Datenverlust maskiert werden soll. SingleReader=true bleibt
+        // gewahrt (nur der Worker liest).
         _spans.Writer.TryComplete();
         _logs.Writer.TryComplete();
         _metrics.Writer.TryComplete();
         _cts.Cancel();
-        try { Task.WaitAll(_workers, TimeSpan.FromSeconds(5)); } catch { /* ignore */ }
+        try { Task.WaitAll(_workers); } catch { /* FlushSafe faengt — Worker faultet nicht */ }
         _cts.Dispose();
     }
 }
