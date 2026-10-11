@@ -1292,6 +1292,18 @@ a:hover { text-decoration: underline; }
 .hmd-tl-swatch { width: .65rem; height: .65rem; border-radius: 2px; display: inline-block;
     box-shadow: inset 0 0 0 1px var(--hmd-line-soft); }
 
+/* Fokus (Klick auf einen Span-Namen): server-seitiger Re-Root auf den Teilbaum unter
+   diesem Span. Banner über der Ansicht + Links sind rein HTML (kein JS nötig). */
+.hmd-tl-focus { display: flex; align-items: center; gap: .6rem; flex-wrap: wrap;
+    margin: 0 0 .8rem; padding: .4rem .6rem; color: var(--hmd-fg);
+    background: var(--hmd-panel); border: 1px solid var(--hmd-border);
+    border-left: 3px solid var(--hmd-accent); border-radius: var(--hmd-radius-sm);
+    font-size: .8rem; }
+.hmd-tl-focus a { margin-left: auto; font-weight: 600; }
+.hmd-tl-focus-link { color: var(--hmd-fg); text-decoration: none; }
+.hmd-tl-focus-link:hover { text-decoration: underline; }
+.hmd-trace-table tr.hmd-focus td:first-child { box-shadow: inset 3px 0 0 var(--hmd-accent); }
+
 /* Dauer-Label im Balken (nur wenn breit genug, sonst via overflow versteckt). */
 .hmd-tl-dur { position: absolute; left: .25rem; top: 50%; transform: translateY(-50%);
     font-family: var(--hmd-mono); font-size: .58rem; line-height: 1; color: #fff;

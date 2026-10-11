@@ -350,6 +350,9 @@ public static class HeimdallI18n
         ["trace.resource"]        = Lang("Resource", "Resource", "Ressource"),
         ["trace.logs.heading"]    = Lang("Logs dieses Traces", "Logs of this trace", "Logs de cette trace"),
         ["trace.logs.empty"]      = Lang("Keine Logs mit dieser Trace-ID verknüpft.", "No logs linked to this trace ID.", "Aucun log lié à cet ID de trace."),
+        ["trace.focus.active"]    = Lang("Fokussiert auf: {0}", "Focused on: {0}", "Ciblé sur : {0}"),
+        ["trace.focus.reset"]     = Lang("Gesamte Trace anzeigen", "Show full trace", "Afficher toute la trace"),
+        ["trace.focus.aria"]      = Lang("Auf diesen Span fokussieren", "Focus on this span", "Se concentrer sur cette span"),
 
         // --- Logs-Seite ------------------------------------------------------
         ["logs.filter.search"]    = Lang("Suche", "Search", "Recherche"),

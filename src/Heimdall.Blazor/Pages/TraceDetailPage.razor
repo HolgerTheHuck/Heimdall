@@ -18,6 +18,13 @@
     }
     else
     {
+        @if (_focused && _focusSpan is not null)
+        {
+            <p class="hmd-tl-focus" role="status">
+                <span>@I18n.T("trace.focus.active", _focusSpan.Name)</span>
+                <a href="@FullTraceUrl()">@I18n.T("trace.focus.reset")</a>
+            </p>
+        }
         <details class="hmd-tl-hist" open>
             <summary>@I18n.T("trace.timeline.heading") <span class="hmd-dim">@I18n.T("trace.span.count", _spans.Count)</span></summary>
             <div class="hmd-tl-hist-scroll">
@@ -67,11 +74,12 @@
                 var attrs = HeimdallCharting.ParseAttrs(s.AttrsJson);
                 var rowCls = s.StatusCode == 2 ? "hmd-err" : "";
                 if (_criticalPath.Contains(s.SpanId)) rowCls += " hmd-crit";
+                if (_focused && _focusSpan is not null && s.SpanId == _focusSpan.SpanId) rowCls += " hmd-focus";
                 <tr class="@rowCls">
                     <td>
                         <span style="@HeimdallTraceWaterfall.Indent(depth)">
                             <span class="hmd-mono" title="@s.SpanId">@HeimdallFmt.Truncate(s.SpanId, 8)</span>
-                            @s.Name
+                            <a href="@FocusUrl(s.SpanId)" title="@I18n.T("trace.focus.aria")">@s.Name</a>
                             @if (!string.IsNullOrEmpty(s.ParentSpanId))
                             {
                                 <span class="hmd-dim" aria-hidden="true">↳ @HeimdallFmt.Truncate(s.ParentSpanId, 8)</span>
@@ -169,6 +177,11 @@
     /// </summary>
     [Parameter] public string? Ret { get; set; }
 
+    /// <summary>Fokus-Span-ID aus <c>?focus=</c>: re-rootet die Ansicht auf den
+    /// Teilbaum unter diesem Span (Grafana-artiges „focus on span"). null/leer = volle
+    /// Trace. Unbekannte IDs fallen auf die volle Trace zurück.</summary>
+    [Parameter] public string? Focus { get; set; }
+
     private List<Heimdall.SpanRow> _spans = new();
     private List<Heimdall.LogRow> _logs = new();
     private IReadOnlyList<(Heimdall.SpanRow Span, int Depth)> _ordered = System.Array.Empty<(Heimdall.SpanRow, int)>();
@@ -183,6 +196,9 @@
     private long _traceSpanNs;
     // Kritischer Pfad: SpanIds der dominierenden Kette (markiert die Zeile).
     private HashSet<string> _criticalPath = new(StringComparer.Ordinal);
+    // Fokus: der angewählte Span (null = keine Fokussierung) samt aktiver Kennung.
+    private Heimdall.SpanRow? _focusSpan;
+    private bool _focused;
 
     protected override void OnInitialized()
     {
@@ -196,23 +212,29 @@
 
         if (string.IsNullOrEmpty(TraceId)) return;
         _spans = new List<Heimdall.SpanRow>(Query.GetTrace(TraceId));
+        // Fokus: Teilbaum unter dem angewählten Span re-rooten. Subtree liefert bei
+        // unbekannter ID die volle Trace zurück; _focused bleibt dann false (kein
+        // Banner, keine Verengung) — ein kaputter ?focus= darf die Ansicht nicht leeren.
+        _focusSpan = string.IsNullOrEmpty(Focus) ? null : _spans.Find(s => s.SpanId == Focus);
+        _focused = _focusSpan is not null;
+        var view = _focused ? HeimdallTraceWaterfall.Subtree(_spans, Focus) : _spans;
         // Zeitstrahl: DFS-Reihenfolge + gemeinsame Trace-Spanne (Tabelle + Histogramm).
-        _ordered = HeimdallTraceWaterfall.Order(_spans);
-        _range = HeimdallTraceWaterfall.TraceRange(_spans);
+        _ordered = HeimdallTraceWaterfall.Order(view);
+        _range = HeimdallTraceWaterfall.TraceRange(view);
         _traceSpanNs = _range.EndUnixNano - _range.StartUnixNano;
-        _hist = HeimdallTraceWaterfall.Histogram(_spans, _range);
+        _hist = HeimdallTraceWaterfall.Histogram(view, _range);
         foreach (var h in _hist) if (h.Count > _histMax) _histMax = h.Count;
         // Service-Färbung: pro Span den service.name ermitteln (ein Parse pro Span),
         // distinct in DFS-Reihenfolge für die Legende sammeln.
         var seenServices = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var s in _spans)
+        foreach (var s in view)
         {
             var svc = HeimdallTraceWaterfall.ServiceFor(s);
             _spanService[s.SpanId] = svc;
             if (!string.IsNullOrEmpty(svc) && seenServices.Add(svc))
                 _serviceLegend.Add((svc, HeimdallTraceWaterfall.ServiceColor(svc)));
         }
-        _criticalPath = new HashSet<string>(HeimdallTraceWaterfall.CriticalPath(_spans), StringComparer.Ordinal);
+        _criticalPath = new HashSet<string>(HeimdallTraceWaterfall.CriticalPath(view), StringComparer.Ordinal);
         // Korrelation Traces↔Logs: LogSearch.TraceId existiert im Modell — direkter
         // Join über die Trace-ID, kein Zeitfenster nötig (Trace ist selbst begrenzt).
         _logs = new List<Heimdall.LogRow>(Query.SearchLogs(new Heimdall.LogSearch
@@ -220,5 +242,26 @@
             TraceId = TraceId,
             Limit = 200,
         }));
+    }
+
+    /// <summary>URL zum Fokussieren eines Spans: <c>?focus=&lt;id&gt;</c> unter
+    /// Erhalt des <c>ret</c>-Rückziels (der Zurück-Link behält so die Herkunft).
+    /// Rein serverseitig — kein JS nötig.</summary>
+    private string FocusUrl(string spanId)
+    {
+        var sb = new System.Text.StringBuilder(BasePath)
+            .Append("/trace/").Append(Uri.EscapeDataString(TraceId))
+            .Append("?focus=").Append(Uri.EscapeDataString(spanId));
+        if (!string.IsNullOrEmpty(Ret)) sb.Append("&ret=").Append(Uri.EscapeDataString(Ret));
+        return sb.ToString();
+    }
+
+    /// <summary>URL zurück zur vollen Trace (Fokus aufheben), <c>ret</c> bleibt erhalten.</summary>
+    private string FullTraceUrl()
+    {
+        var sb = new System.Text.StringBuilder(BasePath)
+            .Append("/trace/").Append(Uri.EscapeDataString(TraceId));
+        if (!string.IsNullOrEmpty(Ret)) sb.Append("?ret=").Append(Uri.EscapeDataString(Ret));
+        return sb.ToString();
     }
 }

@@ -146,6 +146,48 @@ public class HeimdallTraceWaterfallTests
     }
 
     [Fact]
+    public void Subtree_FokusAufKind_LiefertTeilbaumNurDesKinds()
+    {
+        var spans = new[]
+        {
+            Span("t", "root", null, "root", 0, 100),
+            Span("t", "c1", "root", "c1", 10, 90),
+            Span("t", "c2", "root", "c2", 20, 100),
+            Span("t", "g1", "c2", "g1", 30, 60),
+            Span("t", "g2", "c2", "g2", 50, 95),
+        };
+
+        var sub = Heimdall.Blazor.HeimdallTraceWaterfall.Subtree(spans, "c2");
+
+        Assert.Equal(new[] { "c2", "g1", "g2" }, sub.Select(s => s.SpanId).OrderBy(x => x).ToArray());
+    }
+
+    [Fact]
+    public void Subtree_BlattLiefertNurSichSelbst()
+    {
+        var spans = new[] { Span("t", "root", null, "root", 0, 100), Span("t", "leaf", "root", "leaf", 10, 20) };
+
+        var sub = Heimdall.Blazor.HeimdallTraceWaterfall.Subtree(spans, "leaf");
+
+        Assert.Single(sub);
+        Assert.Equal("leaf", sub[0].SpanId);
+    }
+
+    [Fact]
+    public void Subtree_LeerUnbekanntUndOhneFokus_FallenZurueckAufVolleTrace()
+    {
+        var spans = new[] { Span("t", "root", null, "root", 0, 100), Span("t", "c1", "root", "c1", 10, 90) };
+
+        Assert.Empty(Heimdall.Blazor.HeimdallTraceWaterfall.Subtree(null, "root"));
+        Assert.Empty(Heimdall.Blazor.HeimdallTraceWaterfall.Subtree(Array.Empty<SpanRow>(), "root"));
+        // Ohne Fokus-ID: unveraenderte Liste.
+        Assert.Equal(2, Heimdall.Blazor.HeimdallTraceWaterfall.Subtree(spans, null).Count);
+        Assert.Equal(2, Heimdall.Blazor.HeimdallTraceWaterfall.Subtree(spans, "").Count);
+        // Unbekannte ID: volle Trace (ein Fokus darf die Ansicht nie leeren).
+        Assert.Equal(2, Heimdall.Blazor.HeimdallTraceWaterfall.Subtree(spans, "nope").Count);
+    }
+
+    [Fact]
     public void ServiceFor_LiestResourceName_VorSpanAttrs()
     {
         var viaResource = new SpanRow("t", "a", "", "GET", (int)HSpanKind.Server,

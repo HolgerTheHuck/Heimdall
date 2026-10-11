@@ -114,6 +114,49 @@ internal static class HeimdallTraceWaterfall
     }
 
     /// <summary>
+    /// Subtree-Sicht für den Fokus: die Spans des Teilbaums unter
+    /// <paramref name="focusId"/> (der Fokus-Span selbst inklusive). Liefert alle Spans,
+    /// wenn <paramref name="focusId"/> null/leer oder unbekannt ist — ein Fokus darf die
+    /// Ansicht nie leeren, sonst ginge beim Klick auf einen unbekannten Span die ganze
+    /// Trace verloren. <see cref="Order"/> behandelt den Fokus-Span automatisch als Wurzel,
+    /// weil dessen Parent nicht mehr in der Teilmenge liegt. Wirft nie.
+    /// </summary>
+    public static IReadOnlyList<Heimdall.SpanRow> Subtree(
+        IReadOnlyList<Heimdall.SpanRow>? spans, string? focusId)
+    {
+        if (spans is null || spans.Count == 0) return Array.Empty<Heimdall.SpanRow>();
+        if (string.IsNullOrEmpty(focusId)) return spans;
+
+        var byId = new Dictionary<string, Heimdall.SpanRow>(StringComparer.Ordinal);
+        foreach (var s in spans) byId[s.SpanId] = s;
+        if (!byId.TryGetValue(focusId, out var root)) return spans;   // unbekannt → volle Trace
+
+        var children = new Dictionary<string, List<Heimdall.SpanRow>>(StringComparer.Ordinal);
+        foreach (var s in spans)
+        {
+            if (string.IsNullOrEmpty(s.ParentSpanId)) continue;
+            if (!children.TryGetValue(s.ParentSpanId, out var list))
+            {
+                list = new List<Heimdall.SpanRow>();
+                children[s.ParentSpanId] = list;
+            }
+            list.Add(s);
+        }
+
+        var result = new List<Heimdall.SpanRow>();
+        var stack = new Stack<Heimdall.SpanRow>();
+        stack.Push(root);
+        while (stack.Count > 0)
+        {
+            var node = stack.Pop();
+            result.Add(node);
+            if (children.TryGetValue(node.SpanId, out var kids))
+                foreach (var k in kids) stack.Push(k);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// Trace-Spanne (Wall-Clock: min Start .. max End). Garantiert End &gt; Start
     /// (Fallback Start+1). Wirft nie (null/leer → (0,1)).
     /// </summary>

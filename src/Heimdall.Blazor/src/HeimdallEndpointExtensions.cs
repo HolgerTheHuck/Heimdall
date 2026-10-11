@@ -154,8 +154,8 @@ public static class HeimdallEndpointExtensions
                 To = ParseNs(to),
             }));
 
-        group.MapGet("/trace/{tid}", (HttpContext ctx, string tid, string? ret) =>
-            new RazorComponentResult<TraceDetailPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), TraceId = tid, Ret = ret }));
+        group.MapGet("/trace/{tid}", (HttpContext ctx, string tid, string? ret, string? focus) =>
+            new RazorComponentResult<TraceDetailPage>(new { BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix), TraceId = tid, Ret = ret, Focus = focus }));
 
         group.MapGet("/logs", (HttpContext ctx, string? text, string? q, string? sev, string[]? svc, string? ver, string? limit, string? expand, string? offset, string? sort, string? dir, string? preset, string? from, string? to, string? view) =>
             new RazorComponentResult<LogsPage>(new
