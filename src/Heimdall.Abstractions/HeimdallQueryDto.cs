@@ -152,6 +152,13 @@ public sealed record SignalVolumePoint(
     long Logs,
     long Metrics);
 
+/// <summary>Eine Metrik-Namen-Zeile mit Service-/Scope-Kontext für die
+/// gruppierte Discovery-Liste (Seq-Idee „Group/Search"). <c>ServiceName</c> ist
+/// leer, wenn die Metrik keinen <c>service.name</c> führt (dann gruppiert die
+/// UI sie unter „kein Service"). <c>ScopeName</c> ist die Instrumentierungs-
+/// Bibliothek (InstrumentationScope), leer wenn unbekannt.</summary>
+public sealed record MetricNameSummary(string Name, string ServiceName, string ScopeName);
+
 /// <summary>Speicherverbrauch einer Tabelle/-gruppe im Depot.
 /// <c>Bytes = -1</c>, wenn das Backend keine Größenermittlung anbieten kann
 /// (z. B. fehlt <c>dbstat</c> in der gebundenen SQLite-Bibliothek) — die UI
@@ -217,6 +224,14 @@ public interface IHeimdallQuery
     /// Additiv als Default-Interface-Method -> nicht-brechend für bestehende Implementierer.</summary>
     IReadOnlyList<string> ListMetricNames(long? fromUnixNano = null, long? toUnixNano = null)
         => System.Array.Empty<string>();
+
+    /// <summary>Alle distinkten Metrik-Namen im Zeitfenster, jeweils mit
+    /// <c>service.name</c> (aus <c>resource_json</c>) und InstrumentationScope.
+    /// Basis für die gruppierte Metrik-Discovery (Seq-Idee „Group/Search").
+    /// Default-Implementierung leer -> additiv, nicht-brechend für bestehende
+    /// Implementierer.</summary>
+    IReadOnlyList<MetricNameSummary> ListMetricSummaries(long? fromUnixNano = null, long? toUnixNano = null)
+        => System.Array.Empty<MetricNameSummary>();
 
     /// <summary>Alle distinkten <c>service.name</c>-Werte (Logs UND Spans) im
     /// Zeitfenster (null = global). Mit <paramref name="includeSpans"/> = false nur

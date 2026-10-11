@@ -3,6 +3,7 @@
    (Gauge/Sum) bzw. Linie + Histogramm-Balken (Histogram). Kein JS. *@
 @using System.Collections.Generic
 @using System.Globalization
+@using System.Linq
 @inject Heimdall.IHeimdallQuery Query
 @inject Heimdall.Blazor.IHeimdallI18n I18n
 
@@ -11,6 +12,7 @@
 
     <form class="hmd-filters" method="get" action="@(BasePath + "/metrics")">
         <label>@I18n.T("metrics.filter.name") <input type="search" name="name" value="@Name" placeholder="http.server.request.duration" /></label>
+        <label>@I18n.T("metrics.filter.q") <input type="search" name="q" value="@Q" placeholder="@I18n.T("metrics.search.placeholder")" /></label>
         <label>@I18n.T("metrics.filter.limit") <input type="number" name="limit" value="@Limit" min="1" max="5000" /></label>
         <HeimdallTimeRange Preset="@Preset" From="@From" To="@To" />
         <button type="submit">@I18n.T("metrics.filter.load")</button>
@@ -19,7 +21,7 @@
     @if (string.IsNullOrWhiteSpace(Name))
     {
         <h2 class="hmd-subhead">@I18n.T("metrics.available.title")</h2>
-        @if (_availableNames.Count == 0)
+        @if (!_hasAny)
         {
             <section class="hmd-empty-state" role="status">
                 <h2>@I18n.T("metrics.empty.title")</h2>
@@ -27,15 +29,30 @@
                 <p class="hmd-dim">@I18n.T("traces.empty.hint.http") <code>POST @BasePath/v1/metrics</code> · @I18n.T("traces.empty.hint.grpc") <code>localhost:4317</code> · @I18n.T("common.back.to") <a href="@BasePath">@I18n.T("nav.overview")</a></p>
             </section>
         }
+        else if (_groups.Count == 0)
+        {
+            <p class="hmd-dim">@I18n.T("metrics.empty.search", Q ?? "")</p>
+        }
         else
         {
             <p class="hmd-dim">@I18n.T("metrics.available.hint", Query.CountMetrics())</p>
-            <ul class="hmd-metric-list">
-            @foreach (var n in _availableNames)
+            @foreach (var grp in _groups)
             {
-                <li><a href="@(BasePath + "/metrics?" + RangeQuery(n))" class="hmd-mono">@n</a></li>
+                var service = string.IsNullOrEmpty(grp.Key) ? I18n.T("metrics.group.unspecified") : grp.Key;
+                <h3 class="hmd-metric-group">@service <span class="hmd-dim">(@grp.Count())</span></h3>
+                <ul class="hmd-metric-list">
+                @foreach (var s in grp)
+                {
+                    <li>
+                        <a href="@(BasePath + "/metrics?" + RangeQuery(s.Name))" class="hmd-mono">@s.Name</a>
+                        @if (!string.IsNullOrEmpty(s.ScopeName))
+                        {
+                            <span class="hmd-dim">· @I18n.T("metrics.group.scope", s.ScopeName)</span>
+                        }
+                    </li>
+                }
+                </ul>
             }
-            </ul>
         }
     }
     else if (_series.Count == 0)
@@ -95,6 +112,7 @@
 @code {
     [Parameter] public string BasePath { get; set; } = "/otel";
     [Parameter] public string? Name { get; set; }
+    [Parameter] public string? Q { get; set; }
     [Parameter] public int Limit { get; set; } = 500;
     [Parameter] public string? Preset { get; set; }
     [Parameter] public long? From { get; set; }
@@ -104,7 +122,8 @@
     private List<ChartSeries> _chartSeries = new();
     private List<long> _histCounts = new();
     private List<double> _histBounds = new();
-    private List<string> _availableNames = new();
+    private List<IGrouping<string, Heimdall.MetricNameSummary>> _groups = new();
+    private bool _hasAny;
     private int _type;
     private int _temp;
     private string? _unit;
@@ -116,10 +135,23 @@
     {
         var range = HeimdallRange.Resolve(Preset, From, To, HeimdallRange.NowUnixNano());
 
-        // Ohne Namen: Discovery-Modus — verfügbare Metrik-Namen im Zeitraum auflisten.
+        // Ohne Namen: Discovery-Modus — verfügbare Metrik-Namen im Zeitraum auflisten,
+        // nach service.name gruppiert (Seq-Idee „Group/Search"); freier Suchtext (q)
+        // filtert die Namen client-seitig über die bereits geladene Liste.
         if (string.IsNullOrWhiteSpace(Name))
         {
-            _availableNames = new List<string>(Query.ListMetricNames(range.From, range.To));
+            var all = Query.ListMetricSummaries(range.From, range.To);
+            _hasAny = all.Count > 0;
+            var q = (Q ?? string.Empty).Trim();
+            if (q.Length > 0)
+            {
+                all = all.Where(s => s.Name.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+            }
+            _groups = all
+                .GroupBy(s => s.ServiceName)
+                .OrderBy(g => string.IsNullOrEmpty(g.Key) ? 1 : 0)          // „(kein Service)" ans Ende
+                .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase)
+                .ToList();
             return;
         }
 

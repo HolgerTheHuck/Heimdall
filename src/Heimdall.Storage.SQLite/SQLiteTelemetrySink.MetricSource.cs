@@ -56,6 +56,52 @@ public sealed partial class SQLiteTelemetrySink : IHeimdallMetricSource
         return names;
     }
 
+    public IReadOnlyList<MetricNameSummary> ListMetricSummaries(long? fromUnixNano = null, long? toUnixNano = null)
+    {
+        var sb = SqlBuilder();
+        // Hebel 4: name/scope/resource kommen aus heim_metric_series (einmal je
+        // Fingerprint). service.name wird in-app aus resource_json geparst — die
+        // Serien-Spalte ist TEXT (unkomprimiert, JsonBlob.cs), kein Brotli.
+        sb.Append("SELECT m.name, COALESCE(s.scope_name, m.scope_name), COALESCE(s.resource_json, m.resource_json) " +
+                  "FROM heim_metrics m LEFT JOIN heim_metric_series s ON s.series_id = m.series_id WHERE 1=1");
+        var ps = new List<SqliteParameter>();
+        if (fromUnixNano is not null) { sb.Append(" AND m.ts_unix_nano >= @from"); ps.Add(Param("@from", fromUnixNano.Value)); }
+        if (toUnixNano is not null) { sb.Append(" AND m.ts_unix_nano <= @to"); ps.Add(Param("@to", toUnixNano.Value)); }
+        // Workstream F: bei aktivem Rollup auch die Rollup-Tabelle vereinigen —
+        // sonst verschwindet ein Name, sobald seine Raw-Punkte alle gealtert sind.
+        if (_options.RollupEnabledEffective)
+        {
+            sb.Append(" UNION ALL SELECT m.name, COALESCE(s.scope_name, m.scope_name), COALESCE(s.resource_json, m.resource_json) " +
+                      "FROM heim_metrics_rollup m LEFT JOIN heim_metric_series s ON s.series_id = m.series_id WHERE 1=1");
+            if (fromUnixNano is not null) { sb.Append(" AND m.bucket_start >= @from2"); ps.Add(Param("@from2", fromUnixNano.Value)); }
+            if (toUnixNano is not null) { sb.Append(" AND m.bucket_start <= @to2"); ps.Add(Param("@to2", toUnixNano.Value)); }
+        }
+        sb.Append(" ORDER BY m.name");
+
+        var set = new HashSet<MetricNameSummary>();
+        using (var rc = OpenReadConnection())
+        using (var cmd = BuildRead(rc, sb.ToString(), ps))
+        using (var r = cmd.ExecuteReader())
+        {
+            while (r.Read())
+            {
+                var name = r.GetString(0);
+                var scope = NStr(r, 1) ?? string.Empty;
+                var labels = ParseLabels(null, NStr(r, 2));   // nur resource_json -> service.name
+                labels.TryGetValue("service.name", out var svc);
+                set.Add(new MetricNameSummary(name, svc ?? string.Empty, scope));
+            }
+        }
+        // heimdall.*-Observability-Metriken (A4/C3): Host-Metriken ohne service.name
+        // — unter dem synthetischen Service „heimdall" gruppieren (ScopeHeimdall).
+        foreach (var m in HeimdallMetricNames)
+            set.Add(new MetricNameSummary(m, ScopeHeimdall, ScopeHeimdall));
+
+        var list = new List<MetricNameSummary>(set);
+        list.Sort((a, b) => string.CompareOrdinal(a.Name, b.Name));
+        return list;
+    }
+
     public IReadOnlyList<string> ListLabelNames(IReadOnlyList<HLabelMatcher>? matchers = null,
                                                  long? fromUnixNano = null, long? toUnixNano = null)
     {

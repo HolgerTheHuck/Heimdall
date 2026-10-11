@@ -755,6 +755,14 @@ a:hover { text-decoration: underline; }
 .hmd-metric-list a { color: var(--hmd-accent); text-decoration: none; font-size: .82rem; }
 .hmd-metric-list a:hover { text-decoration: underline; }
 
+/* Gruppierte Discovery: Service-Gruppenkopf über je einer Namen-Liste */
+.hmd-metric-group {
+    margin: 1.4rem 0 .2rem; font-size: .9rem; font-weight: 600;
+    color: var(--hmd-fg); border-left: 3px solid var(--hmd-accent);
+    padding-left: .55rem;
+}
+.hmd-metric-group:first-of-type { margin-top: .6rem; }
+
 /* Benutzerdefinierter Zeitraum */
 .hmd-range-custom { margin-left: .2rem; }
 .hmd-range-custom > summary {

@@ -282,7 +282,41 @@ public class SQLiteTelemetrySinkTests
     }
 
     /// <summary>
-    /// Regression: MetricSeries mit null/leerem Namen darf nicht werfen (früher
+    /// Seq-Idee „Group/Search": ListMetricSummaries liefert je Metrik-Namen den
+    /// service.name (aus resource_json) und den InstrumentationScope — Basis der
+    /// gruppierten Discovery-Liste. Ein Name kann unter mehreren Services laufen;
+    /// Metriken ohne service.name bleiben leer, heimdall.*-Host-Metriken laufen
+    /// unter dem synthetischen Service „heimdall".
+    /// </summary>
+    [Fact]
+    public void ListMetricSummaries_Gruppiert_NachServiceName_Und_Scope()
+    {
+        var path = NewDbPath();
+        try
+        {
+            using var sink = new SQLiteTelemetrySink(new SQLiteTelemetryOptions { DataPath = path, RetentionDays = 0 });
+            var t0 = NowNs;
+            var scope = new HScope("api", "1.0", Array.Empty<HAttribute>());
+            sink.WriteMetrics(new[]
+            {
+                new HMetricPoint("http.server.duration", "ms", HMetricType.Histogram, HTemporality.Cumulative, t0, 0, 1, 5, 5, 5,
+                    new long[] { 0, 1 }, new double[] { 0, 10 }, Array.Empty<HAttribute>(), Res("shop"), scope),
+                new HMetricPoint("http.server.duration", "ms", HMetricType.Histogram, HTemporality.Cumulative, t0, 0, 1, 5, 5, 5,
+                    new long[] { 0, 1 }, new double[] { 0, 10 }, Array.Empty<HAttribute>(), Res("billing"), scope),
+                new HMetricPoint("orders", "1", HMetricType.Sum, HTemporality.Cumulative, t0, 1, 1, null, null, null, null, null,
+                    Array.Empty<HAttribute>(), null, null),   // kein service.name
+            });
+
+            var summaries = sink.ListMetricSummaries();
+            Assert.Contains(summaries, s => s.Name == "http.server.duration" && s.ServiceName == "shop" && s.ScopeName == "api");
+            Assert.Contains(summaries, s => s.Name == "http.server.duration" && s.ServiceName == "billing");
+            Assert.Contains(summaries, s => s.Name == "orders" && s.ServiceName == "");
+            Assert.Contains(summaries, s => s.Name == "heimdall.host.ingest" && s.ServiceName == "heimdall");
+        }
+        finally { if (File.Exists(path)) try { File.Delete(path); } catch { } }
+    }
+
+    /// <summary>
     /// „InvalidOperationException: Value must be set" aus der SQLite-Bindung, weil
     /// Param("@n", null) den Parameter ohne Value ließ). Aufrufer wie das Dashboard
     /// rufen MetricSeries für einen optionalen Errors-Counter auf, der leer sein darf.

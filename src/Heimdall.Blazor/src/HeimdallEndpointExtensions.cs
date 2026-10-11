@@ -181,11 +181,12 @@ public static class HeimdallEndpointExtensions
                 View = NullIfEmpty(view ?? ""),
             }));
 
-        group.MapGet("/metrics", (HttpContext ctx, string? name, string? limit, string? preset, string? from, string? to) =>
+        group.MapGet("/metrics", (HttpContext ctx, string? name, string? q, string? limit, string? preset, string? from, string? to) =>
             new RazorComponentResult<MetricsPage>(new
             {
                 BasePath = HeimdallUiPaths.FullPrefix(ctx, prefix),
                 Name = name,
+                Q = q,
                 Limit = ParseInt(limit) ?? 500,
                 Preset = preset,
                 From = ParseNs(from),
